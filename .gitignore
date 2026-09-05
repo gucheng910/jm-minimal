@@ -1,0 +1,30 @@
+# deps / build outputs
+node_modules/
+dist/
+release-pc/
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+
+# signing secrets - never commit
+android/keystore.properties
+android/keystore/
+
+# local dev & analysis artifacts (not part of the app source)
+dev.log
+emulator36.log
+p6.xml
+p6b.xml
+p6c.xml
+p6d.xml
+p6e.xml
+p6f.xml
+dist-jmmin-pwa.zip
+reference/
+docs/
+scripts/
+
+.DS_Store
+*.local

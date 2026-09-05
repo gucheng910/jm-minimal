@@ -1,0 +1,60 @@
+{
+  "name": "jm-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "cap:sync": "cap sync android",
+    "pc:pack": "vite build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.1",
+    "crypto-js": "^4.2.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
+    "@types/crypto-js": "^4.2.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^33.4.11",
+    "electron-builder": "^26.0.12",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  },
+  "build": {
+    "appId": "dev.jmclient.pc",
+    "productName": "JM极简版",
+    "directories": {
+      "output": "release-pc"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "JM极简版-PC-${version}-portable.${ext}"
+    },
+    "electronLanguages": [
+      "zh-CN"
+    ],
+    "asar": true
+  },
+  "main": "electron/main.cjs",
+  "description": "JM极简版桌面端",
+  "author": "JMClient"
+}
