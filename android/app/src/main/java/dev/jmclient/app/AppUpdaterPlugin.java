@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Environment;
 
 import androidx.core.content.FileProvider;
 
@@ -17,7 +18,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 
 /**
- * 更新桥：从 GitHub Release 下载 APK 到应用缓存，再由系统安装器安装
+ * 更新桥：从 GitHub Release 下载 APK 到 app 专属外部目录，再由系统安装器安装
  * （安装未知应用需用户按系统提示授权）
  */
 @CapacitorPlugin(name = "AppUpdater")
@@ -26,7 +27,9 @@ public class AppUpdaterPlugin extends Plugin {
   private long taskId = -1;
 
   private File targetFile() {
-    return new File(getContext().getCacheDir(), "jm-update-" + getContext().getPackageName() + ".apk");
+    // 下载到 app 专属外部目录（DownloadManager 无法写入 app 内部 cache，会抛 Unsupported path）
+    File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+    return new File(dir, "jm-update-" + getContext().getPackageName() + ".apk");
   }
 
   @PluginMethod
@@ -41,7 +44,7 @@ public class AppUpdaterPlugin extends Plugin {
       if (f.exists()) f.delete();
       DownloadManager dm = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
       DownloadManager.Request req = new DownloadManager.Request(Uri.parse(url));
-      req.setDestinationUri(Uri.fromFile(f));
+      req.setDestinationInExternalFilesDir(getContext(), Environment.DIRECTORY_DOWNLOADS, f.getName());
       req.setMimeType("application/vnd.android.package-archive");
       req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
       taskId = dm.enqueue(req);
