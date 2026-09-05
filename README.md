@@ -34,12 +34,12 @@ Android 正式包：`android/app/build/outputs/apk/release/app-release.apk`
 
 | 文件 | 适用 |
 |---|---|
-| `JM极简版-安卓-现代版-1.0.apk` | Android 10+ / 新系统（targetSdk 36） |
-| `JM极简版-安卓-兼容版-1.0.apk` | 旧 Android 及兼容安卓生态的鸿蒙（targetSdk 29） |
-| `JM极简版-PC-便携版-1.0.exe` | Windows 7+ x64（免安装，体积更小） |
-| `JM极简版-PC-安装版-Setup-1.0.exe` | Windows 7+ x64（NSIS 安装包） |
+| `jm-minimal-modern-1.0.apk` | Android 10+ / 新系统（targetSdk 36） |
+| `jm-minimal-compat-1.0.apk` | 旧 Android 及兼容安卓生态的鸿蒙（targetSdk 29） |
+| `jm-minimal-portable-1.0.exe` | Windows 7+ x64（免安装，体积更小） |
+| `jm-minimal-setup-1.0.exe` | Windows 7+ x64（NSIS 安装包） |
 
-App 内「左侧菜单 → 版本 → 检查更新」会读取本仓库最新 Release 自动更新（需将版本打 tag 为 v1.x，并上传含「现代」的 APK 资产）。
+App 内「左侧菜单 → 版本 → 检查更新」会读取本仓库最新 Release 自动更新（需将版本打 tag 为 v1.x，并按 modern/compat 命名上传对应 APK 资产）。
 
 > 注意：HarmonyOS NEXT（纯血鸿蒙）不支持 APK，请使用官方支持的渠道；兼容版适用于 HarmonyOS 2~4 等带 Android 兼容层的系统。
 
