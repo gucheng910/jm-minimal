@@ -254,8 +254,8 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
       <button onClick={handleBack}>返回</button>
       <button onClick={() => jumpTo(current - 1)} disabled={current <= 1}>上</button>
       <button onClick={() => jumpTo(current + 1)} disabled={current >= total}>下</button>
-      <input className="page-input" value={jumpInput} onChange={(e) => setJumpInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }} />
-      <span className="muted">/{total}</span>
+      <input className="page-input mono-num" value={jumpInput} onChange={(e) => setJumpInput(e.target.value)} inputMode="numeric" onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }} />
+      <span className="muted mono-num">/{total}</span>
       <button onClick={() => setMode(mode === "continuous" ? "single" : "continuous")}>{mode === "continuous" ? "切单页" : "切连续"}</button>
       {!offline && <button disabled={testing} onClick={speedTestAndSwitch}>{testing ? "测速中…" : "测速切换"}</button>}
       {!offline && (
@@ -265,7 +265,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
         </select>
       )}
       <button className={task && task.status === "done" ? "btn-cached" : ""} disabled={Boolean(task && (task.status === "queued" || task.status === "running" || task.status === "done"))} onClick={handleCache}>
-        {task && task.status === "done" ? "已缓存" : task && (task.status === "queued" || task.status === "running") ? "缓存中 " + task.done + "/" + task.total : task && task.status === "failed" ? "重新缓存" : "缓存"}
+        {task && task.status === "done" ? "已缓存" : task && (task.status === "queued" || task.status === "running") ? <span className="mono-num">{"缓存中 " + task.done + "/" + task.total}</span> : task && task.status === "failed" ? "重新缓存" : "缓存"}
       </button>
     </div>
   );

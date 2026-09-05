@@ -6,6 +6,7 @@ import type { ReadPage } from "../core/types";
 import ReaderPanel from "../Reader";
 import { pushToast } from "./toast";
 import { CloseIcon } from "./icons";
+import { SkeletonGrid } from "./SkeletonGrid";
 
 interface Reading {
   id: number | string;
@@ -115,7 +116,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
                 <TaskCover task={t} />
                 <div className="cache-item-main">
                   <div className="title one-line">{t.title}</div>
-                  <div className="muted">{STATUS_TEXT[t.status]}{t.status === "running" || t.status === "queued" ? " · " + t.done + "/" + t.total + " 页" : ""}</div>
+                  <div className="muted mono-num">{STATUS_TEXT[t.status]}{t.status === "running" || t.status === "queued" ? " · " + t.done + "/" + t.total + " 页" : ""}</div>
                   {(t.status === "queued" || t.status === "running") && (
                     <div className="progress"><div className="progress-fill" style={{ width: pct + "%" }} /></div>
                   )}

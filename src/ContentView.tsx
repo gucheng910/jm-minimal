@@ -10,6 +10,7 @@ import { sanitizeCommentHtml } from "./core/commentRich";
 import { RANK_MODES, SORT_MODES, UI_KEYS } from "./core/constants";
 import { albumCoverUrl } from "./ui/AlbumCard";
 import { AlbumGrid } from "./ui/AlbumGrid";
+import { SkeletonGrid } from "./ui/SkeletonGrid";
 import { debouncedSetJSON, getJSONNow, removeKeyNow } from "./core/debounceStorage";
 import { announceStartupReady, gatePassed } from "./core/startup";
 import type { AlbumDetail, AlbumSummary, CategoryItem, ForumPayload, ReadPayload, WeekPayload } from "./core/types";
@@ -90,6 +91,16 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [hotTags, setHotTags] = useState<string[]>([]);
   const [searched, setSearched] = useState(false);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  // 下拉刷新：DOM 直接更新（无 setState 触发重渲染） + 固定阈值
+  const [refreshing, setRefreshing] = useState(false);
+  const ptrStartY = useRef(0);
+  const ptrPosRef = useRef(0);
+  const isRefreshingRef = useRef(false);
+  const ptrIndicatorRef = useRef<HTMLDivElement | null>(null);
+  const ptrArrowRef = useRef<HTMLSpanElement | null>(null);
+  const ptrLabelRef = useRef<HTMLSpanElement | null>(null);
+  const MAX_PULL = 110;          // 阻力公式校正：拉到 110px 时即可达到阈值
+  const REFRESH_THRESHOLD = 70;   // 阈值 70px，正常手指下滑一次即可触发
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent<boolean>("jm:immersive", { detail: mode === "reader" }));
@@ -140,6 +151,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       exitDetailToHome();
     } else if (mode === "week") {
       exitWeekToHome();
+    } else {
+      // home 等其他模式不消费返回键，让 App.tsx 处理两次返回退出
+      return false;
     }
   }, [mode]);
 
@@ -467,8 +481,89 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   function retryHomeFeed() {
-    if (feedKind === null && items.length === 0) loadRandom();
-    else loadMore();
+    // 与底部导航点击「首页」时的刷新逻辑完全一致（复用 jm:refreshHome 事件）
+    setRead(null);
+    setDetail(null);
+    setComments(null);
+    setMode("home");
+    window.scrollTo({ top: 0 });
+    loadRandom();
+  }
+
+  function handlePTRStart(e: React.TouchEvent) {
+    if (window.scrollY > 0 || isRefreshingRef.current) return;
+    ptrStartY.current = e.touches[0].clientY;
+  }
+  function handlePTRMove(e: React.TouchEvent) {
+    if (ptrStartY.current === 0 || isRefreshingRef.current) return;
+    const raw = e.touches[0].clientY - ptrStartY.current;
+    if (raw <= 0) {
+      ptrPosRef.current = 0;
+      updatePTRUI(0);
+      return;
+    }
+    // 阻力公式（更平缓）：pos = raw / (1 + raw/k)
+    // raw=70 → pos≈53；raw=150 → pos≈91；raw=300 → pos≈120（封顶）
+    const pos = Math.min(raw / (1 + raw / 220), MAX_PULL);
+    ptrPosRef.current = pos;
+    updatePTRUI(pos);
+  }
+  function handlePTREnd() {
+    if (ptrStartY.current === 0) return;
+    ptrStartY.current = 0;
+    const finalPos = ptrPosRef.current;
+    ptrPosRef.current = 0;
+    hidePTRUI();
+    if (finalPos < REFRESH_THRESHOLD) return; // 未达阈值，自动回弹
+    isRefreshingRef.current = true;
+    setRefreshing(true);
+    showRefreshingUI();
+    Promise.resolve().then(() => retryHomeFeed()).finally(() => {
+      isRefreshingRef.current = false;
+      setRefreshing(false);
+    });
+  }
+  // 直接操作 DOM，避免 React 重渲染造成的卡顿
+  function updatePTRUI(pos: number) {
+    const ind = ptrIndicatorRef.current;
+    const arr = ptrArrowRef.current;
+    const lab = ptrLabelRef.current;
+    if (!ind || !arr || !lab) return;
+    const h = Math.min(pos * 0.7, 60);
+    ind.style.height = h + "px";
+    ind.style.opacity = String(Math.min(pos / REFRESH_THRESHOLD, 1));
+    ind.style.display = "flex";
+    const reachThreshold = pos >= REFRESH_THRESHOLD;
+    arr.style.transform = reachThreshold
+      ? "rotate(180deg)"
+      : "rotate(" + Math.min(pos / REFRESH_THRESHOLD * 180, 180) + "deg)";
+    arr.style.color = reachThreshold ? "var(--brand)" : "var(--ink-2)";
+    lab.textContent = reachThreshold ? "松手刷新" : "继续下拉";
+  }
+  function hidePTRUI() {
+    const ind = ptrIndicatorRef.current;
+    if (ind) {
+      ind.style.transition = "height 0.18s ease, opacity 0.18s ease";
+      ind.style.height = "0px";
+      ind.style.opacity = "0";
+      setTimeout(() => {
+        if (ind) ind.style.display = "none";
+        ind.style.transition = "";
+      }, 180);
+    }
+  }
+  function showRefreshingUI() {
+    const ind = ptrIndicatorRef.current;
+    const arr = ptrArrowRef.current;
+    const lab = ptrLabelRef.current;
+    if (!ind || !arr || !lab) return;
+    ind.style.transition = "none";
+    ind.style.height = "60px";
+    ind.style.opacity = "1";
+    ind.style.display = "flex";
+    arr.style.transform = "none";
+    arr.className = "ptr-spinner";
+    lab.textContent = "正在刷新…";
   }
 
   async function loadMore() {
@@ -736,7 +831,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         ) : (
           <div>
             {error && <div className="card err">{error}</div>}
-            {busy && items.length === 0 && <Loading />}
+            {busy && items.length === 0 ? <SkeletonGrid /> : null}
             <AlbumGrid key={"g" + settingTick} items={items} onOpen={openDetail} />
             {hasMore && <div className="card row"><button disabled={busy} onClick={loadMore}>加载更多（第 {page + 1} 页）</button></div>}
           </div>
@@ -783,7 +878,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           </div>
         )}
         {error && <div className="card err">{error}</div>}
-        {busy && items.length === 0 && <Loading />}
+        {busy && items.length === 0 ? <SkeletonGrid /> : null}
         <AlbumGrid key={"g" + settingTick} items={items} onOpen={openDetail} />
         {hasMore && <div className="card row"><button disabled={busy} onClick={loadMore}>加载更多（第 {page + 1} 页）</button></div>}
       </div>
@@ -791,7 +886,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   return (
-    <div>
+    <div onTouchStart={handlePTRStart} onTouchMove={handlePTRMove} onTouchEnd={handlePTREnd}>
+      <div ref={ptrIndicatorRef} className="ptr-indicator" style={{ height: 0, opacity: 0, display: "none" }}>
+        <span ref={ptrArrowRef} className="ptr-arrow">↓</span>
+        <span ref={ptrLabelRef}></span>
+      </div>
       <div className="card row">
         <button className="ghost" disabled={busy} onClick={() => gotoPage("latest")}>最新</button>
         <button className="ghost" disabled={busy} onClick={() => gotoPage("ranking")}>排行榜</button>
@@ -804,7 +903,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           </div>
         </div>
       )}
-      {busy && items.length === 0 && <Loading />}
+      {busy && items.length === 0 ? <SkeletonGrid /> : null}
       <AlbumGrid key={"g" + settingTick} items={items} onOpen={openDetail} />
       {hasMore && <div className="card row"><button disabled={busy} onClick={loadMore}>加载更多（第 {page + 1} 页）</button></div>}
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { TOS_PARAGRAPHS } from "../core/tos";
+import { openExternal } from "../core/openExternal";
 
 export default function TosModal({
   open,
@@ -31,7 +32,7 @@ export default function TosModal({
                 if (/^https?:\/\//.test(part)) {
                   return (
                     <a key={j} className="tos-link" href={part}
-                      onClick={(e) => { e.preventDefault(); window.open(part, "_blank"); }}>
+                      onClick={(e) => { e.preventDefault(); openExternal(part); }}>
                       {part}
                     </a>
                   );

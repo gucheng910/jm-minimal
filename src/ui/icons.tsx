@@ -14,3 +14,6 @@ export function DownloadIcon(p: IconProps) { return <Svg {...p}><path d="M12 3v1
 export function MenuIcon(p: IconProps) { return <Svg {...p}><path d="M4 6h16M4 12h16M4 18h16" /></Svg>; }
 export function BookIcon(p: IconProps) { return <Svg {...p}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></Svg>; }
 export function ClockIcon(p: IconProps) { return <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>; }
+export function MoonIcon(p: IconProps) { return <Svg {...p}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></Svg>; }
+export function SunIcon(p: IconProps) { return <Svg {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>; }
+export function LightningIcon(p: IconProps) { return <Svg {...p}><path d="M13 2L3 14h7l-1 8 10-10h-7l1-8Z" /></Svg>; }

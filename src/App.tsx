@@ -6,7 +6,7 @@ import { client } from "./core/api";
 import { measureAll } from "./core/speed";
 import type { SpeedSample } from "./core/speed";
 import { sessionStore } from "./core/storage";
-import { BookIcon, CheckInIcon, ClockIcon, CloseIcon, DownloadIcon, GridIcon, HomeIcon, MenuIcon, SearchIcon, SourceIcon, UserIcon } from "./ui/icons";
+import { BookIcon, CheckInIcon, ClockIcon, CloseIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon, UserIcon } from "./ui/icons";
 import { authService } from "./state/auth";
 import ContentView from "./ContentView";
 import ToastHost, { pushToast } from "./ui/toast";
@@ -16,6 +16,8 @@ import AdMenuBanner from "./ui/AdMenuBanner";
 import UpdateSection from "./ui/UpdateSection";
 import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
+import { LOCAL_VERSION, UI_KEYS } from "./core/constants";
+import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
 import type { DailyPayload, MemberInfo, PaymentPayload, SettingConfig } from "./core/types";
 
@@ -50,14 +52,18 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
-  const [planKey, setPlanKey] = useState("");
-  const [methodPid, setMethodPid] = useState<number | string>("");
   const [daily, setDaily] = useState<DailyPayload | null>(null);
   const [speedResult, setSpeedResult] = useState<SpeedSample[]>([]);
   const [tab, setTab] = useState("home");
   // 每次冷启动显示 18+ 确认（与自动测源同频）；确认期间后台完成测速与首屏预取
   const [ageGate, setAgeGate] = useState(true);
   const [gateBusy, setGateBusy] = useState(false);
+  // 暗色模式：跟随左侧菜单开关，持久化到 localStorage；阅读器区域本身就是深色不受影响
+  const [dark, setDark] = useState<boolean>(() => {
+    try { return localStorage.getItem(UI_KEYS.theme) === "dark"; } catch { return false; }
+  });
+  // 顶栏滚动态：内容滚动出一定距离后加阴影/底边，分离层级
+  const [scrolled, setScrolled] = useState(false);
 
   // 点击确认：放行首页启动（测速此时才开始）→ 按钮转圈等待测速结束 → 成功/失败后进门
   async function confirmGate() {
@@ -110,6 +116,30 @@ export default function App() {
   }, []);
 
   useEffect(() => { sessionStore.lang = "CN"; }, []);
+
+  useEffect(() => {
+    try {
+      if (dark) document.documentElement.setAttribute("data-theme", "dark");
+      else document.documentElement.removeAttribute("data-theme");
+      localStorage.setItem(UI_KEYS.theme, dark ? "dark" : "light");
+    } catch { /* ignore */ }
+  }, [dark]);
+
+  // 顶栏滚动态：> 8px 切换 .scrolled，rAF 节流
+  useEffect(() => {
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        setScrolled(window.scrollY > 8);
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   // 菜单展开时按需拉取官方赞助方案（匿名可读；登录后带订单）
   useEffect(() => {
@@ -271,30 +301,10 @@ export default function App() {
     }
   }
 
-  function openCheckout(pk?: string, pidParam?: number | string) {
-    const pay = state.payment;
-    if (!pay) { patch({ error: "请先初始化官方支付方案" }); return; }
-    const key = pk || planKey || pay.plans[0]?.key;
-    const pid = pidParam !== undefined ? pidParam : methodPid || pay.pay_methods[0]?.pid;
-    if (!key || pid === undefined || pid === "") { patch({ error: "缺少方案或支付方式" }); return; }
-    const url = pay.checkout
-      .replace("{key}", key)
-      .replace("{pid}", String(pid))
-      .replace("{uid}", String(pay.uid));
-    window.open(url, "_blank");
-    patch({ msg: "已在浏览器打开官方 checkout；付款完成后回到本页刷新会员中心" });
-  }
-
   function acceptTos() {
     try { localStorage.setItem(TOS_ACCEPTED_KEY, "1"); } catch { /* ignore */ }
     setTosAccepted(true);
     setTosOpen(false);
-  }
-
-  // 菜单赞助模块：点击方案直接发起官方 checkout
-  function menuCheckout(planKeyValue?: string) {
-    if (!logged) { pushToast("请先登录会员账号，再参与官方赞助", "info"); return; }
-    openCheckout(planKeyValue);
   }
 
   async function reloadConfig() {
@@ -450,7 +460,7 @@ export default function App() {
 
   return (
     <div className={immersive ? "app immersive" : "app"}>
-      <header className="top-bar">
+      <header className={"top-bar" + (scrolled ? " scrolled" : "")}>
         <div className="top-left">
           <button className="menu-btn" aria-label="菜单" onClick={() => setMenuOpen((o) => !o)}><MenuIcon size={20} /></button>
           <div className="top-title">JM极简版</div>
@@ -459,7 +469,7 @@ export default function App() {
           <button aria-label="缓存" onClick={() => { setMenuOpen(false); setShowCache(true); }}><DownloadIcon size={20} /></button>
           <button aria-label="签到" onClick={openCheckinFromTop}><CheckInIcon size={20} /></button>
           <button aria-label="搜索" onClick={() => { setMenuOpen(false); navTo("search"); }}><SearchIcon size={20} /></button>
-          <button aria-label="源切换" onClick={openSourcePanel}><SourceIcon size={20} /></button>
+          <button aria-label="线路测速" title="线路测速" onClick={openSourcePanel}><LightningIcon size={20} /></button>
         </div>
       </header>
       <main className="view-stack">
@@ -474,8 +484,8 @@ export default function App() {
 
       {!logged && (
         <div className="card row">
-          <button className="ghost" onClick={() => pushToast("登录后可查看收藏与足迹", "info")}><BookIcon size={16} /> 我的收藏</button>
-          <button className="ghost" onClick={() => pushToast("登录后可查看足迹", "info")}><ClockIcon size={16} /> 我的足迹</button>
+          <button className="ghost" onClick={() => pushToast("登录后可查看收藏", "info")}><BookIcon size={16} /> 我的收藏</button>
+          <button className="ghost" onClick={() => setLibPanel("history")}><ClockIcon size={16} /> 我的足迹</button>
         </div>
       )}
       {!logged ? (
@@ -554,18 +564,14 @@ export default function App() {
       )}
       {state.payment && (
         <div className="card">
-          <h2>官方赞助方案（购买走官方 checkout）</h2>
-          {state.payment.plans.map((p) => (<div key={p.key} style={{ margin: "8px 0" }}><b>{p.name}</b> <span className="muted">USD {p.price} / {p.days} 天 · {p.features?.join(" / ")}</span></div>))}
+          <h2>官方赞助</h2>
+          <p className="muted">赞助支持项目持续更新；选择方案并支付后权益自动生效。</p>
           <div className="row">
-            <select value={planKey} onChange={(e) => setPlanKey(e.target.value)}>
-              {state.payment.plans.map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
-            </select>
-            <select value={String(methodPid)} onChange={(e) => setMethodPid(e.target.value)}>
-              {state.payment.pay_methods.map((m) => <option key={m.pid} value={m.pid}>{m.name}</option>)}
-            </select>
-            <button disabled={state.busy || !logged} onClick={() => openCheckout()}>打开官方 checkout（需登录）</button>
+            {state.payment.plans.map((p) => (
+              <span key={p.key} className="muted" style={{ display: "block", marginBottom: 4 }}>{p.name} · USD {p.price} / {p.days} 天</span>
+            ))}
           </div>
-          {logged && <p className="muted">订单记录数：{state.payment.orders.length}</p>}
+          <button onClick={() => { openExternal("https://comic18j-bibi.me/payment?link=homepage_icon"); }}>前往官方赞助页面</button>
         </div>
       )}
       </section>
@@ -597,22 +603,16 @@ export default function App() {
             <AdMenuBanner open={menuOpen} />
           </div>
           <div className="menu-section">
-            <h4>官方赞助方案</h4>
-            {!state.payment ? (
-              <p className="muted menu-note">加载中…</p>
-            ) : (
-              state.payment.plans.map((p) => (
-                <button key={p.key} className="menu-plan" onClick={() => menuCheckout(p.key)}>
-                  <span className="plan-name">{p.name}</span>
-                  <span className="plan-price">${String(p.price)} / {String(p.days)} 天</span>
-                </button>
-              ))
-            )}
-            <p className="muted menu-note">赞助走官方 checkout（去广告 / 充能等权益）</p>
+            <h4>官方赞助</h4>
+            <button className="menu-plan" onClick={() => openExternal("https://comic18j-bibi.me/payment?link=homepage_icon")}>
+              <span className="plan-name">前往官方赞助页面</span>
+              <span className="plan-price">→</span>
+            </button>
+            <p className="muted menu-note">赞助支持项目持续更新；支付后权益自动生效</p>
           </div>
           <div className="menu-section">
             <h4>GitHub 仓库</h4>
-            <button className="menu-link" onClick={() => window.open(REPO_URL, "_blank")}>
+            <button className="menu-link" onClick={() => openExternal(REPO_URL)}>
               github.com/gucheng910/jm-minimal ↗
             </button>
           </div>
@@ -620,8 +620,17 @@ export default function App() {
             <button className="menu-link" onClick={() => setTosOpen(true)}>使用须知</button>
           </div>
           <div className="menu-section">
+            <button className="theme-toggle" onClick={() => setDark((d) => !d)}>
+              <span className="theme-toggle-left">
+                {dark ? <MoonIcon size={18} /> : <SunIcon size={18} />}
+                {dark ? "深色模式" : "浅色模式"}
+              </span>
+              <span className={"theme-toggle-switch" + (dark ? " on" : "")} />
+            </button>
+          </div>
+          <div className="menu-section">
             <h4>版本</h4>
-            <p className="muted menu-note">1.0（官方协议 2.1.5）</p>
+            <p className="muted menu-note">v{LOCAL_VERSION}（官方协议 2.1.5）</p>
             <UpdateSection />
           </div>
         </div>
@@ -631,7 +640,6 @@ export default function App() {
           <div className="source-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="row">
               <h2>线路 / 图源切换</h2>
-              <button aria-label="关闭" onClick={() => setShowSource(false)}><CloseIcon size={18} /></button>
             </div>
             <div className="row">
               <label>线路
@@ -650,6 +658,9 @@ export default function App() {
             <div className="row">
               <button disabled={state.busy} onClick={runLineSpeed}>线路测速</button>
               {speedResult.length > 0 && <ul className="speed-list">{speedResult.map((r) => <li key={r.label} className={r.ok ? "ok" : "fail"}>{r.label} · {r.ok ? r.ms + "ms" : "失败"}</li>)}</ul>}
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="ghost" onClick={() => setShowSource(false)}>关闭</button>
             </div>
           </div>
         </div>

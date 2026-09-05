@@ -6,7 +6,9 @@ export const HOST_KEY_SECRET = "diosfjckwpqpdfjkvnqQjsik";
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 /** 出包标识（诊断用，每次发布更新） */
-export const BUILD_TAG = "v20260904d";
+export const BUILD_TAG = "v20260910a";
+/** 当前客户端版本号（由 UpdateSection / 侧边栏版本信息共用，避免硬编码） */
+export const LOCAL_VERSION = "1.1";
 export const HOST_URLS: string[] = [
   "https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt",
   "https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt",
@@ -33,7 +35,8 @@ export const UI_KEYS = {
   searchHistory: "jmclient.searchHistory",
   readerMode: "jmclient.reader.mode",
   hostConfigCache: "jmclient.hostcfg.v1",
-  autoSelectCache: "jmclient.autoSelect.v1"
+  autoSelectCache: "jmclient.autoSelect.v1",
+  theme: "jmclient.theme"
 } as const;
 
 /** 最优线路/图源记忆有效期：期间冷启动直连上次最优，跳过启动测速 */

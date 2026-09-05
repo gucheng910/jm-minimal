@@ -3,6 +3,7 @@ import { useBackHandler } from "../hooks/useBackHandler";
 import { client } from "../core/api";
 import { UI_KEYS } from "../core/constants";
 import { AlbumGrid } from "./AlbumGrid";
+import { SkeletonGrid } from "./SkeletonGrid";
 import type { AlbumSummary } from "../core/types";
 import { pushToast } from "./toast";
 import { CloseIcon } from "./icons";
@@ -37,19 +38,16 @@ export default function LibPage({
     let alive = true;
     (async () => {
       try {
-        if (!client.apiBase) await client.init();
-        const result = kind === "favorite"
-          ? await client.getFavorites()
-          : await client.getWatchHistory();
-        const obj = result as { list?: AlbumSummary[]; content?: AlbumSummary[]; data?: { list?: AlbumSummary[] } };
-        const official = obj.list || obj.content || obj.data?.list || [];
-        let list = official;
         if (kind === "history") {
-          // 官方 watch_list 仅记录官方客户端的阅读行为；与本地阅读足迹合并展示
-          const local = loadLocalHistory();
-          const seen = new Set(official.map((x) => String(x.id)));
-          list = [...local.filter((x) => !seen.has(String(x.id))), ...official];
+          // 足迹仅使用本地 localStorage，无需登录
+          if (alive) setItems(loadLocalHistory());
+          return;
         }
+        // 收藏需要登录才能请求官方接口
+        if (!client.apiBase) await client.init();
+        const result = await client.getFavorites();
+        const obj = result as { list?: AlbumSummary[]; content?: AlbumSummary[]; data?: { list?: AlbumSummary[] } };
+        const list = obj.list || obj.content || obj.data?.list || [];
         if (alive) setItems(list);
       } catch (err) {
         if (alive) setError(String(err));
@@ -65,7 +63,7 @@ export default function LibPage({
         <button className="ghost" aria-label="关闭" onClick={onClose}><CloseIcon size={18} /></button>
       </div>
       {error && <div className="card err">{error}</div>}
-      {!items && !error && <p className="muted cache-empty">加载中…</p>}
+      {!items && !error && <SkeletonGrid />}
       {items && items.length === 0 && <p className="muted cache-empty">还没有内容，去逛一逛吧</p>}
       {items && items.length > 0 && (
         <AlbumGrid items={items} onOpen={(album) => onOpenAlbum(album.id)} />

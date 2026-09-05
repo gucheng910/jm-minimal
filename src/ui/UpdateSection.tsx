@@ -2,8 +2,7 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { useEffect, useRef, useState } from "react";
 import { pushToast } from "./toast";
-
-const LOCAL_VERSION = "1.0";
+import { LOCAL_VERSION } from "../core/constants";
 const REPO = "gucheng910/jm-minimal";
 const API_URL = "https://api.github.com/repos/" + REPO + "/releases/latest";
 
