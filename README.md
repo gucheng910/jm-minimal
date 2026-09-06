@@ -11,7 +11,8 @@
 
 ## 下载（Download）
 
-最新发行版：［戳我］(https://github.com/gucheng910/jm-minimal/releases/latest)
+最新发行版：
+［戳我］(https://github.com/gucheng910/jm-minimal/releases/latest)
 
 无需自行构建，直接下载对应平台的安装包即可：
 
