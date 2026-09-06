@@ -1149,3 +1149,270 @@ button.ghost.danger { color: var(--err); border-color: #f6cdc9; }
   .loading-spinner { animation: none !important; border-top-color: var(--brand-deep); }
   .skeleton-thumb, .skeleton-title, .skeleton-meta { animation: none !important; }
 }
+/* ============================================================
+   DNS 加速引导（DnsGuide）
+   风格目标：与 tag-block / card / ghost 一致，简约可折叠
+   ============================================================ */
+.dns-card {
+  position: relative;
+}
+.dns-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.dns-summary {
+  margin: 4px 0 0;
+  cursor: pointer;
+  line-height: 1.55;
+}
+.dns-arrow {
+  color: var(--ink-3);
+  font-size: 14px;
+  transition: transform 0.15s ease;
+}
+.dns-body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dns-section h3 {
+  font-size: 13.5px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+.dns-results {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dns-results li {
+  font-size: 12.5px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+}
+.dns-ok { color: var(--ok); background: var(--ok-soft); }
+.dns-err { color: var(--err); background: var(--err-soft); }
+[data-theme="dark"] .dns-ok { color: #34d399; background: rgba(52,211,153,0.14); }
+[data-theme="dark"] .dns-err { color: #f87171; background: rgba(248,113,113,0.14); }
+
+.dns-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dns-server-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.dns-server-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  flex-shrink: 0;
+  min-width: 38px;
+}
+.dns-server-addr {
+  flex: 1;
+  font-size: 12.5px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--ink-2);
+  word-break: break-all;
+}
+.dns-copy-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--r-pill);
+}
+[data-theme="dark"] .dns-server-item {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+[data-theme="dark"] .dns-server-addr { color: var(--ink-2); }
+
+.dns-steps-summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand-deep);
+}
+[data-theme="dark"] .dns-steps-summary { color: #fb923c; }
+.dns-steps {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+.dns-steps-note {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.dns-footer {
+  border-top: 1px dashed var(--line-strong);
+  padding-top: 8px;
+}
+
+/* 若用户已关闭：不渲染（无样式需要）+ 小关闭形态 */
+
+/* ============================================================
+   标签屏蔽（TagBlockSetting）
+   设计目标：会员中心卡内、橙品牌、pill chip、嵌入式 toggle
+   ============================================================ */
+.tag-block-card {
+  /* 与其它 .card 共享圆角与阴影；仅留出上方间距避免与上一张卡粘连 */
+  position: relative;
+}
+.tag-block-tip {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.tag-block-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 12px;
+  position: relative;
+}
+.tag-block-list.is-locked {
+  /* 等级不足：列表被遮罩覆盖（不靠 opacity，整体可读但不可点） */
+  pointer-events: none;
+  user-select: none;
+  filter: grayscale(0.4);
+}
+.tag-block-item {
+  /* chip 已是 pill；在内嵌 toggle 时 padding 稍大以容纳开关 */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 7px 9px;
+  font-size: 13px;
+}
+.tag-block-item .tag-block-item-label {
+  /* 标签名独立可点区域 */
+  letter-spacing: 0.1px;
+}
+.tag-block-item.active {
+  /* 选中态直接复用 chip.active 的黑底白字，强化品牌对比 */
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+[data-theme="dark"] .tag-block-item.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #1c1612;
+}
+.tag-block-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 嵌入式开关（toggle）：圆形 knob + 椭圆形槽，激活态用品牌色 */
+.tag-block-toggle {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 16px;
+  border-radius: var(--r-pill);
+  background: var(--line-strong);
+  transition: background 0.18s ease;
+  flex-shrink: 0;
+}
+[data-theme="dark"] .tag-block-toggle {
+  background: #363c47;
+}
+.tag-block-toggle.on {
+  background: var(--brand);
+}
+.tag-block-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.18);
+  transition: transform 0.18s cubic-bezier(0.3, 0.9, 0.4, 1.1);
+}
+.tag-block-toggle.on .tag-block-toggle-knob {
+  transform: translateX(14px);
+}
+.tag-block-item.active .tag-block-toggle-knob {
+  /* chip.active 黑底时 knob 加点阴影仍可读 */
+  background: #fff;
+}
+
+/* 等级遮罩层（覆盖整个 chip 区，中心文字） */
+.tag-block-locked {
+  position: relative;
+  min-height: 0;
+  margin: -4px 0 8px;
+}
+.tag-block-locked-mask {
+  /* 不阻挡底部 chip 的灰度视觉，但避免按钮可点 */
+  display: none;
+}
+.tag-block-locked-msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  margin-bottom: 8px;
+}
+[data-theme="dark"] .tag-block-locked-msg {
+  background: var(--brand-soft);
+  color: #fb923c;
+}
+.tag-block-locked-msg::before {
+  /* 锁图标（用 CSS 画） */
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.8px solid currentColor;
+  border-radius: 2px;
+  border-top-left-radius: 50% 6px;
+  border-top-right-radius: 50% 6px;
+  position: relative;
+  box-shadow: 0 -5px 0 -3px currentColor;
+  margin-right: 2px;
+}
+
+.tag-block-actions {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+.tag-block-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.tag-block-meta .muted {
+  font-size: 12px;
+  line-height: 1.6;
+}
+

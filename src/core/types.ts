@@ -32,6 +32,7 @@ export interface SettingConfig {
 export interface MemberInfo {
   uid?: string | number;
   username?: string;
+  level?: number | string;
   coin?: number | string;
   charge?: number | string;
   jar?: number | string;

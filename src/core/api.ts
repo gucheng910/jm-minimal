@@ -84,7 +84,12 @@ export class JMClient {
   }
 
   selectLine(hostOrBase: string) {
-    this.apiBase = hostOrBase.startsWith("http") ? hostOrBase : "https://" + hostOrBase + "/";
+    // 统一强制 https：拒绝 http 混合内容（页面 https → 请求 http 会被浏览器拦截）
+    let base = hostOrBase.trim();
+    if (!/^https?:\/\//i.test(base)) base = "https://" + base;
+    if (!base.startsWith("https://")) base = "https://" + base.replace(/^https?:\/\//i, "");
+    base = base.replace(/\/+$/, "") + "/";
+    this.apiBase = base;
     sessionStore.apiUrl = this.apiBase;
     // 通知外壳同步“当前线路”显示（自动测速/手动切换都走这里）
     if (typeof window !== "undefined") {
@@ -271,7 +276,7 @@ export class JMClient {
       sessionStore.account = { username: account.username, password: account.password };
       return data as MemberInfo;
     } catch {
-      sessionStore.clearAuth();
+      // 重登失败不清理本地会话：保留旧 token，等待用户手动刷新，避免无故登出
       return null;
     }
   }
@@ -316,16 +321,25 @@ export class JMClient {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
+        // credentials 始终 include：登录响应也可能 Set-Cookie（如 PHPSESSID），
+        // 登录/重登的 noAuth 不再 omit，避免丢失服务端会话 Cookie。
         const resp = await fetch(url.toString(), {
           method,
           headers,
           body,
-          credentials: options.noAuth ? "omit" : "include",
+          credentials: "include",
           referrerPolicy: "no-referrer",
           signal: controller.signal
         });
         const text = await resp.text();
-        const env = JSON.parse(text) as ApiEnvelope;
+        let env: ApiEnvelope;
+        try {
+          env = JSON.parse(text) as ApiEnvelope;
+        } catch {
+          // 响应非 JSON（HTML 错误页 / 502 网关 / CORS 拒绝等）
+          const status = resp.status;
+          throw new Error("api parse failed: status=" + status + " body=" + (text.slice(0, 80) || "(empty)"));
+        }
         if (env.code !== 200) {
           // 自动续期：仅业务请求（非 noAuth/noRelogin）首个 attempt 触发一次
           if (!options.noAuth && !options.noRelogin && attempt === 0 && env.code === 401) {
@@ -342,6 +356,12 @@ export class JMClient {
         }
         return result;
       } catch (err) {
+        // 网络错误打上 [network] 标记（区别于业务 api error），便于 UI 提示「检查网络或线路」
+        if (err instanceof TypeError && !(err instanceof DOMException)) {
+          err = new TypeError("[network] " + (err.message || "fetch failed"));
+        } else if (err instanceof DOMException && err.name === "AbortError") {
+          err = new DOMException("[timeout] 请求超时", "AbortError");
+        }
         lastErr = err;
         const isDecrypt = err instanceof Error && err.message === "api decrypt failed";
         // 解密失败说明命中异常节点：跳出本线重试循环，交给线路级 fallback

@@ -7,8 +7,15 @@ export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 /** 出包标识（诊断用，每次发布更新） */
 export const BUILD_TAG = "v20260910a";
-/** 当前客户端版本号（由 UpdateSection / 侧边栏版本信息共用，避免硬编码） */
-export const LOCAL_VERSION = "1.1";
+/**
+ * 当前客户端版本号（由 UpdateSection / 侧边栏版本信息共用）。
+ * 构建时由 vite.config.ts 的 define 从 package.json 注入 __APP_VERSION__，
+ * 运行时也能通过 globalThis 覆盖（如 Android 壳注入原生 versionName）。
+ */
+declare const __APP_VERSION__: string;
+export const LOCAL_VERSION =
+  (typeof globalThis !== "undefined" && (globalThis as { __builtinVersion?: string }).__builtinVersion) ||
+  (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0");
 export const HOST_URLS: string[] = [
   "https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt",
   "https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt",

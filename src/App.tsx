@@ -19,6 +19,8 @@ import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
 import { LOCAL_VERSION, UI_KEYS } from "./core/constants";
 import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
+import TagBlockSetting from "./ui/TagBlockSetting";
+import DnsGuide from "./ui/DnsGuide";
 import type { DailyPayload, MemberInfo, PaymentPayload, SettingConfig } from "./core/types";
 
 interface DemoState {
@@ -28,6 +30,14 @@ interface DemoState {
   busy: boolean;
   error: string;
   msg: string;
+}
+
+/** 把原始错误字符串转成用户友好提示；网络类错误附加"去配 DNS"建议 */
+function friendlyError(raw: string): string {
+  if (/[network]|[timeout]|fetch failed|Failed to fetch|network/i.test(raw)) {
+    return "网络连接失败 · 请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS，配置后需删除后台重新进入 App 使设置生效，再重试（若仍失败可尝试切换线路）";
+  }
+  return raw;
 }
 
 function fmt(v: unknown): string { return v === null || v === undefined || v === "" ? "-" : String(v); }
@@ -81,7 +91,7 @@ export default function App() {
     setGateBusy(false);
     setAgeGate(false);
     if (!speedOk) {
-      pushToast("网络连接失败，重连后请删后台重新进入软件", "err");
+      pushToast("线路/DNS 连接失败，建议到会员页「DNS 加速」配置 DoT，配置后删除后台重进生效", "err", "goto-dns");
     }
   }
   const [showSource, setShowSource] = useState(false);
@@ -458,6 +468,18 @@ export default function App() {
     } catch { /* 未初始化成功时忽略，页面显示占位 */ }
   }
 
+  /** 跳转到会员页（DnsGuide 组件监听 jm:gotoDns 自行滚动） */
+  function openMemberAndDns() {
+    openMember();
+  }
+
+  // 全局响应「去 DNS 配置」点击
+  useEffect(() => {
+    const h = () => openMemberAndDns();
+    window.addEventListener("jm:gotoDns", h);
+    return () => window.removeEventListener("jm:gotoDns", h);
+  }, []);
+
   return (
     <div className={immersive ? "app immersive" : "app"}>
       <header className={"top-bar" + (scrolled ? " scrolled" : "")}>
@@ -479,7 +501,16 @@ export default function App() {
         {logged && <button disabled={state.busy} onClick={handleLogout}>登出</button>}
         {logged && <button disabled={state.busy} onClick={handleRefresh}>刷新会话</button>}
       </div>
-      {state.error && <div className="card err">{state.error}</div>}
+      {state.error && (
+        <div className="card err">
+          {friendlyError(state.error)}
+          {/\[network\]|\[timeout\]|fetch failed|Failed to fetch|network/i.test(state.error) && (
+            <div style={{ marginTop: 8 }}>
+              <button className="ghost" onClick={openMemberAndDns}>去会员页配 DNS</button>
+            </div>
+          )}
+        </div>
+      )}
       {state.msg && <div className="card msg">{state.msg}</div>}
 
       {!logged && (
@@ -506,6 +537,7 @@ export default function App() {
           <h2>会员中心（官方数据）</h2>
           <div className="grid2">
             <span>账号：{fmt(member?.username)}</span>
+            <span>等级：{fmt(member?.level)}</span>
             <span>UID：{fmt(member?.uid)}</span>
             <span>JCoin：{fmt(member?.coin)}</span>
             <span>充能：{fmt(member?.charge)}</span>
@@ -532,6 +564,12 @@ export default function App() {
           )}
         </div>
       )}
+
+      {/* 标签屏蔽：官方服务端过滤，需登录 + 等级 >= 8 + 冷却机制（仅登录态可见） */}
+      {logged && <TagBlockSetting />}
+
+      {/* DNS 加速引导（非登录态也可见，用于解决运营商 DNS 污染） */}
+      <DnsGuide />
 
       {state.apiBase && <div className="card"><h2>当前线路</h2><p className="mono">{state.apiBase}</p></div>}
       {state.setting && (

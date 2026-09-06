@@ -283,7 +283,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
             setError("");
             showList(list, "latest", false);
           } else if (alive) {
-            setError("网络连接失败，推荐内容加载不出来。若网络问题持续出现，可尝试使用魔法（网络工具）后再点“重试”。");
+            setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
+            pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
           }
         }
         if (aid) {
@@ -381,7 +382,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       showList(list, "latest", false);
     } else if (list === null) {
       // run() 失败已置 error；这里统一为可操作的提示
-      setError("网络连接失败，推荐内容加载不出来。若网络问题持续出现，可尝试使用魔法（网络工具）后再点“重试”。");
+      setError("网络连接失败，推荐内容加载不出来。先去会员页「DNS 加速」配置 DoT 公共 DNS（可解决大多数运营商 DNS 污染）；配置后需删除后台重新进入 App 使设置生效，再重试；仍失败再尝试魔法或切换线路。");
+      pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
     }
   }
 
@@ -457,6 +459,12 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   async function searchPage(q: string, p: number, replace: boolean, type = searchType) {
     const result = await run(() => client.search(q, p, 0, type));
     if (!result) return;
+    // 官方协议：搜索纯数字 JM 号时服务器返回 redirect_aid（无 content）
+    // 客户端收到后直接跳转详情页，与官方 v2.1.5 行为一致
+    if (replace && result.redirect_aid) {
+      openDetail({ id: result.redirect_aid } as AlbumSummary);
+      return;
+    }
     const total = Number(result.total || 0);
     const next = replace ? result.content || [] : [...items, ...(result.content || [])];
     showList(next, "search", next.length < total, p);
@@ -900,6 +908,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           {error}
           <div className="row" style={{ marginTop: 8 }}>
             <button className="ghost" disabled={busy} onClick={retryHomeFeed}>重新加载推荐</button>
+            <button className="ghost" onClick={() => window.dispatchEvent(new CustomEvent("jm:gotoDns"))}>去配 DNS</button>
           </div>
         </div>
       )}
