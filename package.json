@@ -1,6 +1,6 @@
 {
   "name": "jm-client",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "@capacitor/browser": "^8.0.4",
     "@capacitor/core": "^8.5.1",
     "crypto-js": "^4.2.0",
+    "electron-updater": "^6.8.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -33,6 +34,11 @@
   "build": {
     "appId": "dev.jmclient.pc",
     "productName": "JM极简版",
+    "publish": {
+      "provider": "github",
+      "owner": "gucheng910",
+      "repo": "jm-minimal"
+    },
     "directories": {
       "output": "release-pc"
     },

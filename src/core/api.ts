@@ -5,6 +5,7 @@ import { measureAll } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
 import { getMemCache, makeKey, setMemCache } from "./requestCache";
 import { sessionStore } from "./storage";
+import { registerDnsHosts } from "./dnsClean";
 import type {
   AlbumDetail,
   AlbumSummary,
@@ -77,6 +78,8 @@ export class JMClient {
   private async doInit(excludeLine: string): Promise<string> {
     const host = await loadHostConfig();
     this.hostConfig = host;
+    // 桌面端：把官方线路域名注册进内置 DNS 清洗池（早于任何业务请求）
+    registerDnsHosts(host.jm3_Server.map(([h]) => h));
     const hostName = chooseLine(host, excludeLine);
     this.apiBase = "https://" + hostName + "/";
     sessionStore.apiUrl = this.apiBase;
@@ -189,7 +192,9 @@ export class JMClient {
       app_img_shunt: String(key),
       t: Math.floor(Date.now() / 1000)
     });
-    return String(cfg?.img_host || "");
+    const host = String(cfg?.img_host || "");
+    registerDnsHosts([host]); // 桌面端：该图床域名注册进清洗池（探测即注册）
+    return host;
   }
 
   finishFastTrack() {
@@ -394,6 +399,8 @@ export class JMClient {
       t: Math.floor(Date.now() / 1000)
     });
     this.setting = cfg;
+    // 桌面端：当前图床域名注册进清洗池（封面/正文镜像请求随之受益）
+    registerDnsHosts([cfg.img_host as string | undefined]);
     // 图床配置就绪通知：封面等依赖 img_host 的渲染可据此刷新
     if (typeof window !== "undefined") {
       try { window.dispatchEvent(new CustomEvent("jm:setting")); } catch { /* ignore */ }
@@ -428,7 +435,8 @@ export class JMClient {
   }
 
   getAlbum(id: number | string): Promise<AlbumDetail> {
-    return this.request<AlbumDetail>(API_PATHS.album, { id });
+    // 短期内存缓存（30s）：同漫画反复进出详情页无需重复请求
+    return this.request<AlbumDetail>(API_PATHS.album, { id }, { cacheTtlMs: 30_000 });
   }
 
   getRead(id: number | string): Promise<ReadPayload> {

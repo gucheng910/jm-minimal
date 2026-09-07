@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useBackHandler } from "./hooks/useBackHandler";
 import type { FormEvent } from "react";
 import { client } from "./core/api";
@@ -19,6 +19,8 @@ type Mode = "home" | "detail" | "reader" | "week";
 type FeedKind = "latest" | "search" | "favorites" | "history" | "category" | "week" | null;
 
 const PAGE_SIZE = 80;
+// 滚动恢复 key（sessionStorage 兜底，避免 ref 丢失）
+const SCROLL_KEY = "jm:pendingRestoreY";
 const HISTORY_KEY = UI_KEYS.history;
 const SEARCH_HISTORY_KEY = UI_KEYS.searchHistory;
 
@@ -116,24 +118,34 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   // 记录离开列表（进入详情/周榜）前的滚动位置，返回时恢复，避免找漫翻页丢失
   const listScrollRef = useRef(0);
+  // 离开详情页的序号：每次 exitDetail/exitWeek 递增，进入详情页时同步递增
+  // 用于在离开后拦截仍在运行的 getAlbum/getAlbumComments 回调
+  const detailReqIdRef = useRef(0);
 
-  function restoreListScroll() {
-    const y = listScrollRef.current || 0;
-    const go = () => window.scrollTo({ top: y });
-    requestAnimationFrame(go);
-    setTimeout(go, 120);
+  /** 保存待恢复的滚动位置（ref + sessionStorage 双写） */
+  function saveScrollTarget(y: number) {
+    listScrollRef.current = y;
+    try { sessionStorage.setItem(SCROLL_KEY, String(y)); } catch { /* ignore */ }
   }
+
+  /** useLayoutEffect: mode 从非 home 切回 home 时，在浏览器绘制前同步恢复滚动 */
+  useLayoutEffect(() => {
+    if (mode !== "home") return;
+    const y = listScrollRef.current || Number(sessionStorage.getItem(SCROLL_KEY) || "0");
+    if (y > 0) window.scrollTo(0, y);
+  }, [mode]);
 
   function exitDetailToHome() {
     setDetail(null);
+    // 作废仍在执行的 openDetail/switchChapter 异步回调（防止 setState 干扰滚动）
+    detailReqIdRef.current++;
     setMode("home");
-    restoreListScroll();
   }
 
   function exitWeekToHome() {
     setWeekMode(false);
+    detailReqIdRef.current++;
     setMode("home");
-    restoreListScroll();
   }
 
   function exitReaderToDetail() {
@@ -415,7 +427,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   async function openWeek() {
-    if (mode === "home") listScrollRef.current = window.scrollY; // 记住打开周榜前列位置
+    if (mode === "home") saveScrollTarget(window.scrollY); // 记住打开周榜前列位置
     const wk = await run(() => client.getWeek());
     if (!wk) return;
     setWeekPayload(wk);
@@ -600,14 +612,27 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   const openDetail = useCallback(async (item: AlbumSummary) => {
-    listScrollRef.current = window.scrollY; // 记住进入详情前列表位置
-    const d = await run(() => client.getAlbum(item.id));
-    if (d) {
-      setDetail(d);
-      setMode("detail");
-      setComments(null);
-      loadComments(d.id);
-    }
+    saveScrollTarget(window.scrollY); // 记住进入详情前列表位置
+    // 乐观渲染：用列表页已有摘要立刻展示详情页，不等 API
+    const snapshot = { ...item, name: item.name || "" } as unknown as AlbumDetail;
+    setDetail(snapshot);
+    setMode("detail");
+    setComments(null);
+    setError("");
+    // 记录本次请求 ID：若后续 exitDetailToHome 已递增此值，说明用户已离开
+    const reqId = detailReqIdRef.current;
+    // 并行拉取完整详情 + 评论，不再串行等待
+    try {
+      if (!client.apiBase) await client.init();
+    } catch { /* 静默，详情页仍可用摘要数据 */ }
+    const [d, c] = await Promise.allSettled([
+      client.getAlbum(item.id).catch(() => null),
+      client.getAlbumComments(item.id, 1).catch(() => null)
+    ]);
+    // 离开详情页后（reqId 已递增）拦截过期回包，避免 setState 破坏滚动恢复
+    if (detailReqIdRef.current !== reqId) return;
+    if (d.status === "fulfilled" && d.value) setDetail(d.value);
+    if (c.status === "fulfilled" && c.value) setComments(c.value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -664,11 +689,22 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   async function switchChapter(id: number | string) {
-    const d = await run(() => client.getAlbum(id));
-    if (d) {
-      setDetail(d);
-      setMode("detail");
+    // 从当前 series 列表找到目标章节名做乐观快照，立刻展示
+    const target = detail?.series?.find((s) => String(s.id) === String(id));
+    if (target && detail) {
+      const snapshot = { ...detail, id, name: target.name || detail.name } as unknown as AlbumDetail;
+      setDetail(snapshot);
     }
+    setError("");
+    const reqId = detailReqIdRef.current;
+    // 后台拉取真实详情 + 评论
+    const [d, c] = await Promise.allSettled([
+      client.getAlbum(id).catch(() => null),
+      client.getAlbumComments(id, 1).catch(() => null)
+    ]);
+    if (detailReqIdRef.current !== reqId) return; // 离开详情后忽略过期回包
+    if (d.status === "fulfilled" && d.value) setDetail(d.value);
+    if (c.status === "fulfilled" && c.value) setComments(c.value);
   }
 
   const logged = Boolean(localStorage.getItem("jwttoken"));
@@ -703,7 +739,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         <p className="muted">JM号：{String(detail.id)}
           <button className="ghost" style={{ marginLeft: 8 }} onClick={() => { navigator.clipboard.writeText(String(detail.id)); pushToast("JM号已复制", "ok"); }}>复制</button>
         </p>
-        <p className="muted">作者：{(detail.author || []).join(" / ") || "-"} · 页数：{String(detail.total_photos ?? "-")}</p>
+        <p className="muted">作者：{(Array.isArray(detail.author) ? detail.author : [detail.author].filter(Boolean)).join(" / ") || "-"} · 页数：{String(detail.total_photos ?? "-")}</p>
         <p className="muted">标签：{(detail.tags || []).join("、") || "-"}</p>
         {Array.isArray(detail.series) && detail.series.length > 1 && (
           <div className="row">
