@@ -14,6 +14,8 @@ import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
 import AdMenuBanner from "./ui/AdMenuBanner";
 import UpdateSection from "./ui/UpdateSection";
+import DesktopUpdate from "./ui/DesktopUpdate";
+import { isDesktop } from "./core/dnsClean";
 import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
 import { LOCAL_VERSION, UI_KEYS } from "./core/constants";
@@ -669,7 +671,7 @@ export default function App() {
           <div className="menu-section">
             <h4>版本</h4>
             <p className="muted menu-note">v{LOCAL_VERSION}（官方协议 2.1.5）</p>
-            <UpdateSection />
+            {isDesktop ? <DesktopUpdate /> : <UpdateSection />}
           </div>
         </div>
       </div>

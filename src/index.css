@@ -1416,3 +1416,10 @@ button.ghost.danger { color: var(--err); border-color: #f6cdc9; }
   line-height: 1.6;
 }
 
+
+
+/* 桌面端更新卡 */
+.update-desktop { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.update-progress { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.update-progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line, rgba(128,128,128,.25)); overflow: hidden; }
+.update-progress-fill { height: 100%; border-radius: 3px; background: var(--brand, #1677ff); transition: width .2s ease; }
