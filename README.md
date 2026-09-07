@@ -16,12 +16,12 @@
 
 无需自行构建，直接下载对应平台的安装包即可：
 
-| 文件 | 适用 |
-|---|---|
-| `jm-minimal-modern.apk` | Android 10+ / 新系统（targetSdk 36） |
-| `jm-minimal-compat.apk` | 旧 Android / 带安卓兼容层的鸿蒙 2~4（targetSdk 29） |
-| `jm-minimal-portable.exe` | Windows 7+ x64（免安装便携版） |
-| `jm-minimal-setup.exe` | Windows 7+ x64（NSIS 安装包） |
+| 文件 | 适用 | 下载 |
+|---|---|---|
+| `jm-minimal-modern-1.4.0.apk` | Android 10+ / 新系统（targetSdk 36） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.4.0/jm-minimal-modern-1.4.0.apk) |
+| `jm-minimal-compat-1.4.0.apk` | 旧 Android / 带安卓兼容层的鸿蒙 2~4（targetSdk 29） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.4.0/jm-minimal-compat-1.4.0.apk) |
+| `jm-minimal-portable-1.4.0.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.4.0/jm-minimal-portable-1.4.0.exe) |
+| `jm-minimal-setup-1.4.0.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.4.0/jm-minimal-setup-1.4.0.exe) |
 
 > 注意：HarmonyOS NEXT（纯血鸿蒙）不支持 APK，请使用官方支持的渠道；兼容版适用于 HarmonyOS 2~4 等带 Android 兼容层的系统。
 
