@@ -1,7 +1,7 @@
 # JM极简版 · 发布与开发工作流手册（BUILDING）
 
 > 更新：2026-09 · 覆盖 v1.4.2（含阅读器浮标修复 + 会员页收藏/足迹点击响应修复）
-> 当前实况：源码/Android 已到 **1.4.2（versionCode 18）**；
+> 当前实况：源码/Android 已到 **1.6.0（versionCode 37）**；
 > 线上 GitHub Release 仍为 **v1.4.0（2026-09-07，Latest）**——下次发版按 §1 打 v1.4.2。
 > 修复记录：docs/24（1.4.1 阅读器浮标+计数器）、docs/25（1.4.2 收藏/足迹点击无响应）。
 > 用途：给"下次开发/发版"的人看——怎么打 PC 包、怎么打 Android 包、往 GitHub 传什么、怎么传、本机常用命令、以及踩过的坑。
@@ -49,10 +49,10 @@
 
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
-| PC + 前端 | package.json → version | 1.4.1 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 1.4.1 / versionCode 17 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| PC + 前端 | package.json → version | 1.6.0 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
+| Android | android/app/build.gradle → defaultConfig | versionName 1.6.0 / versionCode 37 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
-> ⚠️ 现值 = **工作区状态**（1.4.1 未发版/未推 tag）；线上 Release 与 release-pc/latest.yml 目前仍是 1.4.0。发版时若已改更多内容，版本号继续往后排。
+> ⚠️ 现值 = **工作区状态**（1.6.0 本次发版）；线上 Release 为 1.5.0，本次发布后同步到 1.6.0。
 
 规则：
 - **每次都同步升**：PC 装包 / APK / 更新判断都依赖这两个值；只改一处会造成"新版拉不下来"或"显示已最新但下载的其实是旧协议版本"。

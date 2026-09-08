@@ -33,3 +33,4 @@ scripts/
 # archived local debris / release binaries (kept on disk, not tracked)
 _archive/
 release/
+tsconfig.tsbuildinfo

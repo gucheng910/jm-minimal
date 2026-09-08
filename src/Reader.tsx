@@ -5,7 +5,7 @@ import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
 import { releaseOfflinePageUrls } from "./core/offline";
 import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
-import { drawUnscrambled } from "./core/scramble";
+import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
 import type { ReadPage } from "./core/types";
 
 type ReaderMode = "continuous" | "single";
@@ -34,16 +34,73 @@ function imageName(p: ReadPage): string {
   return clean.replace(/\.(webp|jpg|jpeg|png|gif)$/i, "");
 }
 
+// 去条纹 = 纯本地图像修复（不消耗额外流量）：
+//   按条带边界量测"超额跳变"，未达标的做逐列加权垂直高斯（平坦列全量、有垂直细节的列不动），
+//   修完复测该边界，未达标则换更宽的核再来一遍。
+// 评分 > 1 即判为可见条纹（阈值见 src/core/scramble.ts）
+const SEAM_BAD_SCORE = 1.0;
+
+function jlog(...args: unknown[]) {
+  try { console.log("[jmd]", ...args); } catch { /* ignore */ }
+}
+const loggedSrc = new Set<string>();
+
+// 带 CORS 加载失败（个别图床不发 CORS 头）时，回退为普通加载——此时 canvas 会被污染，
+// 评分/平滑会自动跳过（见 measureSeamScore 的 try/catch），不影响阅读
+function onImgError(e: React.SyntheticEvent<HTMLImageElement>) {
+  const im = e.currentTarget;
+  if (im.dataset.corsFallback) return;
+  im.dataset.corsFallback = "1";
+  im.removeAttribute("crossorigin");
+  const src = im.src;
+  im.src = "";
+  im.src = src;
+}
+
 function applyScramble(img: HTMLImageElement, albumId: number | string, scrambleId?: number | string) {
-  if (img.dataset.scrambled) return;
-  img.dataset.scrambled = "1";
-  if (!scrambleId) return;
-  const canvas = drawUnscrambled(img, albumId, scrambleId);
-  if (canvas) {
-    canvas.classList.add("scramble-canvas");
-    if (img.dataset.page) canvas.dataset.page = img.dataset.page;
-    img.parentElement?.insertBefore(canvas, img.nextSibling);
-    img.style.display = "none";
+  // 尚未解码完成先不动（交给 onLoad）；否则会把键写死，后续再也不会还原
+  if (!img.complete || img.naturalWidth === 0) return;
+  const on = deseaOn();
+  // 键 = scrambleId + 开关状态 + 当前图源地址：图源切换、scrambleId 迟到/变化、开关切换都必须重绘
+  const key = String(scrambleId ?? "") + "|" + (on ? "fix" : "raw") + "|" + (img.currentSrc || img.src);
+  if (img.dataset.scrambleKey === key) return;
+  // 图源/页面变化时允许对新图重新做一次接缝修复
+  delete img.dataset.seamRepaired;
+  // 清掉同一容器内上一轮生成的 canvas（切源 / 单页翻页时 React 会替换 img，旧 canvas 必须移除）
+  const parent = img.parentElement;
+  if (parent) parent.querySelectorAll("canvas.scramble-canvas").forEach((c) => c.remove());
+  const canvas = scrambleId ? drawUnscrambled(img, albumId, scrambleId) : null;
+  img.dataset.scrambleKey = key;
+  if (!canvas) {
+    img.style.display = "";
+    return;
+  }
+  canvas.classList.add("scramble-canvas");
+  if (img.dataset.page) canvas.dataset.page = img.dataset.page;
+  img.parentElement?.insertBefore(canvas, img.nextSibling);
+  img.style.display = "none";
+  // 本地修复（零流量）：逐边界量测"超额跳变"，未达标的按强度自适应加宽高斯并复测
+  if (scrambleId && !on) {
+    jlog("unscramble page=" + pageNameOf(img) + " 原图（去条纹关闭）");
+  } else if (scrambleId) {
+    const pageName = pageNameOf(img);
+    const parts = scrambleSliceCount(albumId, pageName);
+    try {
+      const t0 = performance.now();
+      const before = measureSeamDetail(canvas, parts);
+      const fixed = before.score > SEAM_BAD_SCORE ? smoothSeams(canvas, parts) : 0;
+      const after = fixed > 0 ? measureSeamDetail(canvas, parts) : before;
+      const ms = Math.round(performance.now() - t0);
+      jlog("unscramble page=" + pageName + " parts=" + parts +
+        " 条纹超额 " + before.score.toFixed(2) + "(亮度" + before.lum.toFixed(2) + "/色度" + before.chroma.toFixed(2) + ")" +
+        (fixed > 0
+          ? " → " + after.score.toFixed(2) + "(亮度" + after.lum.toFixed(2) + "/色度" + after.chroma.toFixed(2) + ") 修复" + fixed + "条边界"
+          : " 达标跳过") + " " + ms + "ms" +
+        " src=" + (img.currentSrc || img.src).split("//").slice(-1)[0].slice(0, 70));
+    } catch (err) {
+      // canvas 被跨域数据污染（图床未发 CORS 头）→ 无法量测，跳过评分与修复
+      jlog("unscramble skip page=" + pageName + " 无法量测: " + String(err).slice(0, 60));
+    }
   }
 }
 
@@ -60,6 +117,11 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
   const [railVisible, setRailVisible] = useState(false);
   const [railTop, setRailTop] = useState(64);
   const [scrubPage, setScrubPage] = useState<number | null>(null);
+  // —— 去条纹：本地修复开关（持久化、全局生效、默认开启）——
+  // 按钮亮 = 显示修复后效果；按钮灭 = 显示原图（点击即切换，无需长按）
+  const [deseam, setDeseamState] = useState<boolean>(() => deseaOn());
+  const currentRef = useRef(1);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
   const railTimer = useRef<number | null>(null);
   const draggingRef = useRef(false);
@@ -70,9 +132,20 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     window.addEventListener("jm:caches", sync);
     return () => window.removeEventListener("jm:caches", sync);
   }, [albumId]);
+
+  useEffect(() => { currentRef.current = current; }, [current]);
+
   const [pageUrls, setPageUrls] = useState<ReadPage[]>(pages);
   // 父组件先以空 pages[] 渲染阅读器（立即进入），后台获取到实际数据后更新 props → 同步到内部状态
   useEffect(() => { if (pages.length > 0) setPageUrls(pages); }, [pages]);
+  // scrambleId 迟到/变化时补一次还原（在线 payload 分批、离线缓存缺字段等），已还原且键相同的页不会重复绘制
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    root.querySelectorAll<HTMLImageElement>("img.jm-page").forEach((img) => applyScramble(img, albumId, scrambleId));
+  }, [albumId, scrambleId, pageUrls]);
+
+
   const total = pages.length;
 
   useEffect(() => { localStorage.setItem(MODE_KEY, mode); }, [mode]);
@@ -372,11 +445,39 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     pushToast("已加入缓存队列", "ok");
   }
 
+  function pageSrc(p: ReadPage): string {
+    const src = p.image;
+    const key = imageName(p) + "|" + src;
+    if (!loggedSrc.has(key)) {
+      loggedSrc.add(key);
+      jlog("pageSrc page=" + imageName(p) + " → " + src.split("//").slice(-1)[0].slice(0, 70));
+    }
+    return src;
+  }
+
   function renderPage(p: ReadPage) {
     return (
       <figure key={String(p.page)} id={"jm-pg-" + p.page} data-page={p.page} className="jm-figure">
-        <img className="jm-page" data-page={p.page} src={p.image} alt={imageName(p)} loading="lazy" decoding="async" draggable={false} onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} />
+        <img className="jm-page" data-page={p.page} src={pageSrc(p)} alt={imageName(p)} crossOrigin="anonymous" loading="lazy" decoding="async" draggable={false} onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} onError={onImgError} />
       </figure>
+    );
+  }
+
+  function toggleDeseam() {
+    const next = !deseam;
+    jlog("toggle pressed →", next ? "ON（显示修复后）" : "OFF（显示原图）", "album=" + albumId, "pages=" + pageUrls.length, "scrambleId=" + String(scrambleId));
+    setDeseamState(next);
+    setDeseam(next);
+    // 立即重绘已渲染页面：关闭 → 原图，开启 → 修复后效果
+    document.querySelectorAll<HTMLImageElement>("img.jm-page, img.jm-single").forEach((im) => {
+      delete im.dataset.scrambleKey;
+      applyScramble(im, albumId, scrambleId);
+    });
+    pushToast(
+      next
+        ? "去条纹已开启：显示修复后效果（本地处理，不消耗额外流量）"
+        : "去条纹已关闭：显示原图",
+      next ? "ok" : "info"
     );
   }
 
@@ -389,6 +490,15 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
       <span className="muted mono-num">/{total}</span>
       <button onClick={() => setMode(mode === "continuous" ? "single" : "continuous")}>{mode === "continuous" ? "切单页" : "切连续"}</button>
       {!offline && <button disabled={testing} onClick={speedTestAndSwitch}>{testing ? "测速中…" : "测速切换"}</button>}
+      {!offline && (
+        <button
+          className={deseam ? "btn-deseam on" : ""}
+          onClick={toggleDeseam}
+          title="通过简单算法尝试去除部分漫画中的条纹（本地处理，不消耗额外流量）；亮=显示修复后，灭=显示原图"
+        >
+          {deseam ? "去条纹 ✓" : "去条纹"}
+        </button>
+      )}
       {!offline && (
         <select className="source-select" value={client.imageShunt} onChange={(e) => changeSource(e.target.value)}>
           <option value="0">快速通道</option>
@@ -407,7 +517,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
   // 初始空 pages（后台 getRead 尚未返回）显示加载态
   if (pageUrls.length === 0) {
     return (
-      <div className="reader-wrap">
+      <div className="reader-wrap" ref={rootRef}>
         {toolbar}
         <h2 className="reader-title">{title}</h2>
         <div className="card"><p className="muted">正在加载阅读数据…</p></div>
@@ -418,17 +528,17 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
   if (mode === "single") {
     const page = loadedPage;
     return (
-      <div className="reader-wrap">
+      <div className="reader-wrap" ref={rootRef}>
         {toolbar}
         <h2 className="reader-title">{title}</h2>
-        {page && <img key={String(page.page)} className="jm-single" src={page.image} alt={imageName(page)} onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} />}
+        {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous" onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} onError={onImgError} />}
         <div className="row"><button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button><button disabled={current >= total} onClick={() => jumpTo(current + 1)}>下一页</button></div>
       </div>
     );
   }
 
   return (
-    <div className="reader-wrap">
+    <div className="reader-wrap" ref={rootRef}>
       {toolbar}
       <h2 className="reader-title">{title}</h2>
       <div className="reader-cont">{pageUrls.map((p) => renderPage(p))}</div>

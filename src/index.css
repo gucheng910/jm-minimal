@@ -916,6 +916,8 @@ h3 { font-size: 14px; margin: 4px 0; }
   border-radius: 8px;
 }
 .reader-toolbar button:hover { background: rgba(255, 255, 255, 0.16); }
+.reader-toolbar button.btn-deseam.on { background: #f97316; color: #14161c; font-weight: 600; }
+.reader-toolbar button.btn-deseam.on:hover { background: #fb923c; }
 .reader-toolbar button:disabled { opacity: 0.35; }
 .reader-toolbar select.source-select {
   background: #1b1d24;
@@ -928,9 +930,14 @@ h3 { font-size: 14px; margin: 4px 0; }
 .reader-toolbar .muted { color: #7f8794; }
 .reader-cont { padding: 0; }
 .jm-figure { margin: 0; padding: 0; background: #0b0c10; content-visibility: auto; contain-intrinsic-size: auto 900px; }
+/* 相邻页重叠 2px：缩放后的页面渲染高度是小数，Chromium 按设备像素取整绘制时会留下 1 个设备像素的
+   未被覆盖行，露出 .jm-page/.jm-figure 的深色背景（即阅读时看到的黑线）。下一张图与上一张重叠并后绘制，
+   即可盖住该行。注意 content-visibility 的 paint containment 会裁剪子内容，需 2px 才能完全覆盖。 */
+.jm-figure + .jm-figure { margin-top: -2px; }
 .jm-page { display: block; width: 100%; height: auto; background: #16181f; }
 .jm-single { display: block; max-width: 100%; max-height: calc(100vh - 160px); width: auto; margin: 10px auto; object-fit: contain; background: #16181f; }
-.scramble-canvas { width: 100%; height: auto; display: block; }
+/* 仅在连续阅读容器内撑满宽度；单页模式让 canvas 走 .jm-single 的等比约束（否则会被压扁） */
+.reader-cont .scramble-canvas { width: 100%; height: auto; display: block; }
 .reader-wrap .row { justify-content: center; padding: 8px 0; gap: 10px; }
 .reader-wrap .row button {
   background: rgba(255, 255, 255, 0.09);
