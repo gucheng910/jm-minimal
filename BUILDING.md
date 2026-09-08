@@ -1,8 +1,11 @@
 # JM极简版 · 发布与开发工作流手册（BUILDING）
 
-> 更新：2026-09-06 · 覆盖 v1.3.1（含内置 DNS 清洗 + PC 应用内自动更新）
+> 更新：2026-09 · 覆盖 v1.4.2（含阅读器浮标修复 + 会员页收藏/足迹点击响应修复）
+> 当前实况：源码/Android 已到 **1.4.2（versionCode 18）**；
+> 线上 GitHub Release 仍为 **v1.4.0（2026-09-07，Latest）**——下次发版按 §1 打 v1.4.2。
+> 修复记录：docs/24（1.4.1 阅读器浮标+计数器）、docs/25（1.4.2 收藏/足迹点击无响应）。
 > 用途：给"下次开发/发版"的人看——怎么打 PC 包、怎么打 Android 包、往 GitHub 传什么、怎么传、本机常用命令、以及踩过的坑。
-> 定位：本文是**操作 runbook + 教训库**；设计/协议/里程碑记录在 docs/01~23，代码侧见 README.md。
+> 定位：本文是**操作 runbook + 教训库**；设计/协议/里程碑记录在 docs/00~24（部分历史已归档至 docs/_archive），代码侧见 README.md。
 
 ---
 
@@ -10,10 +13,13 @@
 
 | 文档 | 内容 | 什么时候看 |
 |---|---|---|
+| **docs/00-索引与逆向资源导航.md** | 全库地图：文档阅读顺序 + 归档清单 + 原 app 逆向资料(E:/JMComic-RE)入口 | 新接手/找文件优先 |
 | docs/01-新版客户端设计.md | 架构与协议总纲（host 解密/Token/AES 响应） | 想改 core/API 层 |
-| docs/02~15 | M0~M3 里程碑、登录/内容流/阅读器/线路图源/账号接口等分模块记录 | 改对应模块前 |
-| docs/16-Android打包.md、docs/22-P6回归与重打包.md | Android 打包步骤与真机回归记录 | 打 Android 包 |
-| docs/23-手机端JM加速器可行性报告.md | DNS/加速方案调研（内置清洗的前身） | 讨论网络优化 |
+| docs/03~08、11、12、17~21、23 | 里程碑与模块实录（登录/内容流/阅读器/连载/账号/社区/UI 迭代等；顶部已标现状） | 改对应模块前 |
+| docs/09-线路与圖源协议实现.md、docs/14-移动壳与路由.md | 合并页：线路/圖源/测速；移动壳与路由（旧 09+10、14+15 已归档） | 线路/壳层 |
+| docs/22-P6回归与重打包.md、docs/24-阅读器页进度浮标与计数器修复.md | Android 真机回归（历史 debug 注）；1.4.1 阅读器浮标+计数器修复 | 回归/阅读器 |
+| docs/_archive/ | 已归档历史文档（旧 02/09/10/13/14/15/16 等），内容保留 | 考古/追溯 |
+| **E:/JMComic-RE/（本机旁库）** | 原 app v2.1.5 逆向工作区：APK/apktool/jadx/40-notes 协议报告/99-scripts | 需要“原版怎么实现”的事实依据 |
 | README.md | 给用户的下载说明（表格链接约定与本手册 §5.3 绑定） | 发版前核对 |
 | 本机 AGENTS.md（机器记忆，DSH ~/.dsh 相关目录） | 网络/hosts/gh/工具链等本机环境事实 | 网络相关操作前 |
 | **本文 BUILDING.md** | 发版全流程 + 命令 + 坑 | 每次发版 |
@@ -43,8 +49,10 @@
 
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
-| PC + 前端 | package.json → version | 1.3.1 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 1.3.1 / versionCode 15 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| PC + 前端 | package.json → version | 1.4.1 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
+| Android | android/app/build.gradle → defaultConfig | versionName 1.4.1 / versionCode 17 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+
+> ⚠️ 现值 = **工作区状态**（1.4.1 未发版/未推 tag）；线上 Release 与 release-pc/latest.yml 目前仍是 1.4.0。发版时若已改更多内容，版本号继续往后排。
 
 规则：
 - **每次都同步升**：PC 装包 / APK / 更新判断都依赖这两个值；只改一处会造成"新版拉不下来"或"显示已最新但下载的其实是旧协议版本"。
@@ -91,7 +99,7 @@ npx electron-builder --win portable   # 便携版（单文件，走系统浏览�
 | jm-minimal-setup-<ver>.exe.blockmap | 差分更新元数据 | ✅ 必须 | 缺失→老用户只能整包下载 |
 | latest.yml | 更新源元数据（版本/sha512/size） | ✅ 必须 | 缺失→"更新源缺少元数据" |
 | jm-minimal-portable-<ver>.exe | 便携版 | ✅ 建议 | 不参与 latest.yml |
-| win-unpacked/ | 未压缩调试目录 | ❌ 不传 | 含 resources/app-update.yml 与 app.asar，可本地验证 |
+| win-unpacked/ | 未压缩调试目录 | ❌ 不传 | 含 resources/app-update.yml 与 app.asar，可本地验证（用完即删，可再生成） |
 
 > app-update.yml 生成条件：必须有 publish 且 target 为 nsis。单独 --win dir（win-unpacked）**不会**生成，别用 dir target 判断。
 > electron-updater 是**生产依赖**（在 dependencies，不在 devDependencies），否则 electron-builder 不会把它打进 asar → 启动即"组件缺失"。
@@ -104,17 +112,20 @@ npx asar list release-pc/win-unpacked/resources/app.asar | findstr /C:"updater.c
 npx asar list release-pc/win-unpacked/resources/app.asar | findstr /C:"node_modules\\electron-updater"
 # app-update.yml 内容（应为 github owner/repo）
 type release-pc\win-unpacked\resources\app-update.yml
-# 本地 sha512 应与 latest.yml 一致
-node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('release-pc/jm-minimal-setup-1.3.1.exe');console.log(c.createHash('sha512').update(b).digest('base64'))"
+# 本地 sha512 应与 latest.yml 一致（示例版本号随发版替换）
+node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('release-pc/jm-minimal-setup-1.4.1.exe');console.log(c.createHash('sha512').update(b).digest('base64'))"
 ```
 ---
 
 ## 4. Android 端打包
 
 现状事实（2026-09）：
-- 单工程 android/，包名 dev.jmclient.app；minSdk 24 / targetSdk 36 / compileSdk 36（见 docs/16）。
+- 单工程 android/，包名 dev.jmclient.app；minSdk 24 / targetSdk 36 / compileSdk 36（见 docs/00 → docs/_archive/16-Android打包.md 历史首包记录）。
 - 签名走 android/keystore.properties（storeFile/storePassword/keyAlias/keyPassword，**不入库**）；缺失时 assembleRelease 会用 debug 签名，无法覆盖安装旧正式版。
-- 当前 gradle 里**没有 modern/compat 两个变体**：Release 上的 jm-minimal-modern-*.apk 与 jm-minimal-compat-*.apk 字节数完全相同（4082344），即**同一 APK 双名上传**。"compat 供旧系统/targetSdk29"的 README 说法与现状不符，属遗留文案，改版时注意。
+- 正式构建命令：`cd android && ..\build-rel.cmd`（封装 JAVA_HOME → Android Studio JBR）＝ gradlew assembleRelease。
+- **modern/compat 双名现状**：gradle 无变体，历史上（1.3.1/1.4.0）两 APK 字节相同，即**同一 APK 双名上传**。
+  1.4.1 目前只本地构建了 jm-minimal-modern-1.4.1.apk（测试用）；正式发布时按 §5.3 双名上传（复制改名即可）。
+  "compat 供旧系统/targetSdk29"的 README 说法与现状不符，属遗留文案，改版时注意（README 行文仍保留该表述）。
 
 ### 4.1 命令
 
@@ -122,9 +133,9 @@ node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('rel
 npm run build            # 1) 前端产物
 npx cap sync android     # 2) 同步 web 资源进 android 工程
 cd android
-..\build-rel.cmd         # 3) 构建正式 APK（脚本封装 JAVA_HOME→Android Studio JBR）＝ gradlew assembleRelease
+..\build-rel.cmd         # 3) 构建正式 APK（assembleRelease，keystore 正式签名）
 # 产物：android/app/build/outputs/apk/release/app-release.apk（约 4MB）
-# 调试/模拟器：gradlew assembleDebug → …/apk/debug/app-debug.apk
+# 调试/模拟器：gradlew assembleDebug → …/apk/debug/app-debug.apk（仅开发）
 ```
 > gradle wrapper 已切腾讯镜像（distributionUrl=…gradle-8.14.3-bin.zip），services.gradle.org 被墙不影响。
 > Android 应用内更新（src/ui/UpdateSection.tsx + AppUpdaterPlugin）检查 GitHub Release，按资产名匹配 modern/compat。
@@ -140,24 +151,25 @@ cd android
 ```bash
 cd E:/JMClient
 # 先把 §3.2 的 PC 产物与 §4 的 APK 按 §5.3 改名准备好，再：
-gh release create v1.4.0 ^
-  "release-pc/jm-minimal-setup-1.4.0.exe" ^
-  "release-pc/jm-minimal-setup-1.4.0.exe.blockmap" ^
+gh release create v1.4.1 ^
+  "release-pc/jm-minimal-setup-1.4.1.exe" ^
+  "release-pc/jm-minimal-setup-1.4.1.exe.blockmap" ^
   "release-pc/latest.yml" ^
-  "release-pc/jm-minimal-portable-1.4.0.exe" ^
-  "release/jm-minimal-modern-1.4.0.apk" ^
-  "release/jm-minimal-compat-1.4.0.apk" ^
-  --repo gucheng910/jm-minimal --title "JM极简版 1.4.0" --notes "变更说明…"
+  "release-pc/jm-minimal-portable-1.4.1.exe" ^
+  "release/jm-minimal-modern-1.4.1.apk" ^
+  "release/jm-minimal-compat-1.4.1.apk" ^
+  --repo gucheng910/jm-minimal --title "JM极简版 1.4.1" --notes "变更说明…"
 ```
 > latest.yml 必须与 setup exe **同一次 electron-builder 构建**产生（sha512/size 绑定）。混搭旧 latest.yml + 新 exe 会让老用户差分更新校验失败。
+> 若某平台本次未构建（如只发 Android 测试版），发布清单按实际产物取舍；**PC 与 Android 更新各自独立**（见 §5.3 命名与 README 表格）。
 
 ### 5.2 更新已有 Release 的资产（替换/补传）
 
 ```bash
 # 替换已存在同名资产：加 --clobber
-gh release upload v1.3.1 release-pc/jm-minimal-setup-1.3.1.exe --clobber --repo gucheng910/jm-minimal
+gh release upload v1.4.1 release-pc/jm-minimal-setup-1.4.1.exe --clobber --repo gucheng910/jm-minimal
 # 补传元数据/新文件：直接 upload（同名会报错，需 --clobber）
-gh release upload v1.3.1 release-pc/latest.yml release-pc/jm-minimal-setup-1.3.1.exe.blockmap --repo gucheng910/jm-minimal
+gh release upload v1.4.1 release-pc/latest.yml release-pc/jm-minimal-setup-1.4.1.exe.blockmap --repo gucheng910/jm-minimal
 ```
 **应用内更新的最小上传集**：setup exe + latest.yml + blockmap（缺任一都有对应报错，§9）。
 **若用 electron-builder 直传**：npx electron-builder --win nsis portable --publish always（等价于上面 PC 部分，自动传 latest.yml/blockmap/exe；APK 仍需手动 gh）。
@@ -174,11 +186,11 @@ gh release upload v1.3.1 release-pc/latest.yml release-pc/jm-minimal-setup-1.3.1
 ### 5.4 发布后校验（必做）
 
 ```bash
-gh release view v1.3.1 --repo gucheng910/jm-minimal --json tagName,assets --jq '.tagName, [.assets[].name]'
+gh release view v1.4.1 --repo gucheng910/jm-minimal --json tagName,assets --jq '.tagName, [.assets[].name]'
 # 线上 latest.yml 与本地 exe sha512 一致（同版本替换资产后尤其要查）
-curl -sL https://github.com/gucheng910/jm-minimal/releases/download/v1.3.1/latest.yml
+curl -sL https://github.com/gucheng910/jm-minimal/releases/download/v1.4.1/latest.yml
 # blockmap 可达
-curl -sIL -o NUL -w "%{http_code}\n" https://github.com/gucheng910/jm-minimal/releases/download/v1.3.1/jm-minimal-setup-1.3.1.exe.blockmap
+curl -sIL -o NUL -w "%{http_code}\n" https://github.com/gucheng910/jm-minimal/releases/download/v1.4.1/jm-minimal-setup-1.4.1.exe.blockmap
 ```
 ---
 
@@ -221,7 +233,7 @@ gh release create/upload …               # 见 §5
 $base = "$env:LOCALAPPDATA\Programs\jm-client"
 & "$base\Uninstall JM极简版.exe" /S /currentuser     # 静默卸载（退出码 0 = 成功）
 # 安装（静默）；GUI 程序必须用 Start-Process -Wait，PowerShell 直接 & 不会等 GUI 进程
-Start-Process "E:\JMClient\release-pc\jm-minimal-setup-1.3.1.exe" -ArgumentList '/S' -Wait -PassThru
+Start-Process "E:\JMClient\release-pc\jm-minimal-setup-<ver>.exe" -ArgumentList '/S' -Wait -PassThru
 # 升级/重装前必杀进程（1 个实例 = 4 个 electron 子进程，进程名含中文）
 Get-Process -Name 'JM极简版' | Stop-Process -Force
 # 启动已安装应用
@@ -231,7 +243,7 @@ Start-Process "$base\JM极简版.exe"
 ```bash
 node -p "require('./node_modules/electron/package.json').version"   # electron 版本
 npx asar list release-pc/win-unpacked/resources/app.asar | findstr /C:"updater.cjs"
-gh auth status && gh release view v1.3.1 --repo gucheng910/jm-minimal --json assets --jq '.assets[].name'
+gh auth status && gh release view v1.4.1 --repo gucheng910/jm-minimal --json assets --jq '.assets[].name'
 ```
 ---
 
@@ -250,7 +262,7 @@ gh auth status && gh release view v1.3.1 --repo gucheng910/jm-minimal --json ass
 - 三者必须与**同一次构建**的 setup exe 配套；改了 exe 必须重跑 electron-builder 再传，别手改 yml。
 
 ### 8.4 同版本"已是最新"陷阱
-- 更新判断只看版本号：**升级内容必须升版本号**。想给老 1.3.1 用户发含更新器的 1.3.1 新包是发不出去的——只能发 1.4.0。发版前在 §1 第 9 步实测一次。
+- 更新判断只看版本号：**升级内容必须升版本号**。想给老用户发同版本但含新功能/新依赖的包是发不出去的——只能发下一版。发版前在 §1 第 9 步实测一次。
 
 ### 8.5 electron-updater 依赖位置
 - 必须放 dependencies（生产依赖）才会进 asar；放 devDependencies 打包后 require 失败 → 更新不可用。
@@ -276,7 +288,8 @@ gh auth status && gh release view v1.3.1 --repo gucheng910/jm-minimal --json ass
 - npx asar list … | Select-String 里正则反斜杠/管道容易失配（曾出现"搜不到实际存在文件"的假阴性）。输出到文件后用 findstr /C:"…" 或 Select-String -SimpleMatch。
 
 ### 8.11 Android "modern/compat" 现状
-- gradle 无变体、两 APK 字节相同（同一文件双名）；README 的 compat=旧 targetSdk 说明是遗留文案。若真要做 compat 需在 gradle 加变体/改 targetSdk 再构建，别直接复制改名假装支持。
+- gradle 无变体、历史双 APK 字节相同（同一文件双名）；README 的 compat=旧 targetSdk 说明是遗留文案。若真要做 compat 需在 gradle 加变体/改 targetSdk 再构建，别直接复制改名假装支持。
+- 1.4.1：本地仅构建并测试 jm-minimal-modern-1.4.1.apk，发布时仍按双名上传（§5.3）。
 
 ### 8.12 网络与证书（速记）
 - api.github.com 稳定；github.com 网页/对象存储间歇被墙；下载 release 资产失败先重试或 hosts pin（详见本机 AGENTS.md 网络段）。
@@ -307,3 +320,6 @@ gh auth status && gh release view v1.3.1 --repo gucheng910/jm-minimal --json ass
 3. APK 按 §5.3 命名后随 gh release 上传
 4. gh release create vX.Y.Z（§5.1 完整清单）→ §5.4 校验 → 装旧版的机器点「检查更新」实测
 5. 更新 README 下载表（若改文件名/说明）与 docs/ 记录
+
+> 悬而未决（当前工作区）：1.4.1 源码已含阅读器改动且版本号已升，**尚未 commit/tag/发布**；
+> PC 端 1.4.1（nsis/portable/latest.yml）尚未构建；README 下载表仍指 1.4.0。

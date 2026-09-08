@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
 import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
 import { releaseOfflinePageUrls } from "./core/offline";
@@ -12,7 +13,8 @@ type ReaderMode = "continuous" | "single";
 const MODE_KEY = "jmclient.reader.mode";
 
 function progressKey(id: number | string): string {
-  return "jmclient.read.y." + String(id);
+  // 页号方案：老版本存的是像素滚动值（jmclient.read.y.<id>），新键避免误当页号恢复
+  return "jmclient.read.page." + String(id);
 }
 
 interface Props {
@@ -54,6 +56,14 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
   const [jumpInput, setJumpInput] = useState("1");
   const [task, setTask] = useState<CacheTaskMeta | undefined>(() => cacheList().find((t) => t.id === String(albumId)));
   const [testing, setTesting] = useState(false);
+  // —— B 方案：右侧页数浮标（阅读进度指示 + 拖动/点按跳页）——
+  const [railVisible, setRailVisible] = useState(false);
+  const [railTop, setRailTop] = useState(64);
+  const [scrubPage, setScrubPage] = useState<number | null>(null);
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const railTimer = useRef<number | null>(null);
+  const draggingRef = useRef(false);
+  const scrubRaf = useRef(0);
 
   useEffect(() => {
     const sync = () => setTask(cacheList().find((t) => t.id === String(albumId)));
@@ -61,6 +71,8 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     return () => window.removeEventListener("jm:caches", sync);
   }, [albumId]);
   const [pageUrls, setPageUrls] = useState<ReadPage[]>(pages);
+  // 父组件先以空 pages[] 渲染阅读器（立即进入），后台获取到实际数据后更新 props → 同步到内部状态
+  useEffect(() => { if (pages.length > 0) setPageUrls(pages); }, [pages]);
   const total = pages.length;
 
   useEffect(() => { localStorage.setItem(MODE_KEY, mode); }, [mode]);
@@ -93,25 +105,6 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     return () => { releaseOfflinePageUrls(); };
   }, []);
 
-  useEffect(() => {
-    const key = progressKey(albumId);
-    const saved = Number(localStorage.getItem(key) || 0);
-    window.scrollTo(0, saved);
-    const onScroll = () => {
-      localStorage.setItem(key, String(window.scrollY));
-      if (mode !== "continuous") return;
-      const imgs = Array.from(document.querySelectorAll<HTMLElement>(".jm-page"));
-      let cur = 1;
-      for (const img of imgs) {
-        if (img.getBoundingClientRect().top <= window.innerHeight * 0.5) cur = Number(img.dataset.page || 1);
-      }
-      setCurrent(cur);
-      setJumpInput(String(cur));
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [albumId, mode]);
 
   const loadedPage = useMemo(() => pages.find((p) => Number(p.page) === current) || pages[0], [pages, current]);
 
@@ -123,7 +116,147 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     }
     setCurrent(p);
     setJumpInput(String(p));
-  }, [mode, total]);
+    if (total > 0) localStorage.setItem(progressKey(albumId), String(p));
+  }, [mode, total, albumId]);
+
+  // —— 浮标自动显隐（滚动/拖动/悬停唤起，静止 1.7s 后淡出）——
+  const showRail = useCallback(() => {
+    setRailVisible(true);
+    if (railTimer.current !== null) window.clearTimeout(railTimer.current);
+    railTimer.current = window.setTimeout(() => {
+      railTimer.current = null;
+      setRailVisible(false);
+    }, 1700);
+  }, []);
+
+  const scrubPageFromY = useCallback((clientY: number): number => {
+    const el = railRef.current;
+    if (!el) return 1;
+    const rect = el.getBoundingClientRect();
+    const ratio = rect.height > 0 ? Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)) : 0;
+    return Math.round(ratio * (total - 1)) + 1;
+  }, [total]);
+
+  /** 拖动过程合并跳页：每帧最多一次 scrollIntoView，避免 pointermove 洪峰 */
+  const railJump = useCallback((page: number) => {
+    if (scrubRaf.current) cancelAnimationFrame(scrubRaf.current);
+    scrubRaf.current = requestAnimationFrame(() => {
+      scrubRaf.current = 0;
+      jumpTo(page);
+    });
+  }, [jumpTo]);
+
+  const onRailPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (total <= 1) return;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    draggingRef.current = true;
+    if (railTimer.current !== null) window.clearTimeout(railTimer.current);
+    setRailVisible(true);
+    const p = scrubPageFromY(e.clientY);
+    setScrubPage(p);
+    railJump(p);
+    e.preventDefault();
+  }, [railJump, scrubPageFromY, total]);
+
+  const onRailPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    const p = scrubPageFromY(e.clientY);
+    setScrubPage(p);
+    railJump(p);
+  }, [railJump, scrubPageFromY]);
+
+  const onRailPointerEnd = useCallback(() => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setScrubPage(null);
+    showRail();
+  }, [showRail]);
+
+  // 卸载/切图源时清理浮标定时器与跳页 rAF
+  useEffect(() => () => {
+    if (railTimer.current !== null) window.clearTimeout(railTimer.current);
+    if (scrubRaf.current) cancelAnimationFrame(scrubRaf.current);
+  }, []);
+
+  // 连续阅读时隐藏系统滚动条（由右侧浮标代替），仅阅读器所在的文档/overlay 生效
+  useEffect(() => {
+    if (mode !== "continuous") return;
+    const root = document.documentElement;
+    root.classList.add("jm-reading");
+    return () => root.classList.remove("jm-reading");
+  }, [mode]);
+
+  // 浮标纵向范围：避开顶部工具栏（可换行）与底部提示行
+  useEffect(() => {
+    if (mode !== "continuous") return;
+    const update = () => {
+      const tb = document.querySelector<HTMLElement>(".reader-toolbar");
+      const top = (tb ? tb.getBoundingClientRect().bottom : 0) + 6;
+      setRailTop(top > 0 ? top : 64);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [mode]);
+
+  // —— 页进度：恢复上次页码 + 当前页检测（扫 .jm-figure 容器而非 img，兼容切块重组/懒加载）——
+  // 兼容两种滚动宿主：在线阅读（窗口滚动）与缓存中心离线阅读（fixed overlay 内滚动）
+  useEffect(() => {
+    const key = progressKey(albumId);
+    const clampP = (n: number) => Math.min(Math.max(1, n), total);
+    const saved = clampP(Number(localStorage.getItem(key) || 0));
+    if (mode !== "continuous") {
+      // 单页模式：仅恢复页码（无需滚动）
+      if (saved >= 1) {
+        setCurrent(saved);
+        setJumpInput(String(saved));
+      }
+      return;
+    }
+    const first = document.getElementById("jm-pg-" + saved);
+    if (first) {
+      setCurrent(saved);
+      setJumpInput(String(saved));
+      first.scrollIntoView({ block: "start" });
+    }
+    const figs = Array.from(document.querySelectorAll<HTMLElement>(".jm-figure"));
+    if (figs.length === 0) return;
+    // 向上找最近的滚动容器（如 .cache-overlay）；找不到则按窗口滚动处理
+    let hostEl: HTMLElement | null = null;
+    let walk = figs[0].parentElement;
+    while (walk && walk !== document.body) {
+      const cs = window.getComputedStyle(walk);
+      if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && walk.scrollHeight > walk.clientHeight + 2) {
+        hostEl = walk;
+        break;
+      }
+      walk = walk.parentElement;
+    }
+    const isWin = hostEl === null;
+    const host = (hostEl || document.scrollingElement || document.documentElement) as HTMLElement;
+    const compute = () => {
+      // 阅读参考线：滚动视口（窗口或 overlay 容器）45% 高度处
+      const lineY = (isWin ? 0 : host.getBoundingClientRect().top) + host.clientHeight * 0.45;
+      let cur = 1;
+      for (const f of figs) {
+        const top = f.getBoundingClientRect().top;
+        if (top > lineY) break; // 参考线以下无需再扫
+        cur = Number(f.dataset.page || String(f.id).replace(/^jm-pg-/, "") || 1);
+      }
+      // 已滚到底：最后一页可能不足以越过参考线
+      const st = isWin ? window.scrollY : host.scrollTop;
+      if (st + host.clientHeight >= host.scrollHeight - 6) cur = total;
+      localStorage.setItem(key, String(cur));
+      setCurrent(cur);
+      setJumpInput(String(cur));
+      showRail();
+    };
+    const target = isWin ? window : host;
+    target.addEventListener("scroll", compute, { passive: true });
+    compute();
+    return () => target.removeEventListener("scroll", compute);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albumId, mode, total, pageUrls, showRail]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,8 +276,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
       const r = await client.getRead(albumId);
       if (!r) return;
       setPageUrls(r.images);
-      setJumpInput("1");
-      setCurrent(1);
+      jumpTo(1);
       pushToast(key === "0" ? "已开启快速通道" : "图源已切换", "ok");
     } catch {
       pushToast("图源切换失败，请重试", "err");
@@ -206,8 +338,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
       const r = await client.getRead(albumId);
       if (r) {
         setPageUrls(r.images);
-        setJumpInput("1");
-        setCurrent(1);
+        jumpTo(1);
       }
       pushToast("已切换最快图源：" + bestTitle + "（" + best.ms + " ms）", "ok");
     } catch {
@@ -270,6 +401,20 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     </div>
   );
 
+  const bubblePage = scrubPage ?? current;
+  const bubbleRatio = total > 1 ? Math.min(1, Math.max(0, (bubblePage - 1) / (total - 1))) : 0;
+
+  // 初始空 pages（后台 getRead 尚未返回）显示加载态
+  if (pageUrls.length === 0) {
+    return (
+      <div className="reader-wrap">
+        {toolbar}
+        <h2 className="reader-title">{title}</h2>
+        <div className="card"><p className="muted">正在加载阅读数据…</p></div>
+      </div>
+    );
+  }
+
   if (mode === "single") {
     const page = loadedPage;
     return (
@@ -287,7 +432,21 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
       {toolbar}
       <h2 className="reader-title">{title}</h2>
       <div className="reader-cont">{pageUrls.map((p) => renderPage(p))}</div>
-      <div className="row"><button onClick={() => jumpTo(1)}>回到开头</button><span className="muted">竖屏连续阅读：滚轮/上下键/空格</span></div>
+      <div className="row"><button onClick={() => jumpTo(1)}>回到开头</button><span className="muted">竖屏连续阅读：滚轮 / 空格翻页，拖动右侧圆点跳页</span></div>
+      {total > 1 && (
+        <div ref={railRef} role="slider" aria-label="阅读进度" aria-valuemin={1} aria-valuemax={total} aria-valuenow={bubblePage}
+          className={"reader-rail" + (railVisible ? " show" : "")}
+          style={{ top: railTop }}
+          onPointerDown={onRailPointerDown} onPointerMove={onRailPointerMove}
+          onPointerUp={onRailPointerEnd} onPointerCancel={onRailPointerEnd}
+          onPointerEnter={showRail}>
+          <div className="reader-rail-line" aria-hidden="true" />
+          <div className="reader-thumb" style={{ top: bubbleRatio * 100 + "%" }}>
+            <span className="reader-thumb-num mono-num">{bubblePage}</span>
+            <i className="reader-thumb-dot" aria-hidden="true" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

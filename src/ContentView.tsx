@@ -103,6 +103,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const ptrLabelRef = useRef<HTMLSpanElement | null>(null);
   const MAX_PULL = 110;          // 阻力公式校正：拉到 110px 时即可达到阈值
   const REFRESH_THRESHOLD = 70;   // 阈值 70px，正常手指下滑一次即可触发
+  // 同步 mode 的 ref：异步回调里判断用户是否已主动进入详情/阅读器（防止首页预取把页面打回 home）
+  const modeRef = useRef<Mode>("home");
+  useEffect(() => { modeRef.current = mode; }, [mode]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent<boolean>("jm:immersive", { detail: mode === "reader" }));
@@ -320,23 +323,10 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   useEffect(() => {
     if (mode !== "reader" || !read) return;
     let cancelled = false;
-    const key = progressKey(read.id);
-    const saved = Number(localStorage.getItem(key) || 0);
-    window.scrollTo(0, saved);
-    const onScroll = () => {
-      localStorage.setItem(key, String(window.scrollY));
-      const imgs = Array.from(document.querySelectorAll<HTMLElement>(".page-img"));
-      let current = 1;
-      for (const img of imgs) {
-        const top = img.getBoundingClientRect().top;
-        if (top <= window.innerHeight * 0.45) current = Number(img.dataset.page || 1);
-      }
-      setCurPage(current);
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
+    // 阅读进度/页码由 ReaderPanel 自管（按页号记忆 + .jm-figure 锚线检测），
+    // 这里移除旧版残留的“像素滚动恢复 + .page-img 扫描”（旧 key jmclient.read.y 已废弃）
     isAlbumCached(read.id).then((ok) => { if (!cancelled) setCached(ok); });
-    return () => { cancelled = true; window.removeEventListener("scroll", onScroll); };
+    return () => { cancelled = true; };
   }, [mode, read]);
 
   async function loadComments(aid: number | string) {
@@ -369,6 +359,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     setFeedKind(kind);
     setPage(p);
     setHasMore(hasMoreFlag);
+    // 用户已主动进入详情/阅读器时，不把首页预取结果打回 home
+    // （修复：从会员页收藏/足迹点进详情，被冷启动测速后的 showList 抢回首页）
+    if (modeRef.current === "detail" || modeRef.current === "reader") return;
     setMode("home");
     // 首屏前 6 张封面预取（不阻塞渲染，命中浏览器缓存后立即显示）
     try {
@@ -636,26 +629,42 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 立即阅读：不等 getRead 返回，先切阅读器再后台加载图片列表 */
   async function startRead() {
     if (!detail) return;
-    const r = await run(() => client.getRead(detail.id));
-    if (r && (!r.images || r.images.length === 0)) {
-      pushToast("该内容需先购买后才能阅读", "err");
-      return;
-    }
-    if (r) {
-      saveHistoryEntry({
-        id: detail.id,
-        name: detail.name || "",
-        author: (detail.author || []).join("/"),
-        adddate: detail.addtime as string | number | undefined,
-        description: detail.description || undefined
-      });
-      setHistory(loadHistory());
+    const albumId = detail.id;
+    const title = detail.name || "";
+    // author 兼容两种数据源：列表乐观快照（string）与完整详情（string[]）
+    const authorRaw = detail.author;
+    const authorStr = Array.isArray(authorRaw) ? authorRaw.join("/") : (typeof authorRaw === "string" ? authorRaw : "");
+    // 立即保存阅读记录（从列表页乐观数据中提取，不依赖完整详情）
+    saveHistoryEntry({
+      id: albumId,
+      name: title,
+      author: authorStr,
+      adddate: detail.addtime as string | number | undefined,
+      description: detail.description || undefined
+    });
+    setHistory(loadHistory());
+    // 瞬间进入阅读器：用空 pages[] 渲染 ReaderPanel（会立即显示工具栏 + Loading）
+    setRead({ id: albumId, images: [] });
+    setMode("reader");
+    setDlState("idle");
+    setDlProgress(0);
+    // 后台获取实际图片列表：到达后直接更新阅读器内容
+    try {
+      const r = await client.getRead(albumId);
+      if (!r || !r.images || r.images.length === 0) {
+        pushToast("该内容需先购买后才能阅读", "err");
+        if (modeRef.current === "reader") setMode("detail");
+        setRead(null);
+        return;
+      }
       setRead(r);
-      setMode("reader");
-      setDlState("idle");
-      setDlProgress(0);
+    } catch (err) {
+      pushToast("阅读数据加载失败：" + String(err).slice(0, 80), "err");
+      if (modeRef.current === "reader") setMode("detail");
+      setRead(null);
     }
   }
 
@@ -820,7 +829,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         scrambleId={read.scramble_id}
         onBack={exitReaderToDetail}
         meta={{
-          author: (detail?.author || []).join("/"),
+          author: Array.isArray(detail?.author) ? detail!.author.join("/") : (typeof detail?.author === "string" ? detail.author : ""),
           cover: detail ? albumCoverUrl({ id: detail.id, name: detail.name || "", update_at: detail.addtime }) : ""
         }}
       />

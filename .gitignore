@@ -28,3 +28,8 @@ scripts/
 
 .DS_Store
 *.local
+
+
+# archived local debris / release binaries (kept on disk, not tracked)
+_archive/
+release/
