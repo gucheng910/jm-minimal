@@ -21,6 +21,8 @@
   --brand-soft: #fff1e6;
   /* 中性黑（主按钮 / 选中态） */
   --black: #1a1c22;
+  /* 可点击文字链接（详情页作者/标签） */
+  --link: #2563eb;
   /* 语义色 */
   --ok: #0f9f6e;
   --ok-soft: #e9f8f1;
@@ -59,6 +61,7 @@ html { background: var(--bg); }
   --brand-deep: #f97316;
   --brand-soft: rgba(251, 146, 60, 0.14);
   --black: #e8eaee;
+  --link: #60a5fa;
   --ok: #34d399;
   --ok-soft: rgba(52, 211, 153, 0.14);
   --err: #f87171;
@@ -1493,7 +1496,160 @@ button.ghost.danger { color: var(--err); border-color: #f6cdc9; }
 
 
 /* 桌面端更新卡 */
+/* ============================================================
+   列表 ↔ 详情 推拉转场（View Transitions API）
+   旧页左移缩小变暗，新页从右滑入；返回时反向。浏览器不支持时自动降级为瞬时切换。
+   ============================================================ */
+@keyframes jmNavOutLeft {
+  from { transform: none; filter: brightness(1); }
+  to { transform: translateX(-22%) scale(0.96); filter: brightness(0.82); }
+}
+@keyframes jmNavInRight {
+  from { transform: translateX(100%); }
+  to { transform: none; }
+}
+@keyframes jmNavOutRight {
+  from { transform: none; }
+  to { transform: translateX(100%); }
+}
+@keyframes jmNavInLeft {
+  from { transform: translateX(-22%) scale(0.96); filter: brightness(0.82); }
+  to { transform: none; filter: brightness(1); }
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.3s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0.35, 1);
+  animation-fill-mode: both;
+}
+html[data-nav="push"]::view-transition-old(root) { animation-name: jmNavOutLeft; }
+html[data-nav="push"]::view-transition-new(root) { animation-name: jmNavInRight; }
+html[data-nav="pop"]::view-transition-old(root) { animation-name: jmNavOutRight; }
+html[data-nav="pop"]::view-transition-new(root) { animation-name: jmNavInLeft; }
+
+/* 顶栏 / 底栏 固定在原地，不参与推拉 */
+.top-bar { view-transition-name: jm-topbar; }
+.bottom-nav { view-transition-name: jm-navbar; }
+::view-transition-group(jm-topbar),
+::view-transition-group(jm-navbar) { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
+}
+
 .update-desktop { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+
+/* ============================================================
+   详情页作者/标签 → 特殊搜索结果页（只读）
+   页面栈：详情页留在背后缩小变暗，搜索页从右侧推入；返回时反向
+   ============================================================ */
+/* 可点击的蓝字（作者 / 标签） */
+.link {
+  background: none !important;
+  border: 0;
+  padding: 0 !important;
+  margin: 0;
+  font: inherit;
+  color: var(--link);
+  cursor: pointer;
+  text-align: left;
+  border-radius: 4px;
+  transition: opacity 0.12s ease;
+}
+.link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.link:active { transform: none; opacity: 0.6; }
+.meta-sep { color: var(--ink-3); }
+
+/* 详情页被搜索页压到背后的层级动效 */
+.page-push {
+  transform-origin: 50% 0;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0.35, 1);
+}
+.page-push.pushed {
+  transform: translateX(-20%) scale(0.96);
+  pointer-events: none;
+}
+.page-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 195;
+  background: rgba(10, 12, 16, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.page-scrim.on { opacity: 1; }
+/* 搜索页在前台时锁住底层页面滚动 */
+body.jm-scroll-lock { overflow: hidden; }
+
+/* 搜索结果层（自身是滚动容器，与详情页的 window 滚动互不干扰） */
+.sr-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  transform: translateX(100%);
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0.35, 1), visibility 0s linear 0.3s;
+}
+.sr-layer.open {
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0.35, 1), visibility 0s;
+}
+.sr-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.sr-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0 !important;
+  border-radius: 50%;
+  background: transparent !important;
+  color: var(--ink);
+  flex: none;
+}
+.sr-back:active { transform: scale(0.9); background: var(--surface-2) !important; }
+.sr-title { min-width: 0; }
+.sr-title h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sr-count { display: block; font-size: 11.5px; color: var(--ink-3); line-height: 1.4; }
+.sr-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 12px 12px calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
+}
+.sr-empty { padding: 40px 4px; text-align: center; display: block; }
+.sr-more { justify-content: center; }
+.sr-sentinel { height: 1px; }
+[data-theme="dark"] .page-scrim { background: rgba(0, 0, 0, 0.42); }
+
 .update-progress { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .update-progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line, rgba(128,128,128,.25)); overflow: hidden; }
 .update-progress-fill { height: 100%; border-radius: 3px; background: var(--brand, #1677ff); transition: width .2s ease; }

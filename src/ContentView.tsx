@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useBackHandler } from "./hooks/useBackHandler";
+import { navTransition } from "./core/viewTransition";
 import type { FormEvent } from "react";
 import { client } from "./core/api";
 import { downloadAlbum, isAlbumCached } from "./core/offline";
@@ -10,6 +11,8 @@ import { sanitizeCommentHtml } from "./core/commentRich";
 import { RANK_MODES, SORT_MODES, UI_KEYS } from "./core/constants";
 import { albumCoverUrl } from "./ui/AlbumCard";
 import { AlbumGrid } from "./ui/AlbumGrid";
+import { SearchResultPage } from "./ui/SearchResultPage";
+import type { SRKind } from "./ui/SearchResultPage";
 import { SkeletonGrid } from "./ui/SkeletonGrid";
 import { debouncedSetJSON, getJSONNow, removeKeyNow } from "./core/debounceStorage";
 import { announceStartupReady, gatePassed } from "./core/startup";
@@ -58,6 +61,26 @@ function parsePaid(d: AlbumDetail): boolean {
   return !own;
 }
 
+/** 详情页作者：完整详情是 string[]，列表乐观快照可能是 "a/b" 字符串，两种都要兼容 */
+function authorNames(d: AlbumDetail | null): string[] {
+  if (!d) return [];
+  const raw = d.author as unknown;
+  if (Array.isArray(raw)) return raw.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof raw === "string") return raw.split("/").map((x) => x.trim()).filter(Boolean);
+  return [];
+}
+
+/** 特殊搜索结果层（详情页作者/标签 → 只读搜索页）的完整状态 */
+interface SRState {
+  kind: SRKind;
+  text: string;
+  items: AlbumSummary[];
+  page: number;
+  hasMore: boolean;
+  busy: boolean;
+  error: string;
+}
+
 interface ContentViewProps { initialAction?: string }
 
 export default function ContentView({ initialAction = "" }: ContentViewProps = {}) {
@@ -69,6 +92,16 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [detail, setDetail] = useState<AlbumDetail | null>(null);
+  // ---- 特殊搜索结果层（页面栈语义）----
+  // 栈最多同时存在「详情页 + 搜索页」两层：
+  //   列表 → 详情A → 搜索X → 详情B，此时 B 直接返回回到 X，再返回回到 A；
+  //   但若在 B 上又点了作者/标签，则丢弃 A 与 X（相当于杀后台），栈变成「详情B + 搜索Y」。
+  const [sr, setSr] = useState<SRState | null>(null);
+  const [srOpen, setSrOpen] = useState(false);
+  const [srParent, setSrParent] = useState<AlbumDetail | null>(null);
+  const [detailFrom, setDetailFrom] = useState<"list" | "search">("list");
+  const srReqIdRef = useRef(0);
+  const srParentScrollRef = useRef(0);
   const [read, setRead] = useState<ReadPayload | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -111,6 +144,13 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     window.dispatchEvent(new CustomEvent<boolean>("jm:immersive", { detail: mode === "reader" }));
   }, [mode]);
 
+  // 搜索页在前台时锁住底层详情页的滚动（搜索页自带滚动容器）
+  useEffect(() => {
+    if (!srOpen) return;
+    document.body.classList.add("jm-scroll-lock");
+    return () => document.body.classList.remove("jm-scroll-lock");
+  }, [srOpen]);
+
   // setting/图床配置迟到时刷新封面（例如测速兜底后才拿到 img_host）
   const [settingTick, setSettingTick] = useState(0);
   useEffect(() => {
@@ -138,11 +178,30 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     if (y > 0) window.scrollTo(0, y);
   }, [mode]);
 
+  /** 清空搜索结果层与栈记忆（离开详情页 / 回首页时调用） */
+  function clearSearchLayer() {
+    srReqIdRef.current++;
+    setSr(null);
+    setSrOpen(false);
+    setSrParent(null);
+    setDetailFrom("list");
+  }
+
+  /** 详情写入统一入口：若搜索页背后的父详情是同一部，一并刷新（避免返回时拿到旧快照） */
+  function applyDetail(next: AlbumDetail | null) {
+    setDetail(next);
+    setSrParent((p) => (p && next && String(p.id) === String(next.id) ? next : p));
+  }
+
   function exitDetailToHome() {
-    setDetail(null);
-    // 作废仍在执行的 openDetail/switchChapter 异步回调（防止 setState 干扰滚动）
-    detailReqIdRef.current++;
-    setMode("home");
+    // 详情 → 列表：反向推拉（详情页右移滑出，列表页回到原位并恢复滚动）
+    navTransition("pop", () => {
+      setDetail(null);
+      clearSearchLayer();
+      // 作废仍在执行的 openDetail/switchChapter 异步回调（防止 setState 干扰滚动）
+      detailReqIdRef.current++;
+      setMode("home");
+    });
   }
 
   function exitWeekToHome() {
@@ -158,19 +217,90 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     requestAnimationFrame(() => window.scrollTo(0, 0));
   }
 
+  /** 详情页返回：父级是搜索页就先回搜索页，否则回列表 */
+  function detailBack() {
+    if (detailFrom === "search" && sr) {
+      setSrOpen(true);
+      return;
+    }
+    exitDetailToHome();
+  }
+
+  /** 详情页作者/标签 → 打开只读搜索结果页：只保留当前详情一层，其余栈丢弃（防无限套娃） */
+  function openSpecialSearch(kind: SRKind, text: string) {
+    const q = text.trim();
+    if (!q) return;
+    srParentScrollRef.current = window.scrollY;
+    setSrParent(detail);
+    setDetailFrom("list"); // 杀后台：背后详情页的父级改为主页（再返回即回首页）
+    const reqId = ++srReqIdRef.current;
+    setSr({ kind, text: q, items: [], page: 1, hasMore: false, busy: true, error: "" });
+    setSrOpen(true);
+    void loadSRPage(q, kind, 1, reqId);
+  }
+
+  async function loadSRPage(q: string, kind: SRKind, p: number, reqId = srReqIdRef.current) {
+    if (!client.apiBase) {
+      try { await client.init(); } catch { /* 静默：详情页摘要仍可看 */ }
+    }
+    try {
+      const r = await client.search(q, p, 0, kind === "tag" ? "tag" : "author");
+      if (srReqIdRef.current !== reqId) return; // 已换词/已关闭，丢弃过期回包
+      const content = r.content || [];
+      const total = Number(r.total || 0);
+      setSr((s) => {
+        if (!s) return s;
+        const items = p > 1 ? [...s.items, ...content] : content;
+        // content 为空即到底：避免服务端重复返回同一页时无限滚动打转
+        const hasMore = content.length > 0 && items.length < total;
+        return { ...s, items, page: p, hasMore, busy: false, error: "" };
+      });
+    } catch (err) {
+      if (srReqIdRef.current !== reqId) return;
+      const msg = String(err).slice(0, 140);
+      setSr((s) => (s ? { ...s, busy: false, error: msg } : s));
+    }
+  }
+
+  function loadMoreSR() {
+    if (!sr || sr.busy || !sr.hasMore) return;
+    setSr((s) => (s ? { ...s, busy: true } : s));
+    void loadSRPage(sr.text, sr.kind, sr.page + 1);
+  }
+
+  /** 关闭搜索页 → 回到它背后的详情页；若中途从结果点进过别的详情，恢复原来那部并刷新评论 */
+  function closeSearch() {
+    setSrOpen(false);
+    const back = srParent;
+    if (back && (!detail || String(back.id) !== String(detail.id))) {
+      const reqId = ++detailReqIdRef.current;
+      applyDetail(back);
+      setComments(null);
+      setError("");
+      client.getAlbumComments(back.id, 1)
+        .then((c) => { if (detailReqIdRef.current === reqId) setComments(c); })
+        .catch(() => { /* 评论拉取失败不影响详情页 */ });
+      const y = srParentScrollRef.current;
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+    setDetailFrom("list");
+  }
+
   useBackHandler(() => {
-    if (mode === "reader") {
+    if (srOpen) {
+      closeSearch();
+    } else if (mode === "reader") {
       client.finishFastTrack();
       exitReaderToDetail();
     } else if (mode === "detail") {
-      exitDetailToHome();
+      detailBack();
     } else if (mode === "week") {
       exitWeekToHome();
     } else {
       // home 等其他模式不消费返回键，让 App.tsx 处理两次返回退出
       return false;
     }
-  }, [mode]);
+  }, [mode, srOpen, detailFrom, sr, srParent, detail]);
 
   const [hotErr, setHotErr] = useState("");
 
@@ -233,6 +363,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       // 底部“首页”再次点击：从详情/阅读退回列表并刷新首页推荐
       setRead(null);
       setDetail(null);
+      clearSearchLayer();
       setComments(null);
       setMode("home");
       window.scrollTo({ top: 0 });
@@ -497,6 +628,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     // 与底部导航点击「首页」时的刷新逻辑完全一致（复用 jm:refreshHome 事件）
     setRead(null);
     setDetail(null);
+    clearSearchLayer();
     setComments(null);
     setMode("home");
     window.scrollTo({ top: 0 });
@@ -536,9 +668,19 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       setRefreshing(false);
     });
   }
+  /**
+   * PTR 指示器全靠手动改 DOM（绕开 React 重渲染）。
+   * 切页时该节点可能被 React 复用成别的元素（如详情页卡片），所以动手前必须确认它还是它自己，
+   * 否则遗留的定时器会把 display:none 打到新页面元素上（1.6.2 白屏事故）。
+   */
+  function ptrIndicator(): HTMLDivElement | null {
+    const el = ptrIndicatorRef.current;
+    return el && el.isConnected && el.classList.contains("ptr-indicator") ? el : null;
+  }
+
   // 直接操作 DOM，避免 React 重渲染造成的卡顿
   function updatePTRUI(pos: number) {
-    const ind = ptrIndicatorRef.current;
+    const ind = ptrIndicator();
     const arr = ptrArrowRef.current;
     const lab = ptrLabelRef.current;
     if (!ind || !arr || !lab) return;
@@ -554,19 +696,23 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     lab.textContent = reachThreshold ? "松手刷新" : "继续下拉";
   }
   function hidePTRUI() {
-    const ind = ptrIndicatorRef.current;
+    const ind = ptrIndicator();
     if (ind) {
       ind.style.transition = "height 0.18s ease, opacity 0.18s ease";
       ind.style.height = "0px";
       ind.style.opacity = "0";
       setTimeout(() => {
-        if (ind) ind.style.display = "none";
-        ind.style.transition = "";
+        // 180ms 后节点可能已被复用成别的元素：重新取一次并校验
+        const el = ptrIndicator();
+        if (el) {
+          el.style.display = "none";
+          el.style.transition = "";
+        }
       }, 180);
     }
   }
   function showRefreshingUI() {
-    const ind = ptrIndicatorRef.current;
+    const ind = ptrIndicator();
     const arr = ptrArrowRef.current;
     const lab = ptrLabelRef.current;
     if (!ind || !arr || !lab) return;
@@ -604,14 +750,38 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     showList(list, "favorites");
   }
 
-  const openDetail = useCallback(async (item: AlbumSummary) => {
-    saveScrollTarget(window.scrollY); // 记住进入详情前列表位置
+  // from="list"：从任意列表进入（重置页面栈）；from="search"：从搜索结果页点进（背后保留搜索页）
+  const openDetail = useCallback(async (item: AlbumSummary, from: "list" | "search" = "list") => {
+    if (from === "list") saveScrollTarget(window.scrollY); // 记住进入详情前列表位置
     // 乐观渲染：用列表页已有摘要立刻展示详情页，不等 API
     const snapshot = { ...item, name: item.name || "" } as unknown as AlbumDetail;
-    setDetail(snapshot);
-    setMode("detail");
-    setComments(null);
-    setError("");
+    const enterDetail = () => {
+      setDetail(snapshot);
+      setDetailFrom(from);
+      if (from === "list") {
+        // 从列表进入 = 页面栈重置，搜索结果层作废
+        srReqIdRef.current++;
+        setSr(null);
+        setSrOpen(false);
+        setSrParent(null);
+      } else {
+        // 从搜索结果页点进：关闭搜索层（滑出动画）
+        setSrOpen(false);
+      }
+      setMode("detail");
+      setComments(null);
+      setError("");
+      // 新页从顶部开始（列表位置已存进 listScrollRef，返回时恢复）
+      window.scrollTo(0, 0);
+    };
+    if (from === "list") {
+      // 列表 → 详情：推拉转场（旧页后退，详情页从右滑入）
+      navTransition("push", enterDetail);
+    } else {
+      // 搜索结果页 → 详情：搜索层自带滑出动画，不再叠加整页转场
+      enterDetail();
+      requestAnimationFrame(() => window.scrollTo(0, 0));
+    }
     // 记录本次请求 ID：若后续 exitDetailToHome 已递增此值，说明用户已离开
     const reqId = detailReqIdRef.current;
     // 并行拉取完整详情 + 评论，不再串行等待
@@ -624,10 +794,13 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     ]);
     // 离开详情页后（reqId 已递增）拦截过期回包，避免 setState 破坏滚动恢复
     if (detailReqIdRef.current !== reqId) return;
-    if (d.status === "fulfilled" && d.value) setDetail(d.value);
+    if (d.status === "fulfilled" && d.value) applyDetail(d.value);
     if (c.status === "fulfilled" && c.value) setComments(c.value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** 搜索结果页里的卡片点击 → 详情页（背后保留搜索页） */
+  const openAlbumFromSearch = useCallback((a: AlbumSummary) => { void openDetail(a, "search"); }, [openDetail]);
 
   /** 立即阅读：不等 getRead 返回，先切阅读器再后台加载图片列表 */
   async function startRead() {
@@ -690,7 +863,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     if (detail.is_favorite) { pushToast("已在收藏中", "info"); return; }
     const ok = await run(() => client.addFavorite(detail.id));
     if (ok) {
-      setDetail({ ...detail, is_favorite: true });
+      applyDetail({ ...detail, is_favorite: true });
       pushToast("已加入官方收藏", "ok");
     } else {
       pushToast("收藏失败，请重试", "err");
@@ -702,7 +875,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     const target = detail?.series?.find((s) => String(s.id) === String(id));
     if (target && detail) {
       const snapshot = { ...detail, id, name: target.name || detail.name } as unknown as AlbumDetail;
-      setDetail(snapshot);
+      applyDetail(snapshot);
     }
     setError("");
     const reqId = detailReqIdRef.current;
@@ -712,7 +885,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       client.getAlbumComments(id, 1).catch(() => null)
     ]);
     if (detailReqIdRef.current !== reqId) return; // 离开详情后忽略过期回包
-    if (d.status === "fulfilled" && d.value) setDetail(d.value);
+    if (d.status === "fulfilled" && d.value) applyDetail(d.value);
     if (c.status === "fulfilled" && c.value) setComments(c.value);
   }
 
@@ -741,15 +914,37 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   if (mode === "detail" && detail) {
     const locked = parsePaid(detail);
+    const authors = authorNames(detail);
+    // 一律转字符串：官方 tags 实测为 string[]，但个别专辑若返回非字符串，
+    // 直接当 React 子节点渲染会抛 "Objects are not valid as a React child" 导致整屏白屏
+    const tags = Array.isArray(detail.tags) ? detail.tags.filter(Boolean).map((t) => String(t)) : [];
     return (
+      <>
+      {/* key 必须固定：否则 React 会把首页列表的 DOM 节点（含下拉刷新指示器）复用成本卡片，
+          下拉刷新遗留的 180ms 定时器随后把 display:none 打到详情页上 → 白屏 */}
+      <div key="detail-page" className={"page-push" + (srOpen ? " pushed" : "")} aria-hidden={srOpen}>
       <div className="card">
-        <button className="ghost" onClick={exitDetailToHome}>返回列表</button>
+        <button className="ghost" onClick={detailBack}>{detailFrom === "search" && sr ? "返回搜索结果" : "返回列表"}</button>
         <h2>{detail.name}</h2>
         <p className="muted">JM号：{String(detail.id)}
           <button className="ghost" style={{ marginLeft: 8 }} onClick={() => { navigator.clipboard.writeText(String(detail.id)); pushToast("JM号已复制", "ok"); }}>复制</button>
         </p>
-        <p className="muted">作者：{(Array.isArray(detail.author) ? detail.author : [detail.author].filter(Boolean)).join(" / ") || "-"} · 页数：{String(detail.total_photos ?? "-")}</p>
-        <p className="muted">标签：{(detail.tags || []).join("、") || "-"}</p>
+        <p className="muted">作者：{authors.length > 0
+          ? authors.map((a, i) => (
+            <span key={"au" + i}>
+              {i > 0 && <span className="meta-sep"> / </span>}
+              <button className="link" onClick={() => openSpecialSearch("author", a)}>{a}</button>
+            </span>
+          ))
+          : "-"} · 页数：{String(detail.total_photos ?? "-")}</p>
+        <p className="muted">标签：{tags.length > 0
+          ? tags.map((t, i) => (
+            <span key={"tg" + i}>
+              {i > 0 && <span className="meta-sep">、</span>}
+              <button className="link" onClick={() => openSpecialSearch("tag", t)}>{t}</button>
+            </span>
+          ))
+          : "-"}</p>
         {Array.isArray(detail.series) && detail.series.length > 1 && (
           <div className="row">
             <label>选择话数</label>
@@ -788,6 +983,25 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           {!logged && <p className="muted">登录后可评论</p>}
         </div>
       </div>
+      </div>
+      <div className={"page-scrim" + (srOpen ? " on" : "")} aria-hidden="true" />
+      {sr && (
+        <SearchResultPage
+          open={srOpen}
+          kind={sr.kind}
+          text={sr.text}
+          items={sr.items}
+          busy={sr.busy}
+          error={sr.error}
+          hasMore={sr.hasMore}
+          resetKey={sr.kind + ":" + sr.text}
+          coverTick={settingTick}
+          onBack={closeSearch}
+          onOpenAlbum={openAlbumFromSearch}
+          onLoadMore={loadMoreSR}
+        />
+      )}
+      </>
     );
   }
 
@@ -811,11 +1025,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     // 成功：立即重新拉取详情确认真实解锁状态，避免误报
     const fresh = await client.getAlbum(detail.id).catch(() => null);
     if (fresh && !parsePaid(fresh)) {
-      setDetail(fresh);
+      applyDetail(fresh);
       pushToast("购买成功，已解锁，可立即阅读", "ok");
       try { window.dispatchEvent(new CustomEvent("jm:coinChanged")); } catch { /* ignore */ }
     } else {
-      if (fresh) setDetail(fresh);
+      if (fresh) applyDetail(fresh);
       pushToast(rawMsg || "已提交购买，请稍后刷新确认", "info");
     }
   }

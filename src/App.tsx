@@ -9,6 +9,7 @@ import { sessionStore } from "./core/storage";
 import { BookIcon, CheckInIcon, ClockIcon, CloseIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon, UserIcon } from "./ui/icons";
 import { authService } from "./state/auth";
 import ContentView from "./ContentView";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import ToastHost, { pushToast } from "./ui/toast";
 import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
@@ -617,9 +618,11 @@ export default function App() {
       </section>
       {tab !== "member" && (
       <section className="browse-page">
+      <ErrorBoundary label="内容页">
       {tab === "home" && <ContentView key="home" />}
       {tab === "categories" && <ContentView key="categories" initialAction="categories" />}
       {tab === "search" && <ContentView key="search" initialAction="search" />}
+      </ErrorBoundary>
       </section>
       )}
       </main>
