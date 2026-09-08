@@ -34,3 +34,48 @@ scripts/
 _archive/
 release/
 tsconfig.tsbuildinfo
+
+# ============================================================
+# 以下为本地分析与逆向产物，永不入库（分析文件/文档/地址/中间产物）
+# ============================================================
+# 分析、逆向、调研文档与笔记（全部本地保留）
+docs/
+reference/
+scripts/
+_archive/
+analysis/
+reverse/
+notes/
+调研/
+*.har
+*.pcap
+*.chlsj
+*.mitm
+*.dump
+*.txt.tmp
+*.bak
+*.orig
+*.rej
+*.tsbuildinfo
+
+# 抓包/日志/截图等运行产物
+*.log
+logs/
+logcat*.txt
+shot*.png
+screenshot*.png
+*.trace
+
+# 打包产物与签名材料（发布走 GitHub Release，不入库）
+release/
+release-pc/
+*.apk
+*.aab
+*.exe
+*.msi
+*.blockmap
+latest.yml
+*.jks
+*.keystore
+keystore.properties
+android/keystore/
