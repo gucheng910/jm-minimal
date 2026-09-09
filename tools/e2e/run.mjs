@@ -57,13 +57,26 @@ async function main() {
       TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "e2eauth=1"
     });
 
+    console.log("\n==== 缓存中心 / 离线详情页 ====");
+    const cache = await runNode("harness.mjs", {
+      DRIVER: "driver-cache.js",
+      TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "e2ecache=1",
+      E2E_PORT: String(Number(PORT) + 2)
+    });
+
+    console.log("\n==== 连载详情 + 足迹合并 ====");
+    const hist = await runNode("harness.mjs", {
+      DRIVER: "driver-history.js",
+      E2E_PORT: String(Number(PORT) + 3)
+    });
+
     let ptrCode = 0;
     if (!process.env.E2E_SKIP_PTR) {
       console.log("\n==== 下拉刷新（CDP 原生触摸）====");
       ptrCode = await runNode("ptr.mjs", { E2E_PORT: String(Number(PORT) + 1) });
     }
-    if (nav || auth || ptrCode) process.exitCode = 1;
-    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
+    if (nav || auth || cache || hist || ptrCode) process.exitCode = 1;
+    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
   } finally {
     if (server) { try { server.kill(); } catch (e) { /* 忽略 */ } }
   }

@@ -22,6 +22,8 @@ import { SearchResultPage } from "./ui/SearchResultPage";
 import type { SRKind } from "./ui/SearchResultPage";
 import { KIND_META } from "./ui/SearchResultPage";
 import { announceStartupReady, gatePassed } from "./core/startup";
+import { bookIdOf } from "./core/series";
+import { bookMetaFromDetail, chapterLabel } from "./core/offlineMeta";
 import type { AlbumDetail, AlbumSummary } from "./core/types";
 
 type Mode = "home" | "detail" | "reader" | "week";
@@ -338,7 +340,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           }
         }
         if (aid) {
-          const d = await client.getAlbum(aid);
+          const d = await client.getAlbumFull(aid);
           if (alive && d) {
             album.set(d);
             setMode("detail");
@@ -481,17 +483,23 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   if (mode === "reader" && album.read) {
+    const d = album.detail;
+    const chapter = d?.series?.find((s) => String(s.id) === String(album.read!.id));
+    const bookId = d ? bookIdOf(d) : "";
     return (
       <ReaderPanel
         albumId={album.read.id}
         pages={album.read.images}
-        title={album.read.name || album.detail?.name || ""}
+        title={album.read.name || d?.name || ""}
         scrambleId={album.read.scramble_id}
         onBack={exitReaderToDetail}
         meta={{
-          author: Array.isArray(album.detail?.author) ? album.detail!.author.join("/") : (typeof album.detail?.author === "string" ? album.detail.author : ""),
-          cover: album.detail ? albumCoverUrl({ id: album.detail.id, name: album.detail.name || "", update_at: album.detail.addtime }) : ""
+          author: Array.isArray(d?.author) ? d!.author.join("/") : (typeof d?.author === "string" ? d.author : ""),
+          cover: d ? albumCoverUrl({ id: d.id, name: d.name || "", update_at: d.addtime }) : ""
         }}
+        bookMeta={d ? bookMetaFromDetail(d, albumCoverUrl({ id: bookId, name: d.book_name || d.name || "", update_at: d.addtime })) : undefined}
+        chapterName={chapterLabel(chapter)}
+        chapterSort={chapter ? Number(chapter.sort) || undefined : undefined}
       />
     );
   }

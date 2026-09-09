@@ -103,6 +103,8 @@ export interface AlbumSummary {
   is_aids?: boolean;
   update_at?: string | number;
   adddate?: string | number;
+  /** 本地派生展示字段（如「读到 第12话」）；接口不返回 */
+  sub?: string;
 }
 
 export interface AlbumDetail {
@@ -116,6 +118,8 @@ export interface AlbumDetail {
   likes?: number | string;
   series?: SeriesItem[];
   series_id?: string | number;
+  /** 书级书名（mergeBookMeta 注入；话级回包只有「书名-第N话」），足迹/列表标题用 */
+  book_name?: string;
   author?: string[];
   tags?: string[];
   works?: string[];

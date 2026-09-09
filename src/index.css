@@ -1077,6 +1077,58 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
 .op-link.danger { color: var(--err); }
 button.ghost.danger { color: var(--err); border-color: #f6cdc9; }
 
+/* 缓存中心：按「书」分组 + 离线详情页目录 */
+.book-group { align-items: flex-start; }
+.chapter-progress { margin-top: 8px; }
+.chapter-actions { gap: 6px; margin-top: 4px; }
+.chapter-actions button { padding: 4px 9px; font-size: 12px; }
+.book-tags { margin: 2px 0 6px; }
+.book-desc {
+  margin: 0 0 12px;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 8.4em;
+  overflow: hidden;
+}
+.book-chapters { padding-bottom: 20px; }
+.chapter-row {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line);
+}
+.chapter-row:last-child { border-bottom: 0; }
+.chapter-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 2px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.chapter-main:active { transform: scale(0.99); }
+.chapter-main .title { padding: 0; font-size: 13.5px; }
+.chapter-main .muted { margin-top: 2px; }
+.chapter-ops { display: flex; gap: 14px; padding: 0 2px 10px; font-size: 11.5px; }
+.badge {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+}
+.badge.ok { color: var(--brand-deep); border-color: var(--brand); background: var(--brand-soft); }
+.badge.pending { color: var(--ink-2); }
 
 /* ---------- 18+ 确认页 ---------- */
 .age-gate {

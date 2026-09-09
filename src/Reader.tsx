@@ -7,6 +7,7 @@ import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
 import type { ReadPage } from "./core/types";
+import type { BookMeta } from "./core/offlineMeta";
 import { on } from "./core/bus";
 
 type ReaderMode = "continuous" | "single";
@@ -25,6 +26,11 @@ interface Props {
   scrambleId?: number | string;
   onBack: () => void;
   meta?: { author?: string; category?: string; cover?: string };
+  /** 书级元数据（简介/标签/作者/目录）：缓存时一并写入 IDB，离线详情页依赖它 */
+  bookMeta?: BookMeta;
+  /** 当前话名称（"第12话"）与序号 */
+  chapterName?: string;
+  chapterSort?: number;
   /** 离线阅读模式：隐藏图源测速/切换等在线功能 */
   offline?: boolean;
 }
@@ -105,7 +111,7 @@ function applyScramble(img: HTMLImageElement, albumId: number | string, scramble
   }
 }
 
-export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack, meta, offline = false }: Props) {
+export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack, meta, bookMeta, chapterName, chapterSort, offline = false }: Props) {
   const [mode, setMode] = useState<ReaderMode>(() => {
     const saved = localStorage.getItem(MODE_KEY);
     return saved === "single" ? "single" : "continuous";
@@ -432,12 +438,16 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     if (task && task.status === "done") return;
     await enqueueCache({
       id: albumId,
-      title,
+      bookId: bookMeta?.bookId,
+      title: bookMeta?.name || title,
+      chapterName,
+      sort: chapterSort,
       author: meta?.author,
       category: meta?.category,
       cover: meta?.cover,
       scrambleId,
-      pages
+      pages,
+      bookMeta
     });
     pushToast("已加入缓存队列", "ok");
   }

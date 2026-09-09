@@ -7,9 +7,9 @@
 ## 跑
 
 ```bash
-npm run e2e                      # 自己起 dev server（5199）→ 导航回归 + 下拉刷新
+npm run e2e                      # 自己起 dev server（5199）→ 导航 + 登录态 + 缓存/离线 + 连载/足迹 + 下拉刷新
 E2E_URL=http://127.0.0.1:5199/ npm run e2e    # 复用已在跑的 server
-E2E_SKIP_PTR=1 npm run e2e       # 只跑导航回归
+E2E_SKIP_PTR=1 npm run e2e       # 跳过下拉刷新
 EDGE_PATH="C:/.../chrome.exe" npm run e2e     # 换浏览器（Edge / Chromium 均可）
 ```
 
@@ -21,9 +21,16 @@ EDGE_PATH="C:/.../chrome.exe" npm run e2e     # 换浏览器（Edge / Chromium �
 |---|---|
 | `stub.js` | 注入页面的桩：线路表缓存、18+ 免确认、`window.fetch` 假接口（含请求记录 `window.__reqs`、错误记录 `window.__errs`） |
 | `driver.js` | 页面内跑的回归脚本：首页 → 周榜 → 分类 → 搜索 tab → 详情 → 标签搜索 → 逐级返回 → 杀后台 → 阅读器 → 相关漫画/登场人物/协议漂移 |
+| `driver-auth.js` | 登录态一致性：会员页 vs 详情页（`?e2eauth=1` 种过期会话） |
+| `driver-cache.js` | 缓存中心/离线详情页：同书多话合并成一行、目录缓存徽标、未缓存话联网读、返回后目录仍在、已缓存话离线读（`?e2ecache=1` 预置 IDB + Cache API 数据） |
+| `driver-history.js` | 连载详情补全书级作者/简介、足迹按「书」合并成一条、点足迹回到最后阅读的一话 |
 | `harness.mjs` | CDP 外壳：起浏览器、注入桩、执行 driver、打印结构化日志 |
 | `ptr.mjs` | 下拉刷新专项：用 CDP 原生触摸（合成 DOM TouchEvent 在无触摸环境下 React 不挂监听） |
-| `run.mjs` | 编排：起 dev server → 跑两项 → 关 server |
+| `run.mjs` | 编排：起 dev server → 跑全部用例 → 关 server |
+
+桩数据开关（拼在 URL 上）：`?e2eauth=1` 过期会话、`?e2ecache=1` 预置「已缓存 2 话的连载书」；
+连载桩 `/album?id=90000{1,2,3}` 刻意复刻真实形状——**话级 payload 的 author/description 为空**，
+用来验证书级补全逻辑。
 
 ## 加用例
 

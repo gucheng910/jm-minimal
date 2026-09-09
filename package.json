@@ -31,6 +31,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^33.4.11",
     "electron-builder": "^26.0.12",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",

@@ -3,6 +3,7 @@
 import CommentList from "../ui/CommentList";
 import { AlbumGrid } from "../ui/AlbumGrid";
 import { albumTags, authorNames, parsePaid } from "../core/albumMeta";
+import { isSeriesWork } from "../core/series";
 import type { AlbumDetail as AlbumDetailData, AlbumSummary, ForumPayload } from "../core/types";
 
 interface Props {
@@ -67,7 +68,10 @@ export default function AlbumDetail({
             <button className="link" onClick={() => onOpenAuthor(a)}>{a}</button>
           </span>
         ))
-        : "-"} · 页数：{String(detail.total_photos ?? "-")}</p>
+        : "-"} · {isSeriesWork(detail)
+          // 连载的 total_photos 不是本话页数（实测 47 页显示 5905），改显示话数
+          ? "共 " + String(detail.series!.length) + " 话"
+          : "页数：" + String(detail.total_photos ?? "-")}</p>
       <p className="muted">标签：{tags.length > 0
         ? tags.map((t, i) => (
           <span key={"tg" + i}>

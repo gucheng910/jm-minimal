@@ -4,6 +4,7 @@ import { API_PATHS } from "./endpoints";
 import { measureAll } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
 import { getMemCache, makeKey, setMemCache } from "./requestCache";
+import { bookIdOf, mergeBookMeta, rememberSeries } from "./series";
 import { emit } from "./bus";
 import { sessionStore } from "./storage";
 import { registerDnsHosts } from "./dnsClean";
@@ -355,7 +356,10 @@ export class JMClient {
           throw new Error("api error code=" + env.code + (env.msg ? "：" + env.msg : ""));
         }
         const result = this.decryptPayload<T>(ts, apiPath, env);
-        // (诊断埋点已移除)
+        // 任意一话的 /album 都带回整本书的 series[]：顺手种入「话 → 书」映射（足迹/缓存合并用）
+        if (apiPath === API_PATHS.album && result && typeof result === "object" && !Array.isArray(result) && "id" in (result as object)) {
+          rememberSeries(result as unknown as AlbumDetail);
+        }
         if (cacheTtl > 0) {
           const q = this.cleanQuery(params);
           setMemCache(makeKey(apiPath, q as Record<string, unknown>), result, cacheTtl);
@@ -438,6 +442,19 @@ export class JMClient {
   getAlbum(id: number | string): Promise<AlbumDetail> {
     // 短期内存缓存（30s）：同漫画反复进出详情页无需重复请求
     return this.request<AlbumDetail>(API_PATHS.album, { id }, { cacheTtlMs: 30_000 });
+  }
+
+  /**
+   * 详情（连载自动补书级元数据）。
+   * 实测：话级 /album 的 author 为空数组、description 为空串、tags 少「韩漫/完结」，
+   * 书级（id = series_id）才有。单本直接返回；连载最多多一次请求（同样 30s 内存缓存）。
+   */
+  async getAlbumFull(id: number | string): Promise<AlbumDetail> {
+    const chapter = await this.getAlbum(id);
+    const bookId = bookIdOf(chapter);
+    if (bookId === String(chapter.id)) return chapter;
+    const book = await this.getAlbum(bookId).catch(() => null);
+    return mergeBookMeta(chapter, book);
   }
 
   getRead(id: number | string): Promise<ReadPayload> {

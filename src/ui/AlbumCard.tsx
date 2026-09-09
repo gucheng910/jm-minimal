@@ -61,7 +61,7 @@ export const AlbumCard = memo(function AlbumCard({ album, onOpen }: { album: Alb
       <Cover url={albumCoverUrl(album)} alt={album.name} />
       <div>
         <div className="title">{album.name}</div>
-        <div className="muted">{album.author || ""} · {(album.category?.title || "")}</div>
+        <div className="muted">{[album.author, album.category?.title, album.sub].filter(Boolean).join(" · ")}</div>
       </div>
     </button>
   );

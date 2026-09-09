@@ -3,24 +3,11 @@
 import { useCallback, useRef, useState } from "react";
 import { client } from "../core/api";
 import { emit } from "../core/bus";
-import { UI_KEYS } from "../core/constants";
-import { debouncedSetJSON, getJSONNow } from "../core/debounceStorage";
 import { authorNames, parsePaid } from "../core/albumMeta";
+import { bookIdOf, isSeriesWork, mergeBookMeta } from "../core/series";
+import { saveHistory } from "../core/history";
 import { pushToast } from "../ui/toast";
-import type { AlbumDetail, AlbumSummary, ForumPayload, ReadPayload } from "../core/types";
-
-const HISTORY_KEY = UI_KEYS.history;
-
-function loadHistory(): AlbumSummary[] {
-  return getJSONNow<AlbumSummary[]>(HISTORY_KEY, []);
-}
-
-/** 阅读记录（足迹）：本地保存，供书库页读取 */
-function saveHistoryEntry(entry: AlbumSummary) {
-  const list = loadHistory().filter((x) => String(x.id) !== String(entry.id));
-  list.unshift(entry);
-  debouncedSetJSON(HISTORY_KEY, list.slice(0, 50), 500);
-}
+import type { AlbumDetail, ForumPayload, ReadPayload } from "../core/types";
 
 export interface AlbumDetailOptions {
   /** 详情数据变化（ContentView 用它同步搜索层背后的父详情） */
@@ -97,16 +84,30 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     return reqId;
   }, [applyDetail]);
 
+  /**
+   * 拉详情（连载分两步）：先渲染话级回包（快），再用书级回包补作者/简介/标签/目录。
+   * 实测话级 payload 的 author 为空数组、description 为空串，直接用会显示空作者。
+   */
+  const fetchDetail = useCallback(async (id: number | string, reqId: number): Promise<void> => {
+    const d = await client.getAlbum(id).catch(() => null);
+    if (reqIdRef.current !== reqId || !d) return;
+    applyDetail(d);
+    const bookId = bookIdOf(d);
+    if (bookId === String(d.id)) return;
+    const book = await client.getAlbum(bookId).catch(() => null);
+    if (reqIdRef.current !== reqId || !book) return;
+    applyDetail(mergeBookMeta(d, book));
+  }, [applyDetail]);
+
   const load = useCallback(async (id: number | string, reqId = reqIdRef.current) => {
     try { if (!client.apiBase) await client.init(); } catch { /* 静默：详情页仍可用摘要数据 */ }
-    const [d, c] = await Promise.allSettled([
-      client.getAlbum(id).catch(() => null),
-      client.getAlbumComments(id, 1).catch(() => null)
+    const [c] = await Promise.allSettled([
+      client.getAlbumComments(id, 1).catch(() => null),
+      fetchDetail(id, reqId)
     ]);
     if (reqIdRef.current !== reqId) return; // 已离开/已切章
-    if (d.status === "fulfilled" && d.value) applyDetail(d.value);
     if (c.status === "fulfilled" && c.value) setComments(c.value);
-  }, [applyDetail]);
+  }, [fetchDetail]);
 
   const leave = useCallback(() => {
     reqIdRef.current++;
@@ -145,8 +146,8 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
       pushToast(rawMsg || "购买未成功，请确认 JCoin 余额", "err");
       return;
     }
-    // 成功：立即重新拉取详情确认真实解锁状态，避免误报
-    const fresh = await client.getAlbum(cur.id).catch(() => null);
+    // 成功：立即重新拉取详情确认真实解锁状态，避免误报（getAlbumFull 保留书级作者/简介）
+    const fresh = await client.getAlbumFull(cur.id).catch(() => null);
     if (fresh && !parsePaid(fresh)) {
       applyDetail(fresh);
       pushToast("购买成功，已解锁，可立即阅读", "ok");
@@ -166,14 +167,13 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     }
     setError("");
     const reqId = ++reqIdRef.current;
-    const [d, c] = await Promise.allSettled([
-      client.getAlbum(id).catch(() => null),
-      client.getAlbumComments(id, 1).catch(() => null)
+    const [c] = await Promise.allSettled([
+      client.getAlbumComments(id, 1).catch(() => null),
+      fetchDetail(id, reqId)
     ]);
     if (reqIdRef.current !== reqId) return; // 离开详情后忽略过期回包
-    if (d.status === "fulfilled" && d.value) applyDetail(d.value);
     if (c.status === "fulfilled" && c.value) setComments(c.value);
-  }, [applyDetail]);
+  }, [applyDetail, fetchDetail]);
 
   const loadComments = useCallback(async (aid: number | string) => {
     const data = await run(() => client.getAlbumComments(aid, 1));
@@ -197,13 +197,19 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     const cur = detailRef.current;
     if (!cur) return;
     const albumId = cur.id;
-    // 立即保存阅读记录（从乐观数据提取，不依赖完整详情）
-    saveHistoryEntry({
-      id: albumId,
-      name: cur.name || "",
+    // 立即保存阅读记录（从乐观数据提取，不依赖完整详情）；连载按「书」合并成一条
+    const chapter = cur.series?.find((s) => String(s.id) === String(albumId));
+    saveHistory({
+      id: String(albumId),
+      bookId: bookIdOf(cur) || String(albumId),
+      name: cur.book_name || cur.name || "",
       author: authorNames(cur).join("/"),
       adddate: cur.addtime as string | number | undefined,
-      description: cur.description || undefined
+      description: cur.description || undefined,
+      chapterName: chapter?.name || (chapter?.sort ? "第" + chapter.sort + "话" : undefined),
+      sort: chapter?.sort,
+      chapters: isSeriesWork(cur) ? cur.series!.length : undefined,
+      lastReadAt: Date.now()
     });
     // 瞬间进入阅读器：用空 pages[] 渲染（会立即显示工具栏 + Loading）
     setRead({ id: albumId, images: [] });
