@@ -172,10 +172,13 @@ if (!SKIP_ANDROID) {
   log("  ✓ " + path.basename(compat) + "（同字节，官方「双名上传」约定）");
 
   // 校验 APK 内的版本号（apkanalyzer 存在才查）
-  const aapt = IS_WIN ? capture("where", ["apkanalyzer"], { optional: true }) : capture("which", ["apkanalyzer"], { optional: true });
+  // 注意：Windows 上 apkanalyzer 是 .bat，必须拿 where 解析出的完整路径再走 cmd /c（直接 spawn 名字会静默失败）
+  const aapt = (IS_WIN ? capture("where", ["apkanalyzer"], { optional: true }) : capture("which", ["apkanalyzer"], { optional: true }))
+    .split(/?
+/)[0].trim();
   if (aapt) {
-    const vn = capture("apkanalyzer", ["manifest", "version-name", apkPath], { optional: true });
-    const vc = capture("apkanalyzer", ["manifest", "version-code", apkPath], { optional: true });
+    const vn = capture(aapt, ["manifest", "version-name", apkPath], { optional: true });
+    const vc = capture(aapt, ["manifest", "version-code", apkPath], { optional: true });
     if (vn && vn !== version) die("APK 内 versionName=" + vn + " 与目标 " + version + " 不一致");
     log("  ✓ APK versionName=" + (vn || "?") + " versionCode=" + (vc || "?"));
   }
@@ -254,8 +257,11 @@ if (PUBLISH) {
   log("\nRelease: https://github.com/" + REPO + "/releases/tag/" + tag);
 } else {
   step("跳过发布（未加 --publish）");
-  log("本地产物就绪，确认无误后执行：");
-  log("  node tools/release.mjs " + version + " --publish --skip-pc --skip-android   # 直接复用本次产物上传（需 --skip-* 以免重复构建）");
+  log("本地产物就绪。发布三步：");
+  log("  1) 真机/本机验证产物");
+  log("  2) git commit -am \"chore(release): " + version + "\" && git push");
+  log("  3) node tools/release.mjs " + version + " --publish --skip-pc --skip-android");
+  log("     （复用本次产物直接上传；--publish 要求工作区干净，故必须先提交版本号）");
 }
 
 // ---------------------------------------------------------------- 汇总
