@@ -23,6 +23,7 @@
     return b;
   };
   const tbButtons = () => qa(".reader-toolbar button").map(txt);
+  const back = () => window.dispatchEvent(new CustomEvent("jm:back", { detail: { consumed: false } }));
   const readIds = () => (window.__reqs || []).filter((r) => r.path === "comic_read").map((r) => r.id);
   const cacheIds = () => { try { return JSON.parse(localStorage.getItem("jmclient.cacheTasks.v2") || "[]").map((t) => t.id); } catch (e) { return []; } };
 
@@ -66,8 +67,23 @@
     active: qa(".reader-sheet .sheet-row").filter((r) => r.classList.contains("active")).map((r) => txt(r.querySelector(".title"))),
     toast: txt(q(".toast"))
   });
-  btn("关闭").click();
-  await waitGone(".reader-sheet");
+  // 系统返回键：只关弹窗，不退出阅读器
+  back();
+  await waitGone(".reader-sheet", 8000);
+  log.push({ step: "back-closes-source-sheet", readerAlive: !!q(".reader-wrap"), toolbar: tbButtons() });
+
+  // ---- 关闭弹窗即取消在途测速（不再切源/刷新）----
+  btn("更快的源").click();
+  await waitFor(".reader-sheet");
+  back();                                   // 测速还没跑完就关掉
+  await waitGone(".reader-sheet", 8000);
+  await sleep(1800);
+  log.push({
+    step: "close-cancels-speedtest",
+    toolbar: tbButtons(),
+    switchedAfterClose: /已切换最快图源/.test(txt(q(".toast"))),
+    sheetOpen: !!q(".reader-sheet")
+  });
 
   // ---- 换话：按钮显示当前话，弹窗列出全部话，切换后标题/请求都变 ----
   btn("第2话").click();
@@ -90,6 +106,12 @@
   });
 
   // ---- 选话缓存：默认只选当前话 ----
+  btn("缓存").click();
+  await waitFor(".reader-sheet");
+  // 返回键只关弹窗（阅读器还在）
+  back();
+  await waitGone(".reader-sheet", 8000);
+  log.push({ step: "back-closes-cache-sheet", readerAlive: !!q(".reader-wrap") });
   btn("缓存").click();
   await waitFor(".reader-sheet");
   const boxes = () => qa(".reader-sheet input[type=checkbox]");

@@ -926,7 +926,8 @@ h3 { font-size: 14px; margin: 4px 0; }
 .reader-sheet-backdrop { z-index: 210; }
 .reader-sheet { max-height: 76vh; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 2px; }
-.sheet-head h3 { margin: 0; font-size: 15px; }
+.sheet-head h3 { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); }
+.reader-sheet > .muted { color: var(--ink-2); font-size: 12.5px; }
 .sheet-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
 .sheet-row {
   display: flex;
@@ -935,18 +936,30 @@ h3 { font-size: 14px; margin: 4px 0; }
   gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 9px 10px;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  padding: 10px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
-  color: inherit;
+  box-shadow: var(--sh-1);
+  color: var(--ink);
   font-size: 13px;
+  transition: box-shadow 0.15s ease, transform 0.12s ease, border-color 0.15s ease;
 }
-.sheet-row .title { padding: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
-.sheet-row .muted { padding: 2px 0 0; font-size: 11.5px; }
+.sheet-row .title { padding: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
+.sheet-row .muted { padding: 3px 0 0; font-size: 12px; color: var(--ink-2); }
+/* 可点的行给个箭头，避免看着像禁用 */
+.sheet-row:not(.check-row):not(.disabled)::after {
+  content: "›";
+  flex: none;
+  margin-left: 4px;
+  color: var(--ink-3);
+  font-size: 17px;
+  line-height: 1;
+}
+.sheet-row:not(.disabled):active { transform: scale(0.99); }
 .sheet-row.active { border-color: var(--brand); background: var(--brand-soft); }
 .sheet-row:disabled,
-.sheet-row.disabled { opacity: 0.55; }
+.sheet-row.disabled { opacity: 0.78; box-shadow: none; background: var(--bg); }
 .check-row { cursor: pointer; }
 .check-row input[type="checkbox"] { flex: none; width: 17px; height: 17px; accent-color: var(--brand); }
 .check-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }

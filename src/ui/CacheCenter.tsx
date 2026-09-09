@@ -12,6 +12,7 @@ import {
 } from "../core/cacheTasks";
 import { cachedCoverUrl, pagesFromCache, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "../core/offline";
 import { ensureBookMeta } from "../core/bookSync";
+import { hasOpenSheet } from "../core/uiLocks";
 import { chapterLabel, getBook, getChapter, listChapters, type BookMeta, type ChapterMeta } from "../core/offlineMeta";
 import { saveHistory } from "../core/history";
 import type { ReadPage } from "../core/types";
@@ -161,6 +162,8 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
   const currentGroup = view.kind === "book" ? groups.find((g) => g.bookId === view.bookId) : undefined;
 
   useBackHandler(() => {
+    // 阅读器内弹窗开着时不要消费返回键（缓存中心的监听注册得更早，这里必须让路）
+    if (hasOpenSheet()) return false;
     if (reading) { setReading(null); return; }
     if (view.kind === "book") { setView({ kind: "list" }); return; }
     onClose();

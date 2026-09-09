@@ -23,6 +23,7 @@ import type { SRKind } from "./ui/SearchResultPage";
 import { KIND_META } from "./ui/SearchResultPage";
 import { announceStartupReady, gatePassed } from "./core/startup";
 import { bookIdOf } from "./core/series";
+import { hasOpenSheet } from "./core/uiLocks";
 import { bookMetaFromDetail, chapterLabel } from "./core/offlineMeta";
 import type { AlbumDetail, AlbumSummary } from "./core/types";
 
@@ -221,6 +222,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   useBackHandler(() => {
+    // 阅读器内弹窗开着时不要消费返回键（由阅读器自己关弹窗）
+    if (hasOpenSheet()) return false;
     if (srOpen) {
       closeSearch();
     } else if (mode === "reader") {

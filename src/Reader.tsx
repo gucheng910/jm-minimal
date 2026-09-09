@@ -6,6 +6,7 @@ import { pagesFromCache, releaseOfflinePageUrls, scanCachedChapters, toOfflinePa
 import { chapterLabel, getChapter, listChapters, type BookChapter, type ChapterMeta } from "./core/offlineMeta";
 import { saveHistory } from "./core/history";
 import { useBackHandler } from "./hooks/useBackHandler";
+import { popSheetLock, pushSheetLock } from "./core/uiLocks";
 import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
@@ -67,6 +68,68 @@ function onImgError(e: React.SyntheticEvent<HTMLImageElement>) {
   im.src = src;
 }
 
+// —— 去条纹（接缝修复）延后执行 ——
+// 重排（drawUnscrambled）是「能不能读懂」的前提，必须随图片加载立刻完成；
+// 去条纹只是画质优化，实测单页 measure+smooth 最坏 191 ms，同步做会把主线程堵死，
+// 导致后续图片迟迟不加载、切片迟迟不重排。所以：立刻重排 → 进入视口 + 主线程空闲时再修。
+interface SeamTask { pageName: string; parts: number }
+const seamTasks = new WeakMap<HTMLCanvasElement, SeamTask>();
+const seamQueue: HTMLCanvasElement[] = [];
+let seamPumping = false;
+let seamObserver: IntersectionObserver | null = null;
+
+function idleRun(cb: () => void): void {
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+  if (typeof ric === "function") ric(cb, { timeout: 1500 });
+  else window.setTimeout(cb, 40);
+}
+
+function ensureSeamObserver(): IntersectionObserver | null {
+  if (seamObserver) return seamObserver;
+  if (typeof IntersectionObserver === "undefined") return null;
+  seamObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const cv = e.target as HTMLCanvasElement;
+      seamObserver?.unobserve(cv);
+      if (cv.isConnected && !cv.dataset.seamRepaired) enqueueSeam(cv);
+    }
+  }, { rootMargin: "400px 0px" });
+  return seamObserver;
+}
+
+function enqueueSeam(cv: HTMLCanvasElement): void {
+  if (seamQueue.includes(cv)) return;
+  seamQueue.push(cv);
+  pumpSeam();
+}
+
+function pumpSeam(): void {
+  if (seamPumping) return;
+  seamPumping = true;
+  const step = () => {
+    const cv = seamQueue.shift();
+    if (!cv) { seamPumping = false; return; }
+    if (cv.isConnected && !cv.dataset.seamRepaired && deseaOn()) {
+      const task = seamTasks.get(cv);
+      if (task) {
+        try {
+          const before = measureSeamDetail(cv, task.parts);
+          const fixed = before.score > SEAM_BAD_SCORE ? smoothSeams(cv, task.parts) : 0;
+          cv.dataset.seamRepaired = "1";
+          jlog("seam page=" + task.pageName + " 超额 " + before.score.toFixed(2) +
+            (fixed > 0 ? " → 修复 " + fixed + " 条边界" : " 达标跳过"));
+        } catch (err) {
+          // canvas 被跨域数据污染（图床未发 CORS 头）→ 无法量测，跳过
+          jlog("seam skip page=" + task.pageName + " " + String(err).slice(0, 60));
+        }
+      }
+    }
+    idleRun(step);
+  };
+  idleRun(step);
+}
+
 function applyScramble(img: HTMLImageElement, albumId: number | string, scrambleId?: number | string) {
   // 尚未解码完成先不动（交给 onLoad）；否则会把键写死，后续再也不会还原
   if (!img.complete || img.naturalWidth === 0) return;
@@ -89,28 +152,14 @@ function applyScramble(img: HTMLImageElement, albumId: number | string, scramble
   if (img.dataset.page) canvas.dataset.page = img.dataset.page;
   img.parentElement?.insertBefore(canvas, img.nextSibling);
   img.style.display = "none";
-  // 本地修复（零流量）：逐边界量测"超额跳变"，未达标的按强度自适应加宽高斯并复测
-  if (scrambleId && !on) {
-    jlog("unscramble page=" + pageNameOf(img) + " 原图（去条纹关闭）");
-  } else if (scrambleId) {
+  // 重排已完成（上面 9ms 的 drawUnscrambled）→ 去条纹排队，等进入视口 + 主线程空闲再做
+  if (scrambleId && on) {
     const pageName = pageNameOf(img);
-    const parts = scrambleSliceCount(albumId, pageName);
-    try {
-      const t0 = performance.now();
-      const before = measureSeamDetail(canvas, parts);
-      const fixed = before.score > SEAM_BAD_SCORE ? smoothSeams(canvas, parts) : 0;
-      const after = fixed > 0 ? measureSeamDetail(canvas, parts) : before;
-      const ms = Math.round(performance.now() - t0);
-      jlog("unscramble page=" + pageName + " parts=" + parts +
-        " 条纹超额 " + before.score.toFixed(2) + "(亮度" + before.lum.toFixed(2) + "/色度" + before.chroma.toFixed(2) + ")" +
-        (fixed > 0
-          ? " → " + after.score.toFixed(2) + "(亮度" + after.lum.toFixed(2) + "/色度" + after.chroma.toFixed(2) + ") 修复" + fixed + "条边界"
-          : " 达标跳过") + " " + ms + "ms" +
-        " src=" + (img.currentSrc || img.src).split("//").slice(-1)[0].slice(0, 70));
-    } catch (err) {
-      // canvas 被跨域数据污染（图床未发 CORS 头）→ 无法量测，跳过评分与修复
-      jlog("unscramble skip page=" + pageName + " 无法量测: " + String(err).slice(0, 60));
-    }
+    seamTasks.set(canvas, { pageName, parts: scrambleSliceCount(albumId, pageName) });
+    const obs = ensureSeamObserver();
+    if (obs) obs.observe(canvas); else enqueueSeam(canvas);
+  } else if (scrambleId) {
+    jlog("unscramble page=" + pageNameOf(img) + " 原图（去条纹关闭）");
   }
 }
 
@@ -139,6 +188,8 @@ export default function ReaderPanel({
   const [chapterMetas, setChapterMetas] = useState<ChapterMeta[]>([]);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
+  /** 测速代际：关闭弹窗就 +1，让在途的测速结果作废（不再切源、不再刷新列表） */
+  const speedGenRef = useRef(0);
 
   const [mode, setMode] = useState<ReaderMode>(() => {
     const saved = localStorage.getItem(MODE_KEY);
@@ -179,13 +230,28 @@ export default function ReaderPanel({
 
   useEffect(() => { if (bookId) void refreshCached(); }, [bookId, refreshCached]);
 
-  // 弹窗打开时，系统返回键先关弹窗（子组件在父级之前注册监听，先收到事件）
+  /**
+   * 弹窗打开时系统返回键只关弹窗。
+   * 必须「只注册一次」：jm:back 按注册顺序派发，若依赖弹窗状态重新注册，
+   * 监听器会被排到父级之后 → 父级先消费 → 直接退出阅读器（真机反馈的 bug）。
+   */
+  const dialogRef = useRef({ sourceOpen: false, chapOpen: false, cacheOpen: false });
+  dialogRef.current = { sourceOpen, chapOpen, cacheOpen };
   useBackHandler(() => {
-    if (sourceOpen) { setSourceOpen(false); return; }
-    if (chapOpen) { setChapOpen(false); return; }
-    if (cacheOpen) { setCacheOpen(false); return; }
+    const d = dialogRef.current;
+    if (d.sourceOpen) { closeSourcePicker(); return; }
+    if (d.chapOpen) { setChapOpen(false); return; }
+    if (d.cacheOpen) { setCacheOpen(false); return; }
     return false;
-  }, [sourceOpen, chapOpen, cacheOpen]);
+  }, []);
+
+  // 有弹窗时给父级一个信号：不要消费返回键（缓存中心的返回监听注册得更早）
+  const anySheetOpen = sourceOpen || chapOpen || cacheOpen;
+  useEffect(() => {
+    if (!anySheetOpen) return;
+    pushSheetLock();
+    return () => popSheetLock();
+  }, [anySheetOpen]);
 
   useEffect(() => { currentRef.current = current; }, [current]);
 
@@ -423,17 +489,25 @@ export default function ReaderPanel({
   function openSourcePicker() {
     setSourceRows(buildSourceRows());
     setSourceOpen(true);
-    void runSpeedTest();
+    void runSpeedTest(++speedGenRef.current);
+  }
+
+  /** 关闭弹窗 = 用户不想换源：作废在途测速（不再切源/刷新列表） */
+  function closeSourcePicker() {
+    speedGenRef.current += 1;
+    setSourceOpen(false);
+    setTesting(false);
   }
 
   /** 阅读器内测速：实测各图源图床下载耗时，自动切到最快图源，并把结果写回弹窗列表 */
-  async function runSpeedTest() {
+  async function runSpeedTest(gen = ++speedGenRef.current) {
     if (testing) return;
     setTesting(true);
     try {
       if (!client.setting) {
         try { await client.getSetting(); } catch { /* ignore */ }
       }
+      if (gen !== speedGenRef.current) return;
       const rows = buildSourceRows();
       setSourceRows(rows.map((r) => ({ ...r })));
       // 并发探测每个图源的图床地址（只读，不改当前图源）
@@ -460,7 +534,9 @@ export default function ReaderPanel({
         pushToast("暂时无法获取图源图床", "err");
         return;
       }
+      if (gen !== speedGenRef.current) return; // 弹窗已关闭：不再测速
       const samples = await measureAll(items, 3);
+      if (gen !== speedGenRef.current) return; // 测速期间被关闭：结果作废，不切源
       // 每行写回耗时/可用性（没有样本的图源视为不可用）
       setSourceRows((list) => list.map((row) => {
         const host = hostMap.get(row.key);
@@ -725,11 +801,11 @@ export default function ReaderPanel({
   const overlays = (
     <>
       {sourceOpen && (
-        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => setSourceOpen(false)}>
+        <div className="drawer-backdrop reader-sheet-backdrop" onClick={closeSourcePicker}>
           <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>更快的源</h3>
-              <button className="ghost" onClick={() => setSourceOpen(false)}>关闭</button>
+              <button className="ghost" onClick={closeSourcePicker}>关闭</button>
             </div>
             <p className="muted">{testing ? "正在测速，自动切换到最快图源…" : "已自动选择最快图源，也可以手动点选（弹窗不会自动关闭）"}</p>
             <div className="list sheet-list">
