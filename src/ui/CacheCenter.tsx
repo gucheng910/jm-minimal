@@ -7,6 +7,7 @@ import ReaderPanel from "../Reader";
 import { pushToast } from "./toast";
 import { CloseIcon } from "./icons";
 import { SkeletonGrid } from "./SkeletonGrid";
+import { emit, on } from "../core/bus";
 
 interface Reading {
   id: number | string;
@@ -47,15 +48,13 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
   const [reading, setReading] = useState<Reading | null>(null);
 
   useEffect(() => {
-    const sync = () => setTasks(cacheList());
-    window.addEventListener("jm:caches", sync);
-    return () => window.removeEventListener("jm:caches", sync);
+    return on("jm:caches", () => setTasks(cacheList()));
   }, []);
 
   // 离线阅读时进入沉浸全屏（隐藏顶栏/底栏）
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent<boolean>("jm:immersive", { detail: Boolean(reading) }));
-    return () => { window.dispatchEvent(new CustomEvent<boolean>("jm:immersive", { detail: false })); };
+    emit("jm:immersive", Boolean(reading));
+    return () => { emit("jm:immersive", false); };
   }, [reading]);
 
   // 系统返回键：阅读中 → 任务列表；任务列表 → 关闭缓存中心

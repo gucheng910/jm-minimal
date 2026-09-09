@@ -10,6 +10,7 @@ import { BookIcon, CheckInIcon, ClockIcon, CloseIcon, DownloadIcon, GridIcon, Ho
 import { authService } from "./state/auth";
 import ContentView from "./ContentView";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { emit, on } from "./core/bus";
 import ToastHost, { pushToast } from "./ui/toast";
 import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
@@ -111,21 +112,16 @@ export default function App() {
   const lastBackRef = useRef(0);
 
   useEffect(() => {
-    const handler = (ev: Event) => setImmersive(Boolean((ev as CustomEvent<boolean>).detail));
-    window.addEventListener("jm:immersive", handler);
-    return () => window.removeEventListener("jm:immersive", handler);
+    return on("jm:immersive", (v) => setImmersive(Boolean(v)));
   }, []);
 
   useEffect(() => {
-    const handler = (ev: Event) => {
-      const detail = (ev as CustomEvent<string>).detail;
+    return on("jm:goto", (detail) => {
       if (detail === "latest" || detail === "ranking") {
         setTab("categories");
-        setTimeout(() => window.dispatchEvent(new CustomEvent<string>("jm:nav", { detail })), 150);
+        setTimeout(() => emit("jm:nav", detail), 150);
       }
-    };
-    window.addEventListener("jm:goto", handler);
-    return () => window.removeEventListener("jm:goto", handler);
+    });
   }, []);
 
   useEffect(() => { sessionStore.lang = "CN"; }, []);
@@ -200,8 +196,7 @@ export default function App() {
     const handler = () => {
       setState((s) => ({ ...s, apiBase: client.apiBase || sessionStore.apiUrl || s.apiBase }));
     };
-    window.addEventListener("jm:lineChanged", handler);
-    return () => window.removeEventListener("jm:lineChanged", handler);
+    return on("jm:lineChanged", handler);
   }, []);
 
   // 购买成功后刷新会员余额（已记住账号时）
@@ -210,16 +205,15 @@ export default function App() {
       if (!sessionStore.account) return;
       authService.reloginFromStoredAccount().then((info) => { if (info) setMember(info); }).catch(() => { /* ignore */ });
     };
-    window.addEventListener("jm:coinChanged", handler);
-    return () => window.removeEventListener("jm:coinChanged", handler);
+    return on("jm:coinChanged", handler);
   }, []);
 
   useEffect(() => {
     const sub = CapApp.addListener("backButton", async () => {
       console.log("jm back native pressed");
-      const evt = new CustomEvent<{ consumed: boolean }>("jm:back", { detail: { consumed: false } });
-      window.dispatchEvent(evt);
-      if (evt.detail.consumed) return;
+      const back = { consumed: false };
+      emit("jm:back", back);
+      if (back.consumed) return;
       if (tab !== "home") {
         setTab("home");
         window.scrollTo({ top: 0 });
@@ -426,7 +420,7 @@ export default function App() {
   function navTo(action: string) {
     setTab(action);
     window.scrollTo({ top: 0 });
-    setTimeout(() => window.dispatchEvent(new CustomEvent<string>("jm:nav", { detail: action })), 80);
+    setTimeout(() => emit("jm:nav", action), 80);
   }
 
   function goHome() {
@@ -436,7 +430,7 @@ export default function App() {
     }
     // 已在首页：回到顶部并通知首页实例刷新推荐内容
     window.scrollTo({ top: 0 });
-    window.dispatchEvent(new CustomEvent("jm:refreshHome"));
+    emit("jm:refreshHome");
   }
 
   function openSourcePanel() {
@@ -479,8 +473,7 @@ export default function App() {
   // 全局响应「去 DNS 配置」点击
   useEffect(() => {
     const h = () => openMemberAndDns();
-    window.addEventListener("jm:gotoDns", h);
-    return () => window.removeEventListener("jm:gotoDns", h);
+    return on("jm:gotoDns", h);
   }, []);
 
   return (
@@ -718,7 +711,7 @@ export default function App() {
             setLibPanel(null);
             setTab("home");
             window.scrollTo({ top: 0 });
-            setTimeout(() => window.dispatchEvent(new CustomEvent("jm:openAid", { detail: String(aid) })), 120);
+            setTimeout(() => emit("jm:openAid", String(aid)), 120);
           }}
         />
       )}

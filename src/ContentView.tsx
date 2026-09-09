@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useBackHandler } from "./hooks/useBackHandler";
 import { navTransition } from "./core/viewTransition";
+import { emit, on } from "./core/bus";
 import type { FormEvent } from "react";
 import { client } from "./core/api";
 import { downloadAlbum, isAlbumCached } from "./core/offline";
@@ -141,7 +142,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent<boolean>("jm:immersive", { detail: mode === "reader" }));
+    emit("jm:immersive", mode === "reader");
   }, [mode]);
 
   // 搜索页在前台时锁住底层详情页的滚动（搜索页自带滚动容器）
@@ -155,8 +156,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [settingTick, setSettingTick] = useState(0);
   useEffect(() => {
     const h = () => setSettingTick((t) => t + 1);
-    window.addEventListener("jm:setting", h);
-    return () => window.removeEventListener("jm:setting", h);
+    return on("jm:setting", h);
   }, []);
 
   // 记录离开列表（进入详情/周榜）前的滚动位置，返回时恢复，避免找漫翻页丢失
@@ -330,8 +330,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }, [pageMode]);
 
   useEffect(() => {
-    const handler = (ev: Event) => {
-      const action = (ev as CustomEvent<string>).detail;
+    const handler = (action: string) => {
       if (action === "categories") {
         // 分类页默认停留在“最新A漫”并自动加载一次列表（先确保 apiBase 就绪）
         (async () => {
@@ -353,8 +352,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         setTimeout(() => document.querySelector<HTMLInputElement>(".searchbar input")?.focus(), 120);
       }
     };
-    window.addEventListener("jm:nav", handler);
-    return () => window.removeEventListener("jm:nav", handler);
+    return on("jm:nav", handler);
   }, []);
 
   useEffect(() => {
@@ -369,18 +367,15 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       window.scrollTo({ top: 0 });
       loadRandom();
     };
-    window.addEventListener("jm:refreshHome", handler);
-    return () => window.removeEventListener("jm:refreshHome", handler);
+    return on("jm:refreshHome", handler);
   }, [pageMode]);
 
   useEffect(() => {
-    const handler = (ev: Event) => {
-      const aid = String((ev as CustomEvent).detail || "");
+    return on("jm:openAid", (raw) => {
+      const aid = String(raw || "");
       if (!aid || pageMode !== "home") return;
       openDetail({ id: aid } as AlbumSummary);
-    };
-    window.addEventListener("jm:openAid", handler);
-    return () => window.removeEventListener("jm:openAid", handler);
+    });
   }, [pageMode]);
 
   useEffect(() => {
@@ -1027,7 +1022,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     if (fresh && !parsePaid(fresh)) {
       applyDetail(fresh);
       pushToast("购买成功，已解锁，可立即阅读", "ok");
-      try { window.dispatchEvent(new CustomEvent("jm:coinChanged")); } catch { /* ignore */ }
+      emit("jm:coinChanged");
     } else {
       if (fresh) applyDetail(fresh);
       pushToast(rawMsg || "已提交购买，请稍后刷新确认", "info");
@@ -1051,7 +1046,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   function gotoPage(action: string) {
-    window.dispatchEvent(new CustomEvent<string>("jm:goto", { detail: action }));
+    emit("jm:goto", action);
   }
 
   if (pageMode === "search") {
@@ -1167,7 +1162,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           {error}
           <div className="row" style={{ marginTop: 8 }}>
             <button className="ghost" disabled={busy} onClick={retryHomeFeed}>重新加载推荐</button>
-            <button className="ghost" onClick={() => window.dispatchEvent(new CustomEvent("jm:gotoDns"))}>去配 DNS</button>
+            <button className="ghost" onClick={() => emit("jm:gotoDns")}>去配 DNS</button>
           </div>
         </div>
       )}

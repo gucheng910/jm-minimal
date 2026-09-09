@@ -4,6 +4,7 @@ import { API_PATHS } from "./endpoints";
 import { measureAll } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
 import { getMemCache, makeKey, setMemCache } from "./requestCache";
+import { emit } from "./bus";
 import { sessionStore } from "./storage";
 import { registerDnsHosts } from "./dnsClean";
 import type {
@@ -96,7 +97,7 @@ export class JMClient {
     sessionStore.apiUrl = this.apiBase;
     // 通知外壳同步“当前线路”显示（自动测速/手动切换都走这里）
     if (typeof window !== "undefined") {
-      try { window.dispatchEvent(new CustomEvent("jm:lineChanged")); } catch { /* ignore */ }
+      emit("jm:lineChanged");
     }
   }
 
@@ -403,7 +404,7 @@ export class JMClient {
     registerDnsHosts([cfg.img_host as string | undefined]);
     // 图床配置就绪通知：封面等依赖 img_host 的渲染可据此刷新
     if (typeof window !== "undefined") {
-      try { window.dispatchEvent(new CustomEvent("jm:setting")); } catch { /* ignore */ }
+      emit("jm:setting");
     }
     return cfg;
   }

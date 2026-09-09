@@ -1,4 +1,5 @@
 import { md5Hex } from "./crypto";
+import { emit } from "./bus";
 
 export function scrambleSliceCount(albumId: number | string, pageName: string): number {
   const idStr = String(albumId);
@@ -200,7 +201,7 @@ export function setDeseam(on: boolean): void {
   seamEnabled = on;
   try { localStorage.setItem(LS_ENABLED, on ? "1" : "0"); } catch { /* ignore */ }
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent<boolean>("jm:deseam", { detail: on }));
+    emit("jm:deseam", on);
   }
 }
 

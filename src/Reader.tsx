@@ -7,6 +7,7 @@ import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
 import type { ReadPage } from "./core/types";
+import { on } from "./core/bus";
 
 type ReaderMode = "continuous" | "single";
 
@@ -128,9 +129,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
   const scrubRaf = useRef(0);
 
   useEffect(() => {
-    const sync = () => setTask(cacheList().find((t) => t.id === String(albumId)));
-    window.addEventListener("jm:caches", sync);
-    return () => window.removeEventListener("jm:caches", sync);
+    return on("jm:caches", () => setTask(cacheList().find((t) => t.id === String(albumId))));
   }, [albumId]);
 
   useEffect(() => { currentRef.current = current; }, [current]);

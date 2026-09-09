@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { pushToast } from "./toast";
 import { client } from "../core/api";
 import { isDesktop, jmDns, dnsCleanPrefEnabled, setDnsCleanPref, type DnsCleanState } from "../core/dnsClean";
+import { on } from "../core/bus";
 
 const DOH_SERVERS = [
   { name: "阿里", dot: "dot.alidns.com" },
@@ -58,8 +59,7 @@ export default function DnsGuide() {
         document.getElementById("dns-guide-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
       }, 150);
     };
-    window.addEventListener("jm:gotoDns", h);
-    return () => window.removeEventListener("jm:gotoDns", h);
+    return on("jm:gotoDns", h);
   }, []);
 
   const runProbe = useCallback(async () => {

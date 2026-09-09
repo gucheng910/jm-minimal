@@ -1,5 +1,6 @@
 // 缓存任务中心：队列化下载（暂停/继续/删除/失败提示），退出 App 即自动停止（无需额外处理）。
 import { cacheCover, cacheName, cachePage, clearAllAlbumCaches, deleteAlbumCache } from "./offline";
+import { emit } from "./bus";
 import type { ReadPage } from "./types";
 
 export type CacheStatus = "queued" | "running" | "paused" | "failed" | "done";
@@ -41,8 +42,8 @@ function save() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(tasks)); } catch { /* ignore */ }
 }
 
-function emit(progress = false) {
-  window.dispatchEvent(new CustomEvent("jm:caches", { detail: { progress } }));
+function notify(progress = false) {
+  emit("jm:caches", { progress });
 }
 
 export function cacheList(): CacheTaskMeta[] {
@@ -66,7 +67,7 @@ export async function enqueueCache(meta: {
   const id = String(meta.id);
   const existing = tasks.find((t) => t.id === id);
   if (existing && (existing.status === "queued" || existing.status === "running")) {
-    emit();
+    notify();
     return;
   }
   // 已完成的旧任务若再次缓存（可能换了图源 URL），先清空旧缓存再排队
@@ -89,7 +90,7 @@ export async function enqueueCache(meta: {
   tasks = tasks.filter((t) => t.id !== id);
   tasks.unshift(entry);
   save();
-  emit();
+  notify();
   ensureLoop();
 }
 
@@ -99,7 +100,7 @@ export function pauseCache(id: number | string): void {
     t.status = "paused";
     t.updatedAt = Date.now();
     save();
-    emit();
+    notify();
   }
 }
 
@@ -110,7 +111,7 @@ export function resumeCache(id: number | string): void {
     t.error = "";
     t.updatedAt = Date.now();
     save();
-    emit();
+    notify();
     ensureLoop();
   }
 }
@@ -120,7 +121,7 @@ export async function removeCache(id: number | string): Promise<void> {
   const sid = String(id);
   tasks = tasks.filter((t) => t.id !== sid);
   save();
-  emit();
+  notify();
   loopGen += 1; // 打断进行中的任务
   await deleteAlbumCache(sid);
 }
@@ -136,7 +137,7 @@ export async function reDownloadCache(id: number | string): Promise<void> {
   t.error = "";
   t.updatedAt = Date.now();
   save();
-  emit();
+  notify();
   ensureLoop();
 }
 
@@ -145,7 +146,7 @@ export async function clearAllCacheTasks(): Promise<number> {
   loopGen += 1; // 打断进行中任务
   tasks = [];
   save();
-  emit();
+  notify();
   return clearAllAlbumCaches();
 }
 
@@ -163,7 +164,7 @@ async function runLoop(): Promise<void> {
     t.status = "running";
     t.error = "";
     save();
-    emit();
+    notify();
     let ok = 0;
     let fail = 0;
     const sid = t.id;
@@ -178,12 +179,12 @@ async function runLoop(): Promise<void> {
       t.updatedAt = Date.now();
       // 进度持久化节流：每满 16 页落盘一次（中断恢复以重新扫描为准，无需逐页写）
       if (ok % 16 < BATCH || fail > 0) save();
-      emit(true);
+      notify(true);
     }
     if (loopGen !== gen) break;
     if ((t.status as string) === "paused") {
       save();
-      emit();
+      notify();
       break;
     }
     if ((t.status as string) !== "paused") {
@@ -198,7 +199,7 @@ async function runLoop(): Promise<void> {
         t.error = fail > 0 ? "有 " + fail + " 页缓存失败，可重试" : "缓存未完成";
       }
       save();
-      emit();
+      notify();
     }
   }
 }
