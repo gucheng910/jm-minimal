@@ -252,6 +252,8 @@ export async function removeCache(id: number | string): Promise<void> {
   await deleteChapter(sid);
   const rest = await listChapters(bookId);
   if (rest.length === 0) await deleteBook(bookId);
+  // 兜底：封面写入/在途下载可能与删除竞态，稍后再删一次（空 cache 虽不影响判定，但没必要留）
+  setTimeout(() => { void deleteAlbumCache(sid); }, 2000);
 }
 
 /** 重下：补齐书级元数据（旧缓存没有作者/标签/简介）→ 清空该话图片缓存 → 重新排队 */
@@ -334,7 +336,10 @@ async function runLoop(): Promise<void> {
       if (fail === 0 && ok >= pages.length) {
         t.status = "done";
         t.error = "";
-        if (t.cover) { await cacheCover(sid, t.cover).catch(() => { /* ignore */ }); }
+        // 任务可能已被删除（用户边下边删）：此时不要再写封面，否则会重建一个空 cache
+        if (t.cover && tasks.some((x) => x.id === sid)) {
+          await cacheCover(sid, t.cover).catch(() => { /* ignore */ });
+        }
       } else {
         t.status = "failed";
         t.error = fail > 0 ? "有 " + fail + " 页缓存失败，可重试" : "缓存未完成";
