@@ -70,13 +70,19 @@ async function main() {
       E2E_PORT: String(Number(PORT) + 3)
     });
 
+    console.log("\n==== 阅读器内弹窗（图源/换话/选话缓存）====");
+    const reader = await runNode("harness.mjs", {
+      DRIVER: "driver-reader.js",
+      E2E_PORT: String(Number(PORT) + 4)
+    });
+
     let ptrCode = 0;
     if (!process.env.E2E_SKIP_PTR) {
       console.log("\n==== 下拉刷新（CDP 原生触摸）====");
       ptrCode = await runNode("ptr.mjs", { E2E_PORT: String(Number(PORT) + 1) });
     }
-    if (nav || auth || cache || hist || ptrCode) process.exitCode = 1;
-    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
+    if (nav || auth || cache || hist || reader || ptrCode) process.exitCode = 1;
+    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
   } finally {
     if (server) { try { server.kill(); } catch (e) { /* 忽略 */ } }
   }

@@ -126,6 +126,22 @@ export async function cachedCoverUrl(id: number | string, coverUrl: string): Pro
   return "";
 }
 
+/**
+ * 一次性扫描所有离线 cache 名 → 已缓存的话 id 集合。
+ * 比逐话 cache.keys() 快得多（缓存中心/阅读器弹窗展示「哪些话已缓存」用）。
+ */
+export async function scanCachedChapters(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!("caches" in window)) return ids;
+  try {
+    for (const name of await caches.keys()) {
+      const prefix = cacheName("");
+      if (name.startsWith(prefix)) ids.add(name.slice(prefix.length));
+    }
+  } catch { /* ignore */ }
+  return ids;
+}
+
 export async function deleteAlbumCache(id: number | string): Promise<void> {
   if (!("caches" in window)) return;
   try { await caches.delete(cacheName(id)); } catch { /* ignore */ }

@@ -24,6 +24,7 @@ EDGE_PATH="C:/.../chrome.exe" npm run e2e     # 换浏览器（Edge / Chromium �
 | `driver-auth.js` | 登录态一致性：会员页 vs 详情页（`?e2eauth=1` 种过期会话） |
 | `driver-cache.js` | 缓存中心/离线详情页：同书多话合并成一行、目录缓存徽标、未缓存话联网读、返回后目录仍在、已缓存话离线读（`?e2ecache=1` 预置 IDB + Cache API 数据） |
 | `driver-history.js` | 连载详情补全书级作者/简介、足迹按「书」合并成一条、点足迹回到最后阅读的一话 |
+| `driver-reader.js` | 阅读器内弹窗：「更快的源」自动测速且弹窗不关闭、换话（标题/请求/按钮同步）、选话缓存（默认只选当前话 + 全选/反选 + 已缓存徽标 + 确认入队） |
 | `harness.mjs` | CDP 外壳：起浏览器、注入桩、执行 driver、打印结构化日志 |
 | `ptr.mjs` | 下拉刷新专项：用 CDP 原生触摸（合成 DOM TouchEvent 在无触摸环境下 React 不挂监听） |
 | `run.mjs` | 编排：起 dev server → 跑全部用例 → 关 server |

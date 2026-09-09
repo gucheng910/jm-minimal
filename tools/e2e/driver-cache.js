@@ -6,7 +6,7 @@
   const q = (s) => document.querySelector(s);
   const qa = (s) => Array.from(document.querySelectorAll(s));
   const txt = (el) => (el ? (el.textContent || "").trim() : "");
-  const waitFor = async (sel, timeout = 10000) => {
+  const waitFor = async (sel, timeout = 15000) => {
     const t0 = Date.now();
     while (Date.now() - t0 < timeout) { const el = q(sel); if (el) return el; await sleep(50); }
     throw new Error("waitFor timeout: " + sel + " / body=" + document.body.innerText.slice(0, 200));
@@ -92,6 +92,26 @@
     // 离线详情页阅读同样记足迹（按书合并）
     history: localStorage.getItem("jmclient.history")
   });
+
+  // ---- 离线阅读器里也能换话：弹窗标出哪些话已缓存 ----
+  // 工具栏的换话按钮文字 = 当前话名，等它就位（阅读器数据就绪后才渲染）
+  let chapBtn = null;
+  for (let i = 0; i < 60 && !chapBtn; i++) {
+    chapBtn = qa(".reader-toolbar button").find((b) => /第2话/.test(txt(b))) || null;
+    if (!chapBtn) await sleep(200);
+  }
+  if (!chapBtn) throw new Error("离线阅读器里没有换话按钮：" + qa(".reader-toolbar button").map(txt).join(","));
+  {
+    chapBtn.click();
+    await waitFor(".reader-sheet");
+    await sleep(400);
+    log.push({
+      step: "offline-chapter-sheet",
+      rows: qa(".reader-sheet .sheet-row").map((r) => ({ title: txt(r.querySelector(".title")), meta: txt(r.querySelector(".muted")) }))
+    });
+    qa(".reader-sheet button").find((b) => txt(b) === "关闭").click();
+    await sleep(400);
+  }
 
   // ---- 系统返回键：回到离线详情页，再返回回到缓存列表 ----
   back();

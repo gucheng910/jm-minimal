@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
 import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
-import { releaseOfflinePageUrls } from "./core/offline";
+import { releaseOfflinePageUrls, scanCachedChapters, toOfflinePageUrls } from "./core/offline";
+import { chapterLabel, getChapter, listChapters, type BookChapter, type ChapterMeta } from "./core/offlineMeta";
+import { saveHistory } from "./core/history";
+import { useBackHandler } from "./hooks/useBackHandler";
 import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
@@ -111,7 +114,32 @@ function applyScramble(img: HTMLImageElement, albumId: number | string, scramble
   }
 }
 
-export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack, meta, bookMeta, chapterName, chapterSort, offline = false }: Props) {
+export default function ReaderPanel({
+  albumId: albumIdProp, pages: pagesProp, title: titleProp, scrambleId: scrambleIdProp,
+  onBack, meta, bookMeta, chapterName, chapterSort, offline = false
+}: Props) {
+  // —— 阅读器内换话：本组件自己维护「当前话」覆盖值，不打断父级的页面栈 ——
+  const [override, setOverride] = useState<{ id: string; pages: ReadPage[]; scrambleId?: number | string; label: string; sort?: number } | null>(null);
+  const albumId = override ? override.id : albumIdProp;
+  const pages = override ? override.pages : pagesProp;
+  const scrambleId = override ? override.scrambleId : scrambleIdProp;
+  const title = override ? [bookMeta?.name, override.label].filter(Boolean).join(" ") : titleProp;
+  /** 连载目录（多话才有；单本为空数组 → 不显示换话/多选缓存） */
+  const chapters = useMemo(() => (bookMeta && bookMeta.chapters.length > 1 ? bookMeta.chapters : []), [bookMeta]);
+  const curChapter = chapters.find((c) => String(c.id) === String(albumId));
+  const curLabel = override ? override.label : (chapterLabel(curChapter) || chapterName || "");
+  const curSort = override ? override.sort : (Number(chapterSort) || Number(curChapter?.sort) || undefined);
+  // —— 弹窗状态 ——
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceRows, setSourceRows] = useState<Array<{ key: string; title: string; host?: string; ms?: number; ok?: boolean }>>([]);
+  const [chapOpen, setChapOpen] = useState(false);
+  const [cacheOpen, setCacheOpen] = useState(false);
+  const [cacheSel, setCacheSel] = useState<Set<string>>(new Set());
+  const [cachedIds, setCachedIds] = useState<Set<string>>(new Set());
+  const [chapterMetas, setChapterMetas] = useState<ChapterMeta[]>([]);
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const [switchBusy, setSwitchBusy] = useState(false);
+
   const [mode, setMode] = useState<ReaderMode>(() => {
     const saved = localStorage.getItem(MODE_KEY);
     return saved === "single" ? "single" : "continuous";
@@ -137,6 +165,22 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
   useEffect(() => {
     return on("jm:caches", () => setTask(cacheList().find((t) => t.id === String(albumId))));
   }, [albumId]);
+
+  /** 已缓存话集合 + 每话缓存记录（弹窗里显示「已缓存 · N 页」，与详情页一致） */
+  const refreshCached = useCallback(async () => {
+    setCachedIds(await scanCachedChapters());
+    if (bookMeta) setChapterMetas(await listChapters(bookMeta.bookId));
+  }, [bookMeta]);
+
+  useEffect(() => { if (bookMeta) void refreshCached(); }, [bookMeta, refreshCached]);
+
+  // 弹窗打开时，系统返回键先关弹窗（子组件在父级之前注册监听，先收到事件）
+  useBackHandler(() => {
+    if (sourceOpen) { setSourceOpen(false); return; }
+    if (chapOpen) { setChapOpen(false); return; }
+    if (cacheOpen) { setCacheOpen(false); return; }
+    return false;
+  }, [sourceOpen, chapOpen, cacheOpen]);
 
   useEffect(() => { currentRef.current = current; }, [current]);
 
@@ -345,6 +389,17 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     return () => window.removeEventListener("keydown", onKey);
   }, [current, jumpTo]);
 
+  /** 图源候选：快速通道 + 官方图源列表 */
+  function buildSourceRows(): Array<{ key: string; title: string }> {
+    const rows: Array<{ key: string; title: string }> = [{ key: "0", title: "快速通道" }];
+    for (const s of client.setting?.app_shunts || []) {
+      const k = String(s.key ?? "");
+      if (k && !rows.some((x) => x.key === k)) rows.push({ key: k, title: String(s.title || k) });
+    }
+    return rows;
+  }
+
+  /** 手动选源：弹窗保持打开，测速结果与当前选中项都在弹窗里看 */
   async function changeSource(key: string) {
     client.setImageShunt(key);
     try {
@@ -359,35 +414,37 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     }
   }
 
-  /** 阅读器内测速：实测当前漫画封面对每个图源图床的下载耗时，自动切换到最快图源 */
-  async function speedTestAndSwitch() {
+  /** 「更快的源」：立即弹窗并自动开始测速；测速完成后弹窗不关闭 */
+  function openSourcePicker() {
+    setSourceRows(buildSourceRows());
+    setSourceOpen(true);
+    void runSpeedTest();
+  }
+
+  /** 阅读器内测速：实测各图源图床下载耗时，自动切到最快图源，并把结果写回弹窗列表 */
+  async function runSpeedTest() {
     if (testing) return;
     setTesting(true);
     try {
       if (!client.setting) {
         try { await client.getSetting(); } catch { /* ignore */ }
       }
-      const shunts = client.setting?.app_shunts || [];
-      const keys: Array<{ key: string; title: string }> = [{ key: "0", title: "快速通道" }];
-      for (const s of shunts) {
-        const k = String(s.key ?? "");
-        if (k && !keys.some((x) => x.key === k)) keys.push({ key: k, title: String(s.title || k) });
-      }
+      const rows = buildSourceRows();
+      setSourceRows(rows.map((r) => ({ ...r })));
       // 并发探测每个图源的图床地址（只读，不改当前图源）
-      const hostMap = new Map<string, string>();
-      const probes = await Promise.all(keys.map(async (k) => {
+      const probes = await Promise.all(rows.map(async (k) => {
         let host = "";
         try { host = await client.probeImageHost(k.key); } catch { host = ""; }
         if (!host && k.key === "0") host = "cn-ms.jmapiproxy2.cc";
-        host = host.replace(/^https?:\/\//, "");
-        return { key: k.key, host };
+        return { key: k.key, host: host.replace(/^https?:\/\//, "") };
       }));
+      const hostMap = new Map<string, string>();
       const items: Array<{ label: string; url: string; noCors: boolean }> = [];
       const stamp = String(Date.now());
       for (const p of probes) {
         if (!p.host) continue;
         hostMap.set(p.key, p.host);
-        const label = keys.find((x) => x.key === p.key)?.title || p.key;
+        const label = rows.find((x) => x.key === p.key)?.title || p.key;
         items.push({
           label: label + "（" + p.host + "）",
           url: "https://" + p.host + "/media/albums/" + String(albumId) + "_3x4.jpg?v=" + stamp,
@@ -399,17 +456,23 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
         return;
       }
       const samples = await measureAll(items, 3);
+      // 每行写回耗时/可用性（没有样本的图源视为不可用）
+      setSourceRows((list) => list.map((row) => {
+        const host = hostMap.get(row.key);
+        const s = host ? samples.find((x) => x.url.includes(host)) : undefined;
+        return { ...row, host, ms: s ? s.ms : undefined, ok: s ? s.ok : false };
+      }));
       const best = samples.find((s) => s.ok);
       if (!best) {
         pushToast("所有图源均测速失败，请检查网络后重试", "err");
         return;
       }
       const bestHost = best.url.replace(/^https?:\/\//, "").split("/")[0];
-      let bestKey = keys[0].key;
+      let bestKey = rows[0].key;
       for (const [k, h] of hostMap) {
         if (h === bestHost) { bestKey = k; break; }
       }
-      const bestTitle = keys.find((x) => x.key === bestKey)?.title || "图源";
+      const bestTitle = rows.find((x) => x.key === bestKey)?.title || "图源";
       client.setImageShunt(bestKey);
       const r = await client.getRead(albumId);
       if (r) {
@@ -429,27 +492,138 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
     onBack();
   }
 
-  async function handleCache() {
-    if (!pages.length) return;
-    if (task && (task.status === "queued" || task.status === "running")) {
-      pushToast("该作品已在缓存队列中", "info");
-      return;
+  /** 取某话页列表：当前话用内存数据（离线 blob 除外）→ IDB → 网络 */
+  async function resolvePages(id: string): Promise<{ pages: ReadPage[]; scrambleId?: number | string } | null> {
+    if (id === String(albumId) && pages.length > 0 && !String(pages[0].image || "").startsWith("blob:")) {
+      return { pages, scrambleId };
     }
-    if (task && task.status === "done") return;
+    const rec = await getChapter(id);
+    if (rec && rec.pages.length > 0) return { pages: rec.pages, scrambleId: rec.scrambleId };
+    if (offline) return null;
+    const r = await client.getRead(id);
+    if (!r || !Array.isArray(r.images) || r.images.length === 0) return null;
+    return { pages: r.images, scrambleId: r.scramble_id };
+  }
+
+  function recordHistory(id: string, label: string, sort?: number) {
+    saveHistory({
+      id,
+      bookId: bookMeta?.bookId || id,
+      name: bookMeta?.name || title,
+      author: bookMeta?.author.join("/") || meta?.author,
+      description: bookMeta?.description,
+      chapterName: label,
+      sort,
+      chapters: chapters.length > 1 ? chapters.length : undefined,
+      lastReadAt: Date.now()
+    });
+  }
+
+  /** 阅读器内换话：离线/已缓存话走本地，其余走网络 */
+  async function switchToChapter(c: BookChapter) {
+    if (switchBusy) return;
+    const id = String(c.id);
+    const label = chapterLabel(c) || ("#" + id);
+    if (id === String(albumId)) { setChapOpen(false); return; }
+    setSwitchBusy(true);
+    try {
+      let next: { pages: ReadPage[]; scrambleId?: number | string } | null = null;
+      if (offline || cachedIds.has(id)) {
+        const rec = await getChapter(id);
+        if (rec && rec.pages.length > 0) next = { pages: await toOfflinePageUrls(id, rec.pages), scrambleId: rec.scrambleId };
+      }
+      if (!next && offline) { pushToast("该话未缓存，无法离线阅读", "err"); return; }
+      if (!next) next = await resolvePages(id);
+      if (!next) { pushToast("该话暂无可用图片（可能需要购买或登录）", "err"); return; }
+      setOverride({ id, pages: next.pages, scrambleId: next.scrambleId, label, sort: Number(c.sort) || undefined });
+      setCurrent(1);
+      setJumpInput("1");
+      window.scrollTo(0, 0);
+      recordHistory(id, label, Number(c.sort) || undefined);
+      setChapOpen(false);
+    } catch (err) {
+      pushToast("切换失败：" + String(err).replace(/^Error: /, "").slice(0, 80), "err");
+    } finally {
+      setSwitchBusy(false);
+    }
+  }
+
+  /** 缓存入口：单本直接缓存；多话弹窗选章节（默认只选中当前话） */
+  function openCacheDialog() {
+    if (!pages.length) return;
+    if (chapters.length <= 1) { void enqueueOne(String(albumId)); return; }
+    setCacheSel(new Set([String(albumId)]));
+    void refreshCached();
+    setCacheOpen(true);
+  }
+
+  /** 把一话加入缓存队列；返回是否真的入队 */
+  async function enqueueOne(id: string, label?: string, sort?: number): Promise<boolean> {
+    const t = cacheList().find((x) => x.id === id);
+    if (t && (t.status === "queued" || t.status === "running")) { pushToast("该话已在缓存队列中", "info"); return false; }
+    if (t && t.status === "done") { pushToast("该话已缓存", "info"); return false; }
+    const resolved = await resolvePages(id);
+    if (!resolved || resolved.pages.length === 0) { pushToast("该话暂无可用图片，无法缓存", "err"); return false; }
     await enqueueCache({
-      id: albumId,
+      id,
       bookId: bookMeta?.bookId,
       title: bookMeta?.name || title,
-      chapterName,
-      sort: chapterSort,
+      chapterName: label ?? curLabel,
+      sort: sort ?? curSort,
       author: meta?.author,
       category: meta?.category,
       cover: meta?.cover,
-      scrambleId,
-      pages,
+      scrambleId: resolved.scrambleId,
+      pages: resolved.pages,
       bookMeta
     });
-    pushToast("已加入缓存队列", "ok");
+    return true;
+  }
+
+  /** 弹窗确认：逐话入队（已缓存的话在弹窗里不可选） */
+  async function confirmCache() {
+    if (cacheBusy) return;
+    const picked = chapters.filter((c) => cacheSel.has(String(c.id)));
+    if (picked.length === 0) { pushToast("请至少选择一话", "info"); return; }
+    setCacheBusy(true);
+    let ok = 0;
+    let fail = 0;
+    try {
+      for (const c of picked) {
+        const done = await enqueueOne(String(c.id), chapterLabel(c), Number(c.sort) || undefined).catch(() => false);
+        if (done) ok += 1; else fail += 1;
+      }
+      pushToast(fail === 0 ? "已加入缓存队列（" + ok + " 话）" : "已加入 " + ok + " 话，" + fail + " 话未能加入", fail === 0 ? "ok" : "err");
+      setCacheOpen(false);
+    } finally {
+      setCacheBusy(false);
+    }
+  }
+
+  function toggleCacheSel(id: string) {
+    setCacheSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  /** 全选：只选可选中的（已缓存的话跳过） */
+  function selectAllChapters() {
+    setCacheSel(new Set(chapters.filter((c) => !cachedIds.has(String(c.id))).map((c) => String(c.id))));
+  }
+
+  /** 反选：在可选中的范围内取反 */
+  function invertChapters() {
+    setCacheSel((prev) => {
+      const next = new Set<string>();
+      for (const c of chapters) {
+        const id = String(c.id);
+        if (cachedIds.has(id)) continue;
+        if (!prev.has(id)) next.add(id);
+      }
+      return next;
+    });
   }
 
   function pageSrc(p: ReadPage): string {
@@ -496,7 +670,12 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
       <input className="page-input mono-num" value={jumpInput} onChange={(e) => setJumpInput(e.target.value)} inputMode="numeric" onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }} />
       <span className="muted mono-num">/{total}</span>
       <button onClick={() => setMode(mode === "continuous" ? "single" : "continuous")}>{mode === "continuous" ? "切单页" : "切连续"}</button>
-      {!offline && <button disabled={testing} onClick={speedTestAndSwitch}>{testing ? "测速中…" : "测速切换"}</button>}
+      {!offline && <button disabled={testing} onClick={openSourcePicker} title="测速并选择图源">{testing ? "测速中…" : "更快的源"}</button>}
+      {chapters.length > 1 && (
+        <button onClick={() => { void refreshCached(); setChapOpen(true); }} title="切换话数">
+          {switchBusy ? "切换中…" : (curLabel || "换话")}
+        </button>
+      )}
       {!offline && (
         <button
           className={deseam ? "btn-deseam on" : ""}
@@ -506,16 +685,125 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
           {deseam ? "去条纹 ✓" : "去条纹"}
         </button>
       )}
-      {!offline && (
-        <select className="source-select" value={client.imageShunt} onChange={(e) => changeSource(e.target.value)}>
-          <option value="0">快速通道</option>
-          {(client.setting?.app_shunts || []).map((s) => <option key={String(s.key)} value={String(s.key)}>{String(s.title)}</option>)}
-        </select>
-      )}
-      <button className={task && task.status === "done" ? "btn-cached" : ""} disabled={Boolean(task && (task.status === "queued" || task.status === "running" || task.status === "done"))} onClick={handleCache}>
-        {task && task.status === "done" ? "已缓存" : task && (task.status === "queued" || task.status === "running") ? <span className="mono-num">{"缓存中 " + task.done + "/" + task.total}</span> : task && task.status === "failed" ? "重新缓存" : "缓存"}
+      <button
+        disabled={!pages.length || Boolean(task && (task.status === "queued" || task.status === "running"))}
+        onClick={openCacheDialog}
+        title={chapters.length > 1 ? "选择要缓存的话数" : "缓存本话"}
+      >
+        {task && (task.status === "queued" || task.status === "running")
+          ? <span className="mono-num">{"缓存中 " + task.done + "/" + task.total}</span>
+          : "缓存"}
       </button>
     </div>
+  );
+
+  /** 阅读器内弹窗（图源 / 换话 / 选话缓存）：底部抽屉，点遮罩或系统返回键关闭 */
+  const overlays = (
+    <>
+      {sourceOpen && (
+        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => setSourceOpen(false)}>
+          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-head">
+              <h3>更快的源</h3>
+              <button className="ghost" onClick={() => setSourceOpen(false)}>关闭</button>
+            </div>
+            <p className="muted">{testing ? "正在测速，自动切换到最快图源…" : "已自动选择最快图源，也可以手动点选（弹窗不会自动关闭）"}</p>
+            <div className="list sheet-list">
+              {sourceRows.map((s) => {
+                const active = String(client.imageShunt) === s.key;
+                return (
+                  <button key={s.key} className={"list-item sheet-row" + (active ? " active" : "")} onClick={() => { void changeSource(s.key); }}>
+                    <div>
+                      <div className="title">{s.title}{active ? "（当前）" : ""}</div>
+                      <div className="muted">{[s.host, s.ms != null ? s.ms + " ms" : (testing ? "测速中…" : ""), s.ok === false && !testing ? "不可用" : ""].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <span className={"badge" + (active ? " ok" : "")}>{active ? "✓" : ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="row sheet-actions">
+              <button disabled={testing} onClick={() => { void runSpeedTest(); }}>{testing ? "测速中…" : "重新测速"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {chapOpen && (
+        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => setChapOpen(false)}>
+          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-head">
+              <h3>{"切换话数" + (bookMeta?.name ? "：" + bookMeta.name : "")}</h3>
+              <button className="ghost" onClick={() => setChapOpen(false)}>关闭</button>
+            </div>
+            <p className="muted">共 {chapters.length} 话 · 当前 {curLabel || "第1话"}</p>
+            <div className="list sheet-list">
+              {chapters.map((c) => {
+                const id = String(c.id);
+                const label = chapterLabel(c) || ("#" + id);
+                const isCur = id === String(albumId);
+                const cached = cachedIds.has(id);
+                const rec = chapterMetas.find((m) => m.chapterId === id);
+                return (
+                  <button key={id} className={"list-item sheet-row" + (isCur ? " active" : "")} onClick={() => { void switchToChapter(c); }}>
+                    <div>
+                      <div className="title">{label}{isCur ? "（当前）" : ""}</div>
+                      <div className="muted">
+                        {[cached ? "已缓存" + (rec ? " · " + rec.total + " 页" : "") : "未缓存",
+                          !cached && offline ? "离线不可读" : ""].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    <span className={"badge" + (cached ? " ok" : "")}>{cached ? "✓" : ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cacheOpen && (
+        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => { if (!cacheBusy) setCacheOpen(false); }}>
+          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-head">
+              <h3>选择要缓存的话数</h3>
+              <button className="ghost" disabled={cacheBusy} onClick={() => setCacheOpen(false)}>关闭</button>
+            </div>
+            <p className="muted">默认只选中当前话；已缓存的话不可重复选择</p>
+            <div className="list sheet-list">
+              {chapters.map((c) => {
+                const id = String(c.id);
+                const label = chapterLabel(c) || ("#" + id);
+                const cached = cachedIds.has(id);
+                const rec = chapterMetas.find((m) => m.chapterId === id);
+                return (
+                  <label key={id} className={"sheet-row check-row" + (cached ? " disabled" : "")}>
+                    <input
+                      type="checkbox"
+                      checked={cached || cacheSel.has(id)}
+                      disabled={cached || cacheBusy}
+                      onChange={() => toggleCacheSel(id)}
+                    />
+                    <span className="check-main">
+                      <span className="title">{label}{id === String(albumId) ? "（当前）" : ""}</span>
+                      <span className="muted">{cached ? "已缓存" + (rec ? " · " + rec.total + " 页" : "") : "未缓存"}</span>
+                    </span>
+                    {cached && <span className="badge ok">✓</span>}
+                  </label>
+                );
+              })}
+            </div>
+            <div className="row sheet-actions">
+              <button disabled={cacheBusy} onClick={selectAllChapters}>全选</button>
+              <button disabled={cacheBusy} onClick={invertChapters}>反选</button>
+              <button disabled={cacheBusy || cacheSel.size === 0} onClick={() => { void confirmCache(); }}>
+                {cacheBusy ? "加入中…" : "确认开始缓存（" + cacheSel.size + "）"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 
   const bubblePage = scrubPage ?? current;
@@ -528,6 +816,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
         {toolbar}
         <h2 className="reader-title">{title}</h2>
         <div className="card"><p className="muted">正在加载阅读数据…</p></div>
+        {overlays}
       </div>
     );
   }
@@ -540,6 +829,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
         <h2 className="reader-title">{title}</h2>
         {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous" onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} onError={onImgError} />}
         <div className="row"><button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button><button disabled={current >= total} onClick={() => jumpTo(current + 1)}>下一页</button></div>
+        {overlays}
       </div>
     );
   }
@@ -564,6 +854,7 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
           </div>
         </div>
       )}
+      {overlays}
     </div>
   );
 }

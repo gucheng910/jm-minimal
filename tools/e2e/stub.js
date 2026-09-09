@@ -108,8 +108,16 @@
     const url = typeof input === "string" ? input : (input && input.url) || "";
     const u = new URL(url, location.href);
     const p = u.pathname.replace(/^\//, "");
-    if (/\.(jpg|jpeg|png|webp)$/i.test(u.pathname)) return img();
-    if (p === "setting") return json({ version: "1", test_version: "1", jm3_version: "2.1.6", ipcountry: "CN", ad_cache_version: 1, float_ad: false, is_cn: 1, cn_base_url: "", base_url: "", main_web_host: "", img_host: "", app_shunts: [{ key: "1", title: "图源1" }] });
+    // 图片：图源1 的图床刻意慢 300ms，用于验证「更快的源」自动选中更快的那一个
+    if (/\.(jpg|jpeg|png|webp)$/i.test(u.pathname)) {
+      if (u.hostname.startsWith("mock-img1")) await new Promise((r) => setTimeout(r, 300));
+      return img();
+    }
+    if (p === "setting") {
+      const shunt = u.searchParams.get("app_img_shunt") || "";
+      const host = shunt === "1" ? "mock-img1.jm.local" : shunt === "2" ? "mock-img2.jm.local" : "";
+      return json({ version: "1", test_version: "1", jm3_version: "2.1.6", ipcountry: "CN", ad_cache_version: 1, float_ad: false, is_cn: 1, cn_base_url: "", base_url: "", main_web_host: "", img_host: host, app_shunts: [{ key: "1", title: "图源1" }, { key: "2", title: "图源2" }] });
+    }
     if (p === "random_recommend") { window.__reqs.push({ path: p }); return json(mk("A", 8, "作者甲")); }
     if (p === "hot_tags") return json(["热词1", "热词2"]);
     if (p === "login") { window.__reqs.push({ path: p }); return json({ jwttoken: "fresh-token", uid: 7, username: "tester", coin: 42, level: 3, exp: 100 }); }

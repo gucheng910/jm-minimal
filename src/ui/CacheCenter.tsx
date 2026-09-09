@@ -10,7 +10,7 @@ import {
   cacheList, chapterPages, clearAllCacheTasks, pauseCache, reDownloadCache, removeCache, resumeCache,
   type CacheTaskMeta
 } from "../core/cacheTasks";
-import { cachedCoverUrl, toOfflinePageUrls } from "../core/offline";
+import { cachedCoverUrl, scanCachedChapters, toOfflinePageUrls } from "../core/offline";
 import { chapterLabel, getBook, getChapter, listChapters, type BookMeta, type ChapterMeta } from "../core/offlineMeta";
 import { saveHistory } from "../core/history";
 import type { ReadPage } from "../core/types";
@@ -65,18 +65,6 @@ function groupByBook(list: CacheTaskMeta[]): BookGroup[] {
   const arr = [...map.values()];
   for (const g of arr) g.chapters.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
   return arr.sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-/** 一次性扫描所有离线 cache 名 → 已缓存的话 id 集合（逐话 cache.keys() 会慢很多） */
-async function scanCachedChapters(): Promise<Set<string>> {
-  const ids = new Set<string>();
-  if (!("caches" in window)) return ids;
-  try {
-    for (const name of await caches.keys()) {
-      if (name.startsWith("jm-offline-")) ids.add(name.slice("jm-offline-".length));
-    }
-  } catch { /* ignore */ }
-  return ids;
 }
 
 /** 封面：优先本书任意一话缓存下来的封面，否则回落到远程 URL */
