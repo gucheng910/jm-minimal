@@ -174,8 +174,7 @@ if (!SKIP_ANDROID) {
   // 校验 APK 内的版本号（apkanalyzer 存在才查）
   // 注意：Windows 上 apkanalyzer 是 .bat，必须拿 where 解析出的完整路径再走 cmd /c（直接 spawn 名字会静默失败）
   const aapt = (IS_WIN ? capture("where", ["apkanalyzer"], { optional: true }) : capture("which", ["apkanalyzer"], { optional: true }))
-    .split(/?
-/)[0].trim();
+    .split(/\r?\n/)[0].trim();
   if (aapt) {
     const vn = capture(aapt, ["manifest", "version-name", apkPath], { optional: true });
     const vc = capture(aapt, ["manifest", "version-code", apkPath], { optional: true });
@@ -212,9 +211,20 @@ if (!SKIP_PC) {
 }
 
 // ---------------------------------------------------------------- 发布
-const assets = [];
-if (!SKIP_ANDROID) assets.push(["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")], ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")]);
-assets.push(...pcFiles);
+// 产物清单按“磁盘上真实存在”发现：支持先 --skip-* 复用上一次的产物再 --publish
+const assetCandidates = [
+  ["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")],
+  ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")],
+  ["jm-minimal-setup-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe")],
+  ["jm-minimal-setup-" + version + ".exe.blockmap", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe.blockmap")],
+  ["latest.yml", path.join(ROOT, "release-pc/latest.yml")],
+  ["jm-minimal-portable-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-portable-" + version + ".exe")]
+];
+const assets = assetCandidates.filter(([n, f]) => {
+  if (existsSync(f)) return true;
+  log("  ! 产物不存在，跳过：" + n);
+  return false;
+});
 
 if (PUBLISH) {
   step("创建 GitHub Release（draft → 上传 → 发布）");
