@@ -1,0 +1,24 @@
+name: CI
+
+# 只做「能编译 + 单测通过」这一件事：打包（Android/Electron）耗时长且要签名密钥，不在 CI 跑。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Type-check + build web
+        run: npm run build

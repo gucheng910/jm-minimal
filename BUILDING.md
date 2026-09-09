@@ -215,6 +215,8 @@ curl -sIL -o NUL -w "%{http_code}\n" https://github.com/gucheng910/jm-minimal/re
 ### 7.1 日常开发
 ```bash
 npm run dev          # vite dev，浏览器调试（http://localhost:5173）
+npm test             # vitest 单测（src/**/*.test.ts；CI 也会跑）
+npm run test:watch   # 单测 watch 模式
 npm run build        # tsc 类型检查 + 产物 dist/
 npm run preview      # 预览 dist
 npx electron .       # 桌面壳跑 dist（未打包=开发态：DNS 清洗可用、更新不可用）

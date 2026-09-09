@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cap:sync": "cap sync android",
@@ -28,8 +30,10 @@
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^33.4.11",
     "electron-builder": "^26.0.12",
+    "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
   },
   "build": {
     "appId": "dev.jmclient.pc",
