@@ -41,7 +41,7 @@ const exe = (name) => (IS_WIN ? name + ".cmd" : name);
 
 // Windows 上 .cmd/.bat 必须经 cmd /c 启动（Node 20+ 不允许直接 spawn .cmd）
 function shellOf(cmd, args) {
-  if (IS_WIN && /.(cmd|bat)$/i.test(cmd)) return { cmd: "cmd", args: ["/c", cmd, ...args] };
+  if (IS_WIN && /\.(cmd|bat)$/i.test(cmd)) return { cmd: "cmd", args: ["/c", cmd, ...args] };
   return { cmd, args };
 }
 function run(cmd, args, opts = {}) {
@@ -76,7 +76,13 @@ step("预检");
 if (!version) die("用法：node tools/release.mjs <x.y.z> [--publish|--dry-run|--skip-pc|--skip-android]");
 const pkg = JSON.parse(readText("package.json"));
 const curVersion = pkg.version;
-assertNewer(version, curVersion);
+// --skip-pc --skip-android = 复用上一轮产物发布，此时版本号必然与当前一致（不再要求递增）
+const reuseOnly = SKIP_PC && SKIP_ANDROID;
+if (reuseOnly) {
+  if (version !== curVersion) die("复用产物发布时版本号必须与 package.json 一致（当前 " + curVersion + "，传入 " + version + "）");
+} else {
+  assertNewer(version, curVersion);
+}
 
 const gradlePath = "android/app/build.gradle";
 const gradle = readText(gradlePath);
