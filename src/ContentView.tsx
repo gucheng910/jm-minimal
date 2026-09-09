@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useBackHandler } from "./hooks/useBackHandler";
 import { navTransition } from "./core/viewTransition";
 import { emit, on } from "./core/bus";
-import type { FormEvent } from "react";
 import { client } from "./core/api";
 import { downloadAlbum, isAlbumCached } from "./core/offline";
 import ReaderPanel from "./Reader";
@@ -12,6 +11,8 @@ import { sanitizeCommentHtml } from "./core/commentRich";
 import { PAGE_SIZE, UI_KEYS } from "./core/constants";
 import { useWeekRank } from "./hooks/useWeekRank";
 import { useCategoryFeed } from "./hooks/useCategoryFeed";
+import { useSearchFeed } from "./hooks/useSearchFeed";
+import SearchFeed from "./pages/SearchFeed";
 import CategoryFeed from "./pages/CategoryFeed";
 import WeekRank from "./pages/WeekRank";
 import { AlbumGrid } from "./ui/AlbumGrid";
@@ -19,7 +20,7 @@ import { albumCoverUrl, prefetchCovers } from "./ui/AlbumCard";
 import { SearchResultPage } from "./ui/SearchResultPage";
 import type { SRKind } from "./ui/SearchResultPage";
 import { SkeletonGrid } from "./ui/SkeletonGrid";
-import { debouncedSetJSON, getJSONNow, removeKeyNow } from "./core/debounceStorage";
+import { debouncedSetJSON, getJSONNow } from "./core/debounceStorage";
 import { announceStartupReady, gatePassed } from "./core/startup";
 import type { AlbumDetail, AlbumSummary, ForumPayload, ReadPayload } from "./core/types";
 
@@ -30,7 +31,6 @@ type FeedKind = "latest" | "search" | "favorites" | "history" | null;
 // 滚动恢复 key（sessionStorage 兜底，避免 ref 丢失）
 const SCROLL_KEY = "jm:pendingRestoreY";
 const HISTORY_KEY = UI_KEYS.history;
-const SEARCH_HISTORY_KEY = UI_KEYS.searchHistory;
 
 function progressKey(id: number | string): string {
   return "jmclient.read.y." + String(id);
@@ -38,16 +38,6 @@ function progressKey(id: number | string): string {
 
 function loadHistory(): AlbumSummary[] {
   return getJSONNow<AlbumSummary[]>(HISTORY_KEY, []);
-}
-
-function loadSearchHistory(): string[] {
-  return getJSONNow<string[]>(SEARCH_HISTORY_KEY, []);
-}
-
-function rememberSearch(q: string) {
-  const list = loadSearchHistory().filter((x) => x !== q);
-  list.unshift(q);
-  debouncedSetJSON(SEARCH_HISTORY_KEY, list.slice(0, 12), 300);
 }
 
 function saveHistoryEntry(entry: AlbumSummary) {
@@ -92,7 +82,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const pageMode = initialAction === "categories" ? "categories" : initialAction === "search" ? "search" : "home";
   const [mode, setMode] = useState<Mode>("home");
   const [items, setItems] = useState<AlbumSummary[]>([]);
-  const [query, setQuery] = useState("");
   const [feedKind, setFeedKind] = useState<FeedKind>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -113,6 +102,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [history, setHistory] = useState<AlbumSummary[]>(loadHistory);
   const cat = useCategoryFeed();
   const week = useWeekRank();
+  // 搜索纯数字 JM 号时服务端返回 redirect_aid → 直接打开详情页
+  const search = useSearchFeed((aid) => { void openDetail({ id: aid } as AlbumSummary); });
   const [comments, setComments] = useState<ForumPayload | null>(null);
   const [commentText, setCommentText] = useState("");
   const [cached, setCached] = useState(false);
@@ -120,10 +111,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [dlState, setDlState] = useState<"idle" | "run" | "done">("idle");
   const [curPage, setCurPage] = useState(1);
   const [jumpInput, setJumpInput] = useState("1");
-  const [searchType, setSearchType] = useState("site");
-  const [hotTags, setHotTags] = useState<string[]>([]);
-  const [searched, setSearched] = useState(false);
-  const [searchHistory, setSearchHistory] = useState<string[]>([]);
   // 下拉刷新：DOM 直接更新（无 setState 触发重渲染） + 固定阈值
   const [refreshing, setRefreshing] = useState(false);
   const ptrStartY = useRef(0);
@@ -295,31 +282,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     }
   }, [mode, srOpen, detailFrom, sr, srParent, detail]);
 
-  const [hotErr, setHotErr] = useState("");
-
+  // 搜索 tab 挂载时：读搜索记录 + 拉热词（逻辑在 useSearchFeed 内）
   useEffect(() => {
     if (pageMode !== "search") return;
-    let alive = true;
-    setSearchHistory(loadSearchHistory());
-    setHotErr("");
-    (async () => {
-      try {
-        if (!client.apiBase) { try { await client.init(); } catch { return; } }
-        if (!client.setting) { client.getSetting().catch(() => { /* 后台尽力，不阻塞热词 */ }); }
-        const loadTags = async (): Promise<string[]> => {
-          const t = await client.getHotTags();
-          return Array.isArray(t) ? t : [];
-        };
-        let tags: string[] = [];
-        try { tags = await loadTags(); } catch (err) { if (alive) setHotErr(String(err).slice(0, 100)); }
-        if (alive && tags.length === 0) {
-          await new Promise((r) => setTimeout(r, 900));
-          try { tags = await loadTags(); } catch (err) { if (alive) setHotErr(String(err).slice(0, 100)); }
-        }
-        if (alive && tags.length > 0) { setHotErr(""); setHotTags(tags); }
-      } catch { /* 静默 */ }
-    })();
-    return () => { alive = false; };
+    void search.init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageMode]);
 
   useEffect(() => {
@@ -507,47 +474,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     if (await week.open()) setMode("week");
   }
 
-  async function doSearch(e: FormEvent) {
-    e.preventDefault();
-    if (!query.trim()) return;
-    rememberSearch(query.trim());
-    setSearchHistory(loadSearchHistory());
-    setSearched(true);
-    await searchPage(query.trim(), 1, true, searchType);
-  }
-
-  async function searchPage(q: string, p: number, replace: boolean, type = searchType) {
-    const result = await run(() => client.search(q, p, 0, type));
-    if (!result) return;
-    // 官方协议：搜索纯数字 JM 号时服务器返回 redirect_aid（无 content）
-    // 客户端收到后直接跳转详情页，与官方 v2.1.5 行为一致
-    if (replace && result.redirect_aid) {
-      openDetail({ id: result.redirect_aid } as AlbumSummary);
-      return;
-    }
-    const total = Number(result.total || 0);
-    const next = replace ? result.content || [] : [...items, ...(result.content || [])];
-    showList(next, "search", next.length < total, p);
-  }
-
-  function changeSearchType(t: string) {
-    setSearchType(t);
-    if (searched && query.trim()) searchPage(query.trim(), 1, true, t);
-  }
-
-  function runSearchTerm(term: string) {
-    setQuery(term);
-    rememberSearch(term);
-    setSearchHistory(loadSearchHistory());
-    setSearched(true);
-    searchPage(term, 1, true, searchType);
-  }
-
-  function clearSearchHistory() {
-    removeKeyNow(SEARCH_HISTORY_KEY);
-    setSearchHistory([]);
-  }
-
   function retryHomeFeed() {
     // 与底部导航点击「首页」时的刷新逻辑完全一致（复用 jm:refreshHome 事件）
     setRead(null);
@@ -654,8 +580,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       const p = page + 1;
       const list = await run(() => client.request<AlbumSummary[]>("/latest", { page: p }));
       if (list) { const next = [...items, ...list]; showList(next, "latest", list.length >= PAGE_SIZE, p); }
-    } else if (feedKind === "search" && query.trim()) {
-      await searchPage(query.trim(), page + 1, false);
     }
   }
 
@@ -972,55 +896,29 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   if (pageMode === "search") {
-    const typeLabels: Array<{ key: string; label: string }> = [
-      { key: "site", label: "站内搜索" },
-      { key: "work", label: "作品" },
-      { key: "author", label: "作者" },
-      { key: "tag", label: "标签" },
-      { key: "character", label: "登场人物" }
-    ];
     return (
-      <div>
-        <form className="searchbar card" onSubmit={doSearch}>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索（官方接口）" />
-          <button disabled={busy || !query.trim()}>搜索</button>
-        </form>
-        <div className="card row">
-          {typeLabels.map((t) => (
-            <button key={t.key} className={searchType === t.key ? "chip active" : "chip"} onClick={() => changeSearchType(t.key)}>{t.label}</button>
-          ))}
-        </div>
-        {!searched ? (
-          <div>
-            <div className="card">
-              <h3>热门搜索</h3>
-              {hotTags.length > 0 ? (
-                <div className="row">{hotTags.map((t) => <button key={t} className="chip" onClick={() => runSearchTerm(t)}>{t}</button>)}</div>
-              ) : hotErr ? (
-                <div className="row">
-                  <span className="err small-err">加载失败：{hotErr}</span>
-                  <button className="ghost" onClick={() => { setHotErr(""); client.getHotTags().then((t) => { if (Array.isArray(t) && t.length) { setHotTags(t); setHotErr(""); } }).catch((e) => setHotErr(String(e).slice(0, 120))); }}>重试</button>
-                </div>
-              ) : (
-                <p className="muted">正在加载…</p>
-              )}
-            </div>
-            {searchHistory.length > 0 && (
-              <div className="card">
-                <div className="row"><h3>搜索记录</h3><button onClick={clearSearchHistory}>清除</button></div>
-                <div className="row">{searchHistory.map((t) => <button key={t} className="chip" onClick={() => runSearchTerm(t)}>{t}</button>)}</div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div>
-            {error && <div className="card err">{error}</div>}
-            {busy && items.length === 0 ? <SkeletonGrid /> : null}
-            <AlbumGrid key={"g" + settingTick} items={items} onOpen={openDetail} />
-            {hasMore && <div className="card row"><button disabled={busy} onClick={loadMore}>加载更多（第 {page + 1} 页）</button></div>}
-          </div>
-        )}
-      </div>
+      <SearchFeed
+        query={search.query}
+        type={search.type}
+        items={search.items}
+        page={search.page}
+        hasMore={search.hasMore}
+        busy={search.busy}
+        error={search.error}
+        searched={search.searched}
+        hotTags={search.hotTags}
+        hotErr={search.hotErr}
+        history={search.history}
+        gridKey={"g" + settingTick}
+        onQueryChange={search.setQuery}
+        onSubmit={search.submit}
+        onRunTerm={search.runTerm}
+        onTypeChange={search.changeType}
+        onRetryHot={search.retryHot}
+        onClearHistory={search.clearHistory}
+        onLoadMore={search.loadMore}
+        onOpenAlbum={openDetail}
+      />
     );
   }
 
