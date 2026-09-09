@@ -1,7 +1,7 @@
 // 端到端回归：无头 Edge + CDP 驱动页面里的 driver.js
 // 用法：node tools/e2e/harness.mjs   （通常经 npm run e2e 调用）
 // 环境变量：TEST_URL / DRIVER / EDGE_PATH / E2E_PORT
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -95,7 +95,33 @@ async function main() {
   console.log("截图: " + path.relative(ROOT, shotPath));
 }
 
+/**
+ * 只杀自己 spawn 的浏览器整棵进程树。
+ * 只 edge.kill() 会留下 renderer/gpu/utility 子进程：多轮 e2e 累积几十个残留进程后，
+ * 新实例会因 profile 争用起不来（表现为 "没有拿到页面 target" 或整体卡死）。
+ * 注意：绝不能按镜像名杀（会误杀用户正在用的浏览器，见 AGENTS.md）。
+ */
+function killBrowserTree(pid) {
+  if (process.platform !== "win32") {
+    if (pid) { try { process.kill(pid, "SIGKILL"); } catch (e) { /* 忽略 */ } }
+    return;
+  }
+  // 先按进程树杀（覆盖 pid 未变的情况）
+  if (pid) { try { spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" }); } catch (e) { /* 忽略 */ } }
+  // 再按「只属于本次运行」的 profile 路径兜底：Edge 的启动器会 fork 后退出，
+  // 真实浏览器进程 pid 与 spawn 返回的不同，taskkill 会打空。
+  // 注意：绝按镜像名杀（会误杀用户浏览器）；这里匹配的是 os.tmpdir() 下本次 profile。
+  const esc = PROFILE.replace(/'/g, "''");
+  try {
+    spawnSync("powershell", ["-NoProfile", "-Command",
+      "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+      "Where-Object { $_.CommandLine -and $_.CommandLine.Contains('" + esc + "') } | " +
+      "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    ], { stdio: "ignore" });
+  } catch (e) { /* 忽略 */ }
+}
+
 main().catch((e) => { console.log("FAIL:", e.message); process.exitCode = 1; }).finally(() => {
   try { ws && ws.close(); } catch (e) { /* 忽略 */ }
-  setTimeout(() => { try { edge.kill(); } catch (e) { /* 忽略 */ } process.exit(process.exitCode || 0); }, 400);
+  setTimeout(() => { killBrowserTree(edge.pid); process.exit(process.exitCode || 0); }, 400);
 });

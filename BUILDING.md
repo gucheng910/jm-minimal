@@ -1,11 +1,11 @@
 # JM极简版 · 发布与开发工作流手册（BUILDING）
 
-> 更新：2026-09 · 覆盖 v1.4.2（含阅读器浮标修复 + 会员页收藏/足迹点击响应修复）
-> 当前实况：源码/Android 已到 **1.6.0（versionCode 37）**；
-> 线上 GitHub Release 仍为 **v1.4.0（2026-09-07，Latest）**——下次发版按 §1 打 v1.4.2。
-> 修复记录：docs/24（1.4.1 阅读器浮标+计数器）、docs/25（1.4.2 收藏/足迹点击无响应）。
+> 更新：2026-09-10 · 覆盖 **v1.8.1（versionCode 48，线上 Latest）**
+> 当前实况：源码/Android = **1.8.1**；协议对齐官方 **2.1.6**（`src/core/constants.ts APP_VERSION`）。
+> 发版已脚本化：`node tools/release.mjs <x.y.z> [--publish]`（见 §1/§7.2），手写步骤仅作排障参考。
+> 近期记录：docs/28（同书多话合并/离线详情页）、29（阅读器弹窗）、30（1.7.2 回归修复）、31（真机压测）。
 > 用途：给"下次开发/发版"的人看——怎么打 PC 包、怎么打 Android 包、往 GitHub 传什么、怎么传、本机常用命令、以及踩过的坑。
-> 定位：本文是**操作 runbook + 教训库**；设计/协议/里程碑记录在 docs/00~24（部分历史已归档至 docs/_archive），代码侧见 README.md。
+> 定位：本文是**操作 runbook + 教训库**；设计/协议/里程碑记录在 docs/00~31（部分历史已归档至 docs/_archive），代码侧见 README.md。
 
 ---
 
@@ -15,11 +15,12 @@
 |---|---|---|
 | **docs/00-索引与逆向资源导航.md** | 全库地图：文档阅读顺序 + 归档清单 + 原 app 逆向资料(E:/JMComic-RE)入口 | 新接手/找文件优先 |
 | docs/01-新版客户端设计.md | 架构与协议总纲（host 解密/Token/AES 响应） | 想改 core/API 层 |
-| docs/03~08、11、12、17~21、23 | 里程碑与模块实录（登录/内容流/阅读器/连载/账号/社区/UI 迭代等；顶部已标现状） | 改对应模块前 |
+| docs/03~08、11、12、17、18、21、23 | 里程碑与模块实录（登录/内容流/阅读器/连载/账号/社区/UI 迭代等；顶部已标现状） | 改对应模块前 |
 | docs/09-线路与圖源协议实现.md、docs/14-移动壳与路由.md | 合并页：线路/圖源/测速；移动壳与路由（旧 09+10、14+15 已归档） | 线路/壳层 |
-| docs/22-P6回归与重打包.md、docs/24-阅读器页进度浮标与计数器修复.md | Android 真机回归（历史 debug 注）；1.4.1 阅读器浮标+计数器修复 | 回归/阅读器 |
+| **docs/26~31** | 26 去条纹原理与实现、27 作者/标签特殊搜索页、**28 同书多话合并+离线元数据+离线详情页**、29 阅读器内弹窗（更快的源/换话/选话缓存）、30 1.7.2 回归定位与修复、**31 真机压测记录** | 改阅读器/缓存/离线前 |
+| docs/24-阅读器页进度浮标与计数器修复.md、docs/25-收藏足迹点击无响应修复.md | 1.4.1/1.4.2 具体修复记录 | 回归/阅读器 |
 | docs/_archive/ | 已归档历史文档（旧 02/09/10/13/14/15/16 等），内容保留 | 考古/追溯 |
-| **E:/JMComic-RE/（本机旁库）** | 原 app v2.1.5 逆向工作区：APK/apktool/jadx/40-notes 协议报告/99-scripts | 需要“原版怎么实现”的事实依据 |
+| **E:/JMComic-RE/（本机旁库）** | 原 app 逆向工作区（2.1.5 基线 + 2.1.6 差异）：APK/apktool/jadx/40-notes 协议报告/99-scripts | 需要“原版怎么实现”的事实依据；**官方出新版先读 40-notes/08** |
 | README.md | 给用户的下载说明（表格链接约定与本手册 §5.3 绑定） | 发版前核对 |
 | 本机 AGENTS.md（机器记忆，DSH ~/.dsh 相关目录） | 网络/hosts/gh/工具链等本机环境事实 | 网络相关操作前 |
 | **本文 BUILDING.md** | 发版全流程 + 命令 + 坑 | 每次发版 |
@@ -27,6 +28,18 @@
 ---
 
 ## 1. 发版 Checklist（PC + Android + GitHub 一次发布）
+
+> **推荐：一条命令**（脚本自动做版本同步 → web 构建 → cap sync 资产哈希校验 → APK → PC 包 → 可选发布 → 自动校验）
+> ```bash
+> node tools/release.mjs 1.8.2                    # 只本地出包（APK + PC），不上传
+> node tools/release.mjs 1.8.2 --publish --notes _archive/release-notes-1.8.2.md
+> node tools/release.mjs 1.8.2 --skip-pc          # 只要 APK
+> node tools/release.mjs 1.8.1 --verify-only      # 只校验线上 Release
+> ```
+> 约束：`--publish` 要求工作区干净、在 main 上、gh 已登录；版本号必须大于 package.json 现值（复用产物用 `--skip-pc --skip-android`）。
+> 发布后脚本会做 §5.4 全部校验（资产字节、latest.yml sha512、HEAD 200）。
+
+手写步骤（排障/脚本不可用时）：
 
 1. 升版本号（见 §2，PC 与 Android 两处同步）
 2. npm run build（tsc 类型检查 + vite 产物 dist/）
@@ -52,7 +65,9 @@
 | PC + 前端 | package.json → version | 1.8.1 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
 | Android | android/app/build.gradle → defaultConfig | versionName 1.8.1 / versionCode 48 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
-> ⚠️ 现值 = **工作区状态**（1.7.1 已发布，线上 Latest = v1.7.1）。
+> ⚠️ 现值 = **1.8.1 / versionCode 48**（线上 Latest = v1.8.1）。
+> `tools/release.mjs` 会一次性同步 **6 处**：package.json、package-lock.json、android/app/build.gradle（versionName + versionCode）、
+> BUILDING.md 本表、README.md 下载表与链接、`src/core/constants.ts` 的 `BUILD_TAG`。手动发版务必逐处核对。
 
 规则：
 - **每次都同步升**：PC 装包 / APK / 更新判断都依赖这两个值；只改一处会造成"新版拉不下来"或"显示已最新但下载的其实是旧协议版本"。
@@ -324,11 +339,32 @@ gh auth status && gh release view v1.4.1 --repo gucheng910/jm-minimal --json ass
 
 ## 10. 下次发版动作速记
 
-1. 升 package.json version **和** android/app/build.gradle versionName/versionCode
-2. npm run build → electron-builder nsis + portable → npx cap sync android + build-rel.cmd
-3. APK 按 §5.3 命名后随 gh release 上传
-4. gh release create vX.Y.Z（§5.1 完整清单）→ §5.4 校验 → 装旧版的机器点「检查更新」实测
-5. 更新 README 下载表（若改文件名/说明）与 docs/ 记录
+1. 改完代码 → `npm test` + `npm run e2e`（单测 90 项 + 端到端 6 组）
+2. `git commit` 干净后：`node tools/release.mjs <新版本> --publish --notes <说明文件>`
+3. 脚本自动：版本同步 → web 构建 → cap sync 哈希校验 → APK → PC 包 → draft 上传 → publish → §5.4 校验
+4. 收尾：`git commit -am "chore(release): <新版本>" && git push`
+5. 需要时补 README 功能说明与 docs/ 记录（版本号表格由脚本自动改）
 
-> 悬而未决（当前工作区）：1.4.1 源码已含阅读器改动且版本号已升，**尚未 commit/tag/发布**；
-> PC 端 1.4.1（nsis/portable/latest.yml）尚未构建；README 下载表仍指 1.4.0。
+---
+
+## 11. 官方 App 出新版怎么办（协议对齐 runbook）
+
+官方 APK 更新不影响本客户端的**代码结构**，但要确认协议层有没有变。流程：
+
+1. **先探服务端**：`GET /setting` 看 `jm3_version` / `jm3_version_info`（脚本样例：JMClient/_archive/probe-setting-216.mjs）。
+   若只是官方 UI 更新，协议通常不动。
+2. **再比 APK**（工作区 E:/JMComic-RE）：
+   ```bash
+   # 取包：官方直链比 GitHub 快（字节一致）
+   #   https://comic18j-jjeg.cc/static/jmapp3apk/JMComic3v<版本>.apk
+   tar -xf 10-apk/<版本>.apk -C 10-apk/raw-<版本> assets   # 前端 + sourcemap（含原始 TS）
+   apktool d -f -o 20-apktool/<版本> 10-apk/<版本>.apk
+   jadx -d 30-jadx/<版本> --show-bad-code -j 8 10-apk/<版本>.apk
+   ```
+3. **对比 sourcemap**（最快路径）：主包 `main.*.js.map` 的 `sourcesContent` 就是原始源码，
+   逐文件哈希比对即可；重点看 `api/apiPaths.ts`、`api/HttpUtil.ts`（协议/密钥/端点）。
+4. **结论落到 JMClient**：
+   - 协议/密钥/端点变了 → 改 `src/core/{constants,crypto,api,host}.ts`，并升 `APP_VERSION`；
+   - 只是 UI 变了 → 只把 `APP_VERSION` 对齐到官方版本即可（否则抽屉里会误报"官方协议已更新"）；
+   - 记一份差异分析到 E:/JMComic-RE/40-notes/（样例：`08-2.1.6版本差异分析.md`）。
+5. **验证**：`npm test` + `npm run e2e`（e2e 的协议漂移用例用桩里更高的 jm3_version 触发）。

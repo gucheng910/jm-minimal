@@ -1,5 +1,5 @@
-// 协议常量（来自对原客户端 v2.1.5 的逆向验证）
-export const APP_VERSION = "2.1.5";
+// 协议常量（来自对原客户端 v2.1.6 的逆向验证；2.1.5→2.1.6 协议层无变化，仅前端 UI 改动）
+export const APP_VERSION = "2.1.6";
 export const TOKEN_SECRET = "185Hcomic3PAPP7R";
 export const CONTENT_SECRET = "18comicAPPContent";
 export const HOST_KEY_SECRET = "diosfjckwpqpdfjkvnqQjsik";

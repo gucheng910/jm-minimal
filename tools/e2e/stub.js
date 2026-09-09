@@ -118,7 +118,7 @@
     if (p === "setting") {
       const shunt = u.searchParams.get("app_img_shunt") || "";
       const host = shunt === "1" ? "mock-img1.jm.local" : shunt === "2" ? "mock-img2.jm.local" : "";
-      return json({ version: "1", test_version: "1", jm3_version: "2.1.6", ipcountry: "CN", ad_cache_version: 1, float_ad: false, is_cn: 1, cn_base_url: "", base_url: "", main_web_host: "", img_host: host, app_shunts: [{ key: "1", title: "图源1" }, { key: "2", title: "图源2" }] });
+      return json({ version: "1", test_version: "1", jm3_version: "2.1.7", ipcountry: "CN", ad_cache_version: 1, float_ad: false, is_cn: 1, cn_base_url: "", base_url: "", main_web_host: "", img_host: host, app_shunts: [{ key: "1", title: "图源1" }, { key: "2", title: "图源2" }] });
     }
     if (p === "random_recommend") { window.__reqs.push({ path: p }); return json(mk("A", 8, "作者甲")); }
     if (p === "hot_tags") return json(["热词1", "热词2"]);

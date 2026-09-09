@@ -231,17 +231,20 @@
     back(); await sleep(1200);
   }
 
-  // 协议漂移提示（桩里 jm3_version=2.1.6，客户端常量 2.1.5）
+  // 协议漂移提示（桩里 jm3_version=2.1.7，比客户端 APP_VERSION 新 → 应出现提示）
   const menuBtn = q(".menu-btn");
   if (menuBtn) {
     menuBtn.click();
     await sleep(900);
     const note = qa(".menu-note").map((n) => (n.textContent || "").trim());
+    const driftWarning = (qa(".small-err").map((e) => (e.textContent || "").trim()).find((t) => /官方协议已更新/.test(t))) || "";
     log.push({
       step: "proto-drift",
       versionLine: note.find((t) => /官方协议/.test(t)) || "",
-      driftWarning: (qa(".small-err").map((e) => (e.textContent || "").trim()).find((t) => /官方协议已更新/.test(t))) || ""
+      driftWarning
     });
+    // 桩里 jm3_version 比客户端 APP_VERSION 新 → 必须出现漂移提示（否则说明判据失效）
+    if (!driftWarning) throw new Error("协议漂移提示未出现（桩 jm3_version=2.1.7，客户端 APP_VERSION 见 constants.ts）");
     q(".menu-backdrop")?.click();
     await sleep(600);
   }
