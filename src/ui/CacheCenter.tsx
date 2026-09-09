@@ -12,6 +12,7 @@ import {
 } from "../core/cacheTasks";
 import { cachedCoverUrl, toOfflinePageUrls } from "../core/offline";
 import { chapterLabel, getBook, getChapter, listChapters, type BookMeta, type ChapterMeta } from "../core/offlineMeta";
+import { saveHistory } from "../core/history";
 import type { ReadPage } from "../core/types";
 import ReaderPanel from "../Reader";
 import { pushToast } from "./toast";
@@ -159,6 +160,22 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
     onClose();
   }, [reading, view, onClose]);
 
+  /** 从离线详情页读任意一话也要记足迹（按书合并，与在线阅读一致） */
+  function recordHistory(chapterId: string, label: string) {
+    const chapter = book?.chapters.find((c) => String(c.id) === chapterId);
+    saveHistory({
+      id: chapterId,
+      bookId: book?.bookId || currentGroup?.bookId || chapterId,
+      name: book?.name || currentGroup?.title || "",
+      author: book?.author.join("/") || currentGroup?.author,
+      description: book?.description,
+      chapterName: label,
+      sort: chapter ? Number(chapter.sort) || undefined : undefined,
+      chapters: book && book.chapters.length > 1 ? book.chapters.length : undefined,
+      lastReadAt: Date.now()
+    });
+  }
+
   /** 离线阅读：页列表来自 IDB，图片来自 Cache API */
   async function readOffline(chapterId: string, label: string) {
     const rec = await getChapter(chapterId);
@@ -168,6 +185,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
       return;
     }
     const urls = await toOfflinePageUrls(chapterId, pages);
+    recordHistory(chapterId, label);
     setReading({ id: chapterId, title: [book?.name, label].filter(Boolean).join(" "), scrambleId: rec?.scrambleId, pages: urls, offline: true });
   }
 
@@ -180,6 +198,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
         pushToast("该话暂无可用图片（可能需要购买或登录）", "err");
         return;
       }
+      recordHistory(chapterId, label);
       setReading({ id: chapterId, title: [book?.name, label].filter(Boolean).join(" "), scrambleId: r.scramble_id, pages: r.images, offline: false });
     } catch (err) {
       pushToast("加载失败：" + String(err).replace(/^Error: /, "").slice(0, 90), "err");

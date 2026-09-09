@@ -88,7 +88,9 @@
     step: "offline-read-cached",
     imgs: qa(".reader-wrap img").map((i) => i.src.slice(0, 5)),
     newReadReqs: readReqs().length - before,
-    offlineToolbarHidden: !qa(".reader-toolbar .source-select").length
+    offlineToolbarHidden: !qa(".reader-toolbar .source-select").length,
+    // 离线详情页阅读同样记足迹（按书合并）
+    history: localStorage.getItem("jmclient.history")
   });
 
   // ---- 系统返回键：回到离线详情页，再返回回到缓存列表 ----
