@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
 import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
@@ -797,8 +798,13 @@ export default function ReaderPanel({
     </div>
   );
 
-  /** 阅读器内弹窗（图源 / 换话 / 选话缓存）：底部抽屉，点遮罩或系统返回键关闭 */
-  const overlays = (
+  /**
+   * 阅读器内弹窗（图源 / 换话 / 选话缓存）：底部抽屉，点遮罩或系统返回键关闭。
+   * 必须 portal 到 body：否则会命中 .reader-wrap 的深色作用域规则
+   * （.reader-wrap .row button 半透明白底 + 白字、.reader-wrap .muted 深灰），
+   * 在浅色抽屉上表现为「文字过淡、像禁用」。
+   */
+  const overlays = createPortal((
     <>
       {sourceOpen && (
         <div className="drawer-backdrop reader-sheet-backdrop" onClick={closeSourcePicker}>
@@ -910,7 +916,7 @@ export default function ReaderPanel({
         </div>
       )}
     </>
-  );
+  ), document.body);
 
   const bubblePage = scrubPage ?? current;
   const bubbleRatio = total > 1 ? Math.min(1, Math.max(0, (bubblePage - 1) / (total - 1))) : 0;

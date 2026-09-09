@@ -24,6 +24,34 @@
   };
   const tbButtons = () => qa(".reader-toolbar button").map(txt);
   const back = () => window.dispatchEvent(new CustomEvent("jm:back", { detail: { consumed: false } }));
+  // 对比度检查：弹窗文字/按钮在抽屉底色上的 WCAG 对比度（防止再出现"文字过淡像禁用"）
+  const effBg = (el) => {
+    let n = el;
+    while (n) {
+      const m = getComputedStyle(n).backgroundColor.match(/[\d.]+/g);
+      if (m && (m.length < 4 || Number(m[3]) > 0.95)) return m.slice(0, 3).map(Number);
+      n = n.parentElement;
+    }
+    return [255, 255, 255];
+  };
+  const lum = ([r, g, b]) => {
+    const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const contrast = (el) => {
+    const fg = getComputedStyle(el).color.match(/[\d.]+/g).slice(0, 3).map(Number);
+    const bg = effBg(el);
+    const l1 = lum(fg), l2 = lum(bg);
+    return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100;
+  };
+  const sheetContrast = () => Array.from(document.querySelectorAll(".reader-sheet .sheet-actions button, .reader-sheet .sheet-row .title, .reader-sheet .sheet-row .muted"))
+    .map((el) => ({ text: txt(el).slice(0, 14), ratio: contrast(el) }));
+  const assertContrast = (label) => {
+    const rows = sheetContrast();
+    const bad = rows.filter((r) => r.ratio < 3);
+    if (bad.length) throw new Error(label + " 弹窗对比度不足: " + JSON.stringify(bad));
+    return rows;
+  };
   const readIds = () => (window.__reqs || []).filter((r) => r.path === "comic_read").map((r) => r.id);
   const cacheIds = () => { try { return JSON.parse(localStorage.getItem("jmclient.cacheTasks.v2") || "[]").map((t) => t.id); } catch (e) { return []; } };
 
@@ -46,7 +74,8 @@
   log.push({
     step: "source-open",
     rows: qa(".reader-sheet .sheet-row .title").map(txt),
-    testing: /正在测速/.test(txt(q(".reader-sheet .muted")))
+    testing: /正在测速/.test(txt(q(".reader-sheet .muted"))),
+    contrast: assertContrast("更快的源")
   });
   await waitUntil(() => !/正在测速/.test(txt(q(".reader-sheet .muted"))), 20000, "speed test done");
   await sleep(400);
@@ -122,7 +151,8 @@
     checked: boxes().filter((b) => b.checked).length,
     checkedLabels: qa(".reader-sheet .check-row").filter((r) => r.querySelector("input").checked).map((r) => txt(r.querySelector(".title"))),
     actions: qa(".reader-sheet .sheet-actions button").map(txt),
-    badges: qa(".reader-sheet .check-row .badge").length
+    badges: qa(".reader-sheet .check-row .badge").length,
+    contrast: assertContrast("缓存")
   });
   // 全选 → 反选
   btn("全选").click();
