@@ -508,7 +508,11 @@ export default function ReaderPanel({
     const rec = await getChapter(id);
     if (rec && rec.pages.length > 0) return { pages: rec.pages, scrambleId: rec.scrambleId };
     const recovered = await pagesFromCache(id);
-    if (recovered.length > 0) return { pages: recovered };
+    if (recovered.length > 0) {
+      // 只有图片、没有 IDB 记录：联网补一次 scrambleId（离线时拿不到，图片会保持未重排）
+      const r = await client.getRead(id).catch(() => null);
+      return { pages: recovered, scrambleId: r?.scramble_id };
+    }
     const r = await client.getRead(id).catch(() => null);
     if (!r || !Array.isArray(r.images) || r.images.length === 0) return null;
     return { pages: r.images, scrambleId: r.scramble_id };

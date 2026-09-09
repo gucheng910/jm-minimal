@@ -193,9 +193,15 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
       await readOnline(chapterId, label);
       return;
     }
+    // 只有图片、没有 IDB 记录（老版本配额溢出/迁移中断）：联网补一次 scrambleId，否则切片无法重排
+    let scrambleId = rec?.scrambleId;
+    if (!rec) {
+      const r = await client.getRead(chapterId).catch(() => null);
+      if (r) scrambleId = r.scramble_id;
+    }
     const urls = await toOfflinePageUrls(chapterId, pages);
     recordHistory(chapterId, label);
-    setReading({ id: chapterId, title: [book?.name, label].filter(Boolean).join(" "), scrambleId: rec?.scrambleId, pages: urls, offline: true });
+    setReading({ id: chapterId, title: [book?.name, label].filter(Boolean).join(" "), scrambleId, pages: urls, offline: true });
   }
 
   /** 未缓存的话：正常走网络（没网就报错，不做特殊处理） */

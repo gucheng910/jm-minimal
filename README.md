@@ -18,10 +18,10 @@
 
 | 文件 | 适用 | 下载 |
 |---|---|---|
-| `jm-minimal-modern-1.7.2.apk` | Android 10+ / 新系统（targetSdk 36） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.2/jm-minimal-modern-1.7.2.apk) |
-| `jm-minimal-compat-1.7.2.apk` | 旧 Android / 带安卓兼容层的鸿蒙 2~4 | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.2/jm-minimal-compat-1.7.2.apk) |
-| `jm-minimal-portable-1.7.2.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.2/jm-minimal-portable-1.7.2.exe) |
-| `jm-minimal-setup-1.7.2.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.2/jm-minimal-setup-1.7.2.exe) |
+| `jm-minimal-modern-1.7.3.apk` | Android 10+ / 新系统（targetSdk 36） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.3/jm-minimal-modern-1.7.3.apk) |
+| `jm-minimal-compat-1.7.3.apk` | 旧 Android / 带安卓兼容层的鸿蒙 2~4 | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.3/jm-minimal-compat-1.7.3.apk) |
+| `jm-minimal-portable-1.7.3.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.3/jm-minimal-portable-1.7.3.exe) |
+| `jm-minimal-setup-1.7.3.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.7.3/jm-minimal-setup-1.7.3.exe) |
 
 > 注意：HarmonyOS NEXT（纯血鸿蒙）不支持 APK，请使用官方支持的渠道；兼容版适用于 HarmonyOS 2~4 等带 Android 兼容层的系统。
 
