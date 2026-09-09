@@ -228,6 +228,7 @@ node tools/release.mjs 1.7.1              # 仅本地：改版本号、出包、
 node tools/release.mjs 1.7.1 --publish    # 额外创建 Release（draft → 逐个上传重试 → 发布 → §5.4 校验）
 node tools/release.mjs 1.7.1 --dry-run    # 只打印会改哪些文件 / 会做哪些步骤
 node tools/release.mjs 1.7.1 --skip-pc    # 只出 APK
+node tools/release.mjs 1.7.1 --verify-only # 只校验已发布的 Release（走 gh API，本机被墙也能用）
 # 手动分步（脚本内部就是按这个顺序调用的）
 npx electron-builder --win nsis          # PC 安装版 → release-pc/
 npx electron-builder --win portable      # PC 便携版
