@@ -87,6 +87,23 @@ describe("navTransition（页面推拉转场）", () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 
+  it("返回的 Promise 在「更新已落地」后才 resolve（调用方据此排序异步工作）", async () => {
+    const { calls } = installVT();
+    const order: string[] = [];
+    const p = navTransition("push", () => order.push("update")).then(() => order.push("after"));
+    order.push("sync-after-call");
+    expect(order).toEqual(["sync-after-call"]); // 走转场时更新是异步的，必须 await
+    calls[0]();
+    await p;
+    expect(order).toEqual(["sync-after-call", "update", "after"]);
+  });
+
+  it("不支持转场时：更新同步执行，Promise 立即 resolve", async () => {
+    const order: string[] = [];
+    await navTransition("push", () => order.push("update")).then(() => order.push("after"));
+    expect(order).toEqual(["update", "after"]);
+  });
+
   it("finished 一直不落定时，1.2s 兜底解锁（避免后续导航全部失去动画）", async () => {
     vi.useFakeTimers();
     const { start } = installVT(new Promise<void>(() => { /* 永不落定 */ }));

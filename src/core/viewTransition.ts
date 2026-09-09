@@ -18,18 +18,26 @@ function mark(dir: NavDir) {
   } catch { /* ignore */ }
 }
 
-export function navTransition(dir: NavDir, update: () => void) {
+/**
+ * 返回的 Promise 在「更新函数真正执行完」后 resolve。
+ * 调用方若在转场之后还要做异步工作（例如拉详情数据后覆盖乐观快照），
+ * 必须 await 它，否则可能出现「异步结果先落地、转场回调后执行」把新数据覆盖掉的竞态。
+ */
+export function navTransition(dir: NavDir, update: () => void): Promise<void> {
   const doc = document as VTDocument;
   const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let resolveApplied: () => void = () => { /* 赋值于下方 */ };
+  const applied = new Promise<void>((res) => { resolveApplied = res; });
   if (!doc.startViewTransition || running || reduce || document.visibilityState !== "visible") {
     update();
-    return;
+    resolveApplied();
+    return applied;
   }
   running = true;
   const root = document.documentElement;
   root.dataset.nav = dir;
   let called = false;
-  const run = () => { if (!called) { called = true; update(); } };
+  const run = () => { if (!called) { called = true; update(); } resolveApplied(); };
   try {
     const t = doc.startViewTransition(() => { flushSync(run); });
     const done = () => {
@@ -45,4 +53,5 @@ export function navTransition(dir: NavDir, update: () => void) {
     delete root.dataset.nav;
     run();
   }
+  return applied;
 }
