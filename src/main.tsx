@@ -4,6 +4,7 @@ import "./index.css";
 import { registerPwa } from "./pwa";
 import { initDnsClean } from "./core/dnsClean";
 import { LOCAL_VERSION } from "./core/constants";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 
 // 禁止浏览器自动滚动恢复（SPA 内部手动管理）
 try { history.scrollRestoration = "manual"; } catch { /* ignore */ }
@@ -45,4 +46,9 @@ window.addEventListener("unhandledrejection", (e) => {
   showFatal("Promise错误: " + (r && (r.message || String(r)) || "unknown"));
 });
 
-createRoot(document.getElementById("root")!).render(<App />);
+// App 级兜底：抽屉/会员页等外壳里的渲染异常此前会把整个界面打空（1.7.2 前的抽屉崩溃就是这样）
+createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary label="应用" fullPage>
+    <App />
+  </ErrorBoundary>
+);

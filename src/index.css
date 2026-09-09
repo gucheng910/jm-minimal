@@ -1650,6 +1650,13 @@ body.jm-scroll-lock { overflow: hidden; }
 .sr-sentinel { height: 1px; }
 [data-theme="dark"] .page-scrim { background: rgba(0, 0, 0, 0.42); }
 
+/* App 级错误兜底页：出错时至少保留可读信息与重试入口 */
+.err-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: calc(var(--top-h) + 16px) 12px 24px;
+}
+
 /* 详情页「相关漫画」区块 */
 .related-block { margin-top: 14px; }
 .related-block h3 { margin: 0 0 8px; font-size: 15px; }

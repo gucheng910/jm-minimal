@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Capacitor } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { client } from "./core/api";
 import { measureAll } from "./core/speed";
 import type { SpeedSample } from "./core/speed";
 import { sessionStore } from "./core/storage";
-import { BookIcon, CheckInIcon, ClockIcon, CloseIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon, UserIcon } from "./ui/icons";
+import { BookIcon, CheckInIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon, UserIcon } from "./ui/icons";
 import { authService } from "./state/auth";
 import ContentView from "./ContentView";
 import { ErrorBoundary } from "./ui/ErrorBoundary";

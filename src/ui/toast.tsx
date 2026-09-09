@@ -15,7 +15,6 @@ export function pushToast(text: string, kind: ToastKind = "info", action?: strin
 
 export default function ToastHost() {
   const [items, setItems] = useState<ToastItem[]>([]);
-  const [tap, setTap] = useState<{ id: number; action?: string } | null>(null);
 
   useEffect(() => {
     const handler = (d: ToastDetail) => {

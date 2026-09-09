@@ -6,6 +6,10 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
+    // 死代码防线：这次重构手工删掉了一大把「只写不读」的状态/函数（loadFavorites、jumpPage、dlState…），
+    // 开这两个开关后同类问题由 tsc 直接报错，CI 的 npm run build 会拦住
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "resolveJsonModule": true,

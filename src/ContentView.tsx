@@ -4,7 +4,6 @@ import { navTransition } from "./core/viewTransition";
 import { emit, on } from "./core/bus";
 import { client } from "./core/api";
 import ReaderPanel from "./Reader";
-import Loading from "./ui/Loading";
 import { pushToast } from "./ui/toast";
 import { useWeekRank } from "./hooks/useWeekRank";
 import { useCategoryFeed } from "./hooks/useCategoryFeed";
@@ -28,10 +27,6 @@ type Mode = "home" | "detail" | "reader" | "week";
 
 // 滚动恢复 key（sessionStorage 兜底，避免 ref 丢失）
 const SCROLL_KEY = "jm:pendingRestoreY";
-
-function progressKey(id: number | string): string {
-  return "jmclient.read.y." + String(id);
-}
 
 /** 特殊搜索结果层（详情页作者/标签 → 只读搜索页）的完整状态 */
 interface SRState {
@@ -59,8 +54,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [detailFrom, setDetailFrom] = useState<"list" | "search">("list");
   const srReqIdRef = useRef(0);
   const srParentScrollRef = useRef(0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   // 详情页数据与动作：详情/评论/收藏/购买/切章/阅读器数据
   const album = useAlbumDetail({
     // 搜索层背后的父详情若是同一部，一并刷新（避免返回时拿到旧快照）
@@ -215,7 +208,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       const reqId = ++commentReqIdRef.current;
       album.set(back);
       album.setComments(null);
-      setError("");
       client.getAlbumComments(back.id, 1)
         .then((c) => { if (commentReqIdRef.current === reqId) album.setComments(c); })
         .catch(() => { /* 评论拉取失败不影响详情页 */ });
@@ -258,9 +250,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
             if (!client.apiBase) await client.init();
             await cat.openCategories();
             await cat.load("", "", 1, true, "");
-          } catch (err) {
-            setError(String(err));
-          }
+          } catch { /* useCategoryFeed 内部已记录错误 */ }
         })();
       }
       if (action === "latest") { void home.loadLatest(); }
@@ -300,7 +290,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   useEffect(() => {
     let alive = true;
     (async () => {
-      setBusy(true);
       try {
         // 18+ 门放行后才开始网络启动（点击确认后由 App 放行），避免后台提前跑完造成“秒进”
         await gatePassed;
@@ -340,10 +329,10 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
             if (alive && Array.isArray(r2)) list = r2 as AlbumSummary[];
           }
           if (alive && list) {
-            setError("");
+            home.setError("");
             home.show(list, "latest", false, 1);
           } else if (alive) {
-            setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
+            home.setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
             pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
           }
         }
@@ -357,21 +346,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           }
         }
       } catch (err) {
-        if (alive) setError(String(err));
-      } finally {
-        if (alive) setBusy(false);
+        if (alive) home.setError(String(err));
       }
     })();
     return () => { alive = false; };
   }, []);
-
-  async function run<T>(fn: () => Promise<T>): Promise<T | null> {
-    setBusy(true);
-    setError("");
-    try { return await fn(); }
-    catch (err) { setError(String(err)); return null; }
-    finally { setBusy(false); }
-  }
 
   /** 打开周榜：数据与分页都在 useWeekRank 内，这里只负责记滚动位置与切页 */
   async function openWeek() {
@@ -410,7 +389,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         setSrOpen(false);
       }
       setMode("detail");
-      setError("");
       // 新页从顶部开始（列表位置已存进 listScrollRef，返回时恢复）
       window.scrollTo(0, 0);
     };

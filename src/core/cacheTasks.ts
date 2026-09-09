@@ -1,5 +1,5 @@
 // 缓存任务中心：队列化下载（暂停/继续/删除/失败提示），退出 App 即自动停止（无需额外处理）。
-import { cacheCover, cacheName, cachePage, clearAllAlbumCaches, deleteAlbumCache } from "./offline";
+import { cacheCover, cachePage, clearAllAlbumCaches, deleteAlbumCache } from "./offline";
 import { emit } from "./bus";
 import type { ReadPage } from "./types";
 

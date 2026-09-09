@@ -6,7 +6,6 @@ import type { ReadPage } from "../core/types";
 import ReaderPanel from "../Reader";
 import { pushToast } from "./toast";
 import { CloseIcon } from "./icons";
-import { SkeletonGrid } from "./SkeletonGrid";
 import { emit, on } from "../core/bus";
 
 interface Reading {

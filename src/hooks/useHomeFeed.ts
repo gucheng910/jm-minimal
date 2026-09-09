@@ -21,6 +21,8 @@ export interface HomeFeedApi {
   hasMore: boolean;
   busy: boolean;
   error: string;
+  /** 直接写错误（冷启动等外部流程的失败提示） */
+  setError: (msg: string) => void;
   /** 直接落地一份列表（冷启动预取、刷新等外部数据源） */
   show: (list: AlbumSummary[], kind: FeedKind, hasMore?: boolean, page?: number) => void;
   loadLatest: () => Promise<void>;
@@ -97,5 +99,5 @@ export function useHomeFeed(opts: HomeFeedOptions = {}): HomeFeedApi {
     setError("");
   }, []);
 
-  return { items, kind, page, hasMore, busy, error, show, loadLatest, loadRandom, loadMore, reset };
+  return { items, kind, page, hasMore, busy, error, setError, show, loadLatest, loadRandom, loadMore, reset };
 }

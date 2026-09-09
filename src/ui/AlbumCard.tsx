@@ -3,8 +3,6 @@ import { memo, useEffect, useRef, useState } from "react";
 import { client } from "../core/api";
 import type { AlbumSummary } from "../core/types";
 
-const MAX_IMG_TRIES = 2;
-
 export function albumCoverUrl(a: AlbumSummary): string {
   const direct = a.image || "";
   if (direct.startsWith("http")) return direct;

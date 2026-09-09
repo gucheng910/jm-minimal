@@ -5,7 +5,6 @@ import { UI_KEYS } from "../core/constants";
 import { AlbumGrid } from "./AlbumGrid";
 import { SkeletonGrid } from "./SkeletonGrid";
 import type { AlbumSummary } from "../core/types";
-import { pushToast } from "./toast";
 import { CloseIcon } from "./icons";
 
 function loadLocalHistory(): AlbumSummary[] {

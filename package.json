@@ -7,6 +7,7 @@
     "dev": "vite",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "node tools/e2e/run.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cap:sync": "cap sync android",

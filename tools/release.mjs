@@ -17,7 +17,7 @@
  *   4) 发布后自动做 BUILDING §5.4 校验：线上 latest.yml sha512 对比 + 资产 HEAD 200
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import fs, { readFileSync, writeFileSync, copyFileSync, existsSync, statSync, readdirSync } from "node:fs";
+import fs, { readFileSync, writeFileSync, copyFileSync, existsSync, statSync, readdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -265,6 +265,41 @@ const assets = assetCandidates.filter(([n, f]) => {
   return true;
 });
 
+/**
+ * 收尾清理：只保留最近 keep 个版本的产物（历史版本在 GitHub Release 上有归档），
+ * 并清掉所有 -log 调试包。避免 release/ 与 release-pc/ 无限膨胀（曾累计 900MB）。
+ */
+function pruneArtifacts(keep = 2) {
+  const verOf = (name) => (name.match(/-(\d+\.\d+\.\d+)(?:-log)?\.(?:apk|exe|exe\.blockmap)$/) || [])[1];
+  const versions = new Set();
+  for (const dir of ["release", "release-pc"]) {
+    for (const f of readdirSync(path.join(ROOT, dir))) {
+      const v = verOf(f);
+      if (v) versions.add(v);
+    }
+  }
+  const sorted = [...versions].sort((a, b) => {
+    const A = a.split(".").map(Number), B = b.split(".").map(Number);
+    for (let i = 0; i < 3; i++) if (A[i] !== B[i]) return A[i] - B[i];
+    return 0;
+  });
+  const keepSet = new Set(sorted.slice(-keep));
+  let removed = 0;
+  for (const dir of ["release", "release-pc"]) {
+    const full = path.join(ROOT, dir);
+    for (const f of readdirSync(full)) {
+      const v = verOf(f);
+      if (!v) continue;
+      if (f.includes("-log.") || !keepSet.has(v)) {
+        rmSync(path.join(full, f), { force: true });
+        removed++;
+      }
+    }
+  }
+  step("清理旧产物");
+  log("  保留版本：" + [...keepSet].join(" / ") + "，删除 " + removed + " 个文件");
+}
+
 /** §5.4 发布后校验：走 gh API（资产下载域名在本机可能被墙） */
 function verifyRelease(list, strict = true) {
   const tag = "v" + version;
@@ -307,6 +342,7 @@ function verifyRelease(list, strict = true) {
     }
   }
   log("\nRelease: https://github.com/" + REPO + "/releases/tag/" + tag);
+  pruneArtifacts();
 }
 
 if (PUBLISH) {
@@ -344,6 +380,7 @@ if (PUBLISH) {
   log("  2) git commit -am \"chore(release): " + version + "\" && git push");
   log("  3) node tools/release.mjs " + version + " --publish --skip-pc --skip-android");
   log("     （复用本次产物直接上传；--publish 要求工作区干净，故必须先提交版本号）");
+  pruneArtifacts();
 }
 
 // ---------------------------------------------------------------- 汇总

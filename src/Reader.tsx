@@ -165,11 +165,9 @@ export default function ReaderPanel({ albumId, pages, title, scrambleId, onBack,
   }, [current, pageUrls]);
 
   useEffect(() => {
-    let cancelled = false;
     if (!client.setting) {
       client.getSetting().catch(() => { /* ignore */ });
     }
-    return () => { cancelled = true; };
   }, []);
 
   // 卸载时释放离线阅读 blob URL，防止泄漏
