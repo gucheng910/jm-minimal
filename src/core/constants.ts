@@ -6,7 +6,7 @@ export const HOST_KEY_SECRET = "diosfjckwpqpdfjkvnqQjsik";
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 /** 出包标识（诊断用，每次发布更新） */
-export const BUILD_TAG = "v20260909-1.7.4";
+export const BUILD_TAG = "v20260909-1.7.5";
 /**
  * 当前客户端版本号（由 UpdateSection / 侧边栏版本信息共用）。
  * 构建时由 vite.config.ts 的 define 从 package.json 注入 __APP_VERSION__，
