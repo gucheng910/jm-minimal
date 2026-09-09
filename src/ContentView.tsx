@@ -9,20 +9,23 @@ import ReaderPanel from "./Reader";
 import Loading from "./ui/Loading";
 import { pushToast } from "./ui/toast";
 import { sanitizeCommentHtml } from "./core/commentRich";
-import { PAGE_SIZE, RANK_MODES, SORT_MODES, UI_KEYS } from "./core/constants";
+import { PAGE_SIZE, UI_KEYS } from "./core/constants";
 import { useWeekRank } from "./hooks/useWeekRank";
+import { useCategoryFeed } from "./hooks/useCategoryFeed";
+import CategoryFeed from "./pages/CategoryFeed";
 import WeekRank from "./pages/WeekRank";
-import { albumCoverUrl } from "./ui/AlbumCard";
 import { AlbumGrid } from "./ui/AlbumGrid";
+import { albumCoverUrl, prefetchCovers } from "./ui/AlbumCard";
 import { SearchResultPage } from "./ui/SearchResultPage";
 import type { SRKind } from "./ui/SearchResultPage";
 import { SkeletonGrid } from "./ui/SkeletonGrid";
 import { debouncedSetJSON, getJSONNow, removeKeyNow } from "./core/debounceStorage";
 import { announceStartupReady, gatePassed } from "./core/startup";
-import type { AlbumDetail, AlbumSummary, CategoryItem, ForumPayload, ReadPayload } from "./core/types";
+import type { AlbumDetail, AlbumSummary, ForumPayload, ReadPayload } from "./core/types";
 
 type Mode = "home" | "detail" | "reader" | "week";
-type FeedKind = "latest" | "search" | "favorites" | "history" | "category" | "week" | null;
+// 分类/周榜已各自持有列表状态，不再共用这里的 feedKind
+type FeedKind = "latest" | "search" | "favorites" | "history" | null;
 
 // 滚动恢复 key（sessionStorage 兜底，避免 ref 丢失）
 const SCROLL_KEY = "jm:pendingRestoreY";
@@ -108,11 +111,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<AlbumSummary[]>(loadHistory);
-  const [categoryList, setCategoryList] = useState<CategoryItem[]>([]);
-  const [feedC, setFeedC] = useState("");
-  const [feedOrder, setFeedOrder] = useState("");
-  const [catSlug, setCatSlug] = useState("");
-  const [catSub, setCatSub] = useState("");
+  const cat = useCategoryFeed();
   const week = useWeekRank();
   const [comments, setComments] = useState<ForumPayload | null>(null);
   const [commentText, setCommentText] = useState("");
@@ -330,9 +329,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         (async () => {
           try {
             if (!client.apiBase) await client.init();
-            setFeedOrder("");
-            await openCategories();
-            loadCategory("", "", 1, true, "");
+            await cat.openCategories();
+            await cat.load("", "", 1, true, "");
           } catch (err) {
             setError(String(err));
           }
@@ -382,7 +380,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         if (!client.apiBase) await client.init();
         if (initialAction === "categories") {
           try { await client.getSetting(); } catch { /* 不阻塞分类加载 */ }
-          await openCategories();
+          await cat.openCategories();
           return;
         }
         if (initialAction === "search") {
@@ -484,16 +482,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     if (modeRef.current === "detail" || modeRef.current === "reader") return;
     setMode("home");
     // 首屏前 6 张封面预取（不阻塞渲染，命中浏览器缓存后立即显示）
-    try {
-      for (const a of list.slice(0, 6)) {
-        const url = albumCoverUrl(a);
-        if (url.startsWith("http")) {
-          const im = new Image();
-          im.decoding = "async";
-          im.src = url;
-        }
-      }
-    } catch { /* ignore */ }
+    prefetchCovers(list);
   }
 
   async function loadLatest() {
@@ -510,33 +499,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       setError("网络连接失败，推荐内容加载不出来。先去会员页「DNS 加速」配置 DoT 公共 DNS（可解决大多数运营商 DNS 污染）；配置后需删除后台重新进入 App 使设置生效，再重试；仍失败再尝试魔法或切换线路。");
       pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
     }
-  }
-
-  async function openCategories() {
-    const cats = await run(() => client.getCategories());
-    if (cats) {
-      setCategoryList(cats.categories || []);
-      // 注意：不能 setMode("home")——若它晚于“排行榜”打开完成，会把周榜页打回分类初始页
-    }
-  }
-
-  async function loadCategory(slug: string, sub = "", p = 1, replace = true, order?: string) {
-    const c = sub ? slug + "_" + sub : slug;
-    const o = order !== undefined ? order : feedOrder;
-    const result = await run(() => client.getCategoryAlbums(c, p, o));
-    if (!result) return;
-    const content = result.content || [];
-    const next = replace ? content : [...items, ...content];
-    const total = Number(result.total || 0);
-    setCatSlug(slug);
-    setCatSub(sub);
-    setFeedC(c);
-    showList(next, "category", replace ? next.length < total : next.length < total, p);
-  }
-
-  function changeSort(o: string) {
-    setFeedOrder(o);
-    loadCategory(catSlug, catSub, 1, true, o);
   }
 
   /** 打开周榜：数据与分页都在 useWeekRank 内，这里只负责记滚动位置与切页 */
@@ -694,10 +656,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       if (list) { const next = [...items, ...list]; showList(next, "latest", list.length >= PAGE_SIZE, p); }
     } else if (feedKind === "search" && query.trim()) {
       await searchPage(query.trim(), page + 1, false);
-    } else if (feedKind === "category") {
-      const p = page + 1;
-      const result = await run(() => client.getCategoryAlbums(feedC, p, feedOrder));
-      if (result && result.content) showList([...items, ...result.content], "category", items.length + result.content.length < Number(result.total || 0), p);
     }
   }
 
@@ -1067,47 +1025,24 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   if (pageMode === "categories") {
-    const activeCat = categoryList.find((c) => String(c.slug ?? "") === String(catSlug ?? ""));
-    const subCats = activeCat?.sub_categories || [];
     return (
-      <div>
-        <div className="card row">
-          {categoryList.map((c) => {
-            const slug = String(c.slug ?? "");
-            const active = slug === String(catSlug ?? "") && !catSub;
-            return (
-              <button key={slug || String(c.id)} className={active ? "chip active" : "chip"} disabled={busy} onClick={() => { setFeedOrder(""); loadCategory(slug, "", 1, true, ""); }}>{c.name}</button>
-            );
-          })}
-        </div>
-        <div className="card row">
-          <span className="chip-label">排序</span>
-          {SORT_MODES.map(([k, label]) => (
-            <button key={k} className={(feedOrder === k ? "chip active" : "chip") + " sort-chip"} disabled={busy} onClick={() => changeSort(k)}>{label}</button>
-          ))}
-        </div>
-        <div className="card row">
-          <span className="chip-label">排行榜</span>
-          {RANK_MODES.map(([k, label]) => (
-            <button key={k} className={(feedOrder === k ? "chip active" : "chip") + " sort-chip"} disabled={busy} onClick={() => changeSort(k)}>{label}</button>
-          ))}
-        </div>
-        {subCats.length > 0 && (
-          <div className="card row">
-            {subCats.map((s) => {
-              const subSlug = String(s.slug ?? "");
-              const active = catSub === subSlug;
-              return (
-                <button key={subSlug} className={active ? "chip active" : "chip"} disabled={busy} onClick={() => loadCategory(String(activeCat?.slug ?? ""), subSlug, 1, true, feedOrder)}>{s.name}</button>
-              );
-            })}
-          </div>
-        )}
-        {error && <div className="card err">{error}</div>}
-        {busy && items.length === 0 ? <SkeletonGrid /> : null}
-        <AlbumGrid key={"g" + settingTick} items={items} onOpen={openDetail} />
-        {hasMore && <div className="card row"><button disabled={busy} onClick={loadMore}>加载更多（第 {page + 1} 页）</button></div>}
-      </div>
+      <CategoryFeed
+        categories={cat.categories}
+        items={cat.items}
+        slug={cat.slug}
+        sub={cat.sub}
+        order={cat.order}
+        page={cat.page}
+        hasMore={cat.hasMore}
+        busy={cat.busy}
+        error={cat.error}
+        gridKey={"g" + settingTick}
+        onPickCategory={(s) => { void cat.load(s, "", 1, true, ""); }}
+        onPickSub={(s, subSlug, order) => { void cat.load(s, subSlug, 1, true, order); }}
+        onSort={cat.changeSort}
+        onLoadMore={cat.loadMore}
+        onOpenAlbum={openDetail}
+      />
     );
   }
 

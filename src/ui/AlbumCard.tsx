@@ -43,6 +43,20 @@ function Cover({ url, alt }: { url?: string; alt: string }) {
   );
 }
 
+/** 首屏封面预取（不阻塞渲染，命中浏览器缓存后立即显示） */
+export function prefetchCovers(list: AlbumSummary[], count = 6): void {
+  try {
+    for (const a of list.slice(0, count)) {
+      const url = albumCoverUrl(a);
+      if (url.startsWith("http")) {
+        const im = new Image();
+        im.decoding = "async";
+        im.src = url;
+      }
+    }
+  } catch { /* ignore */ }
+}
+
 export const AlbumCard = memo(function AlbumCard({ album, onOpen }: { album: AlbumSummary; onOpen: (a: AlbumSummary) => void }) {
   return (
     <button className="list-item" onClick={() => onOpen(album)}>
