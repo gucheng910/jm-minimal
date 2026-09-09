@@ -9,7 +9,9 @@ import ReaderPanel from "./Reader";
 import Loading from "./ui/Loading";
 import { pushToast } from "./ui/toast";
 import { sanitizeCommentHtml } from "./core/commentRich";
-import { RANK_MODES, SORT_MODES, UI_KEYS } from "./core/constants";
+import { PAGE_SIZE, RANK_MODES, SORT_MODES, UI_KEYS } from "./core/constants";
+import { useWeekRank } from "./hooks/useWeekRank";
+import WeekRank from "./pages/WeekRank";
 import { albumCoverUrl } from "./ui/AlbumCard";
 import { AlbumGrid } from "./ui/AlbumGrid";
 import { SearchResultPage } from "./ui/SearchResultPage";
@@ -17,12 +19,11 @@ import type { SRKind } from "./ui/SearchResultPage";
 import { SkeletonGrid } from "./ui/SkeletonGrid";
 import { debouncedSetJSON, getJSONNow, removeKeyNow } from "./core/debounceStorage";
 import { announceStartupReady, gatePassed } from "./core/startup";
-import type { AlbumDetail, AlbumSummary, CategoryItem, ForumPayload, ReadPayload, WeekPayload } from "./core/types";
+import type { AlbumDetail, AlbumSummary, CategoryItem, ForumPayload, ReadPayload } from "./core/types";
 
 type Mode = "home" | "detail" | "reader" | "week";
 type FeedKind = "latest" | "search" | "favorites" | "history" | "category" | "week" | null;
 
-const PAGE_SIZE = 80;
 // 滚动恢复 key（sessionStorage 兜底，避免 ref 丢失）
 const SCROLL_KEY = "jm:pendingRestoreY";
 const HISTORY_KEY = UI_KEYS.history;
@@ -108,14 +109,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [error, setError] = useState("");
   const [history, setHistory] = useState<AlbumSummary[]>(loadHistory);
   const [categoryList, setCategoryList] = useState<CategoryItem[]>([]);
-  const [weekPayload, setWeekPayload] = useState<WeekPayload | null>(null);
   const [feedC, setFeedC] = useState("");
   const [feedOrder, setFeedOrder] = useState("");
   const [catSlug, setCatSlug] = useState("");
   const [catSub, setCatSub] = useState("");
-  const [weekType, setWeekType] = useState("");
-  const [weekIssue, setWeekIssue] = useState("");
-  const [weekMode, setWeekMode] = useState(false);
+  const week = useWeekRank();
   const [comments, setComments] = useState<ForumPayload | null>(null);
   const [commentText, setCommentText] = useState("");
   const [cached, setCached] = useState(false);
@@ -204,12 +202,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     });
   }
 
-  function exitWeekToHome() {
-    setWeekMode(false);
-    detailReqIdRef.current++;
-    setMode("home");
-  }
-
   function exitReaderToDetail() {
     setRead(null);
     setMode("detail");
@@ -295,7 +287,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     } else if (mode === "detail") {
       detailBack();
     } else if (mode === "week") {
-      exitWeekToHome();
+      week.reset();
+      detailReqIdRef.current++;
+      setMode("home");
     } else {
       // home 等其他模式不消费返回键，让 App.tsx 处理两次返回退出
       return false;
@@ -545,37 +539,10 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     loadCategory(catSlug, catSub, 1, true, o);
   }
 
+  /** 打开周榜：数据与分页都在 useWeekRank 内，这里只负责记滚动位置与切页 */
   async function openWeek() {
     if (mode === "home") saveScrollTarget(window.scrollY); // 记住打开周榜前列位置
-    const wk = await run(() => client.getWeek());
-    if (!wk) return;
-    setWeekPayload(wk);
-    setWeekMode(true);
-    setMode("week");
-    // 自动选中最新一期 + 全部类型并立即加载（type 为空=全部）
-    const latest = wk.categories && wk.categories[0];
-    if (latest) {
-      setWeekIssue(String(latest.id));
-      setWeekType("");
-      await loadWeekList(String(latest.id), "", 1, true);
-    }
-  }
-
-  async function loadWeekList(issueId?: string, type?: string, p = 1, replace = true) {
-    const iid = issueId || weekIssue;
-    const tid = type || weekType;
-    if (!iid) return; // tid 为空串=全部类型
-    const result = await run(() => client.getWeekAlbums(iid, tid, p));
-    if (!result) return;
-    const list = result.list || [];
-    const next = replace ? list : [...items, ...list];
-    setWeekIssue(iid);
-    setWeekType(tid);
-    // 注意：不能走 showList（它会 setMode("home") 把排行榜页打回分类页）
-    setItems(next);
-    setFeedKind("week");
-    setPage(p);
-    setHasMore(list.length >= PAGE_SIZE);
+    if (await week.open()) setMode("week");
   }
 
   async function doSearch(e: FormEvent) {
@@ -731,9 +698,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       const p = page + 1;
       const result = await run(() => client.getCategoryAlbums(feedC, p, feedOrder));
       if (result && result.content) showList([...items, ...result.content], "category", items.length + result.content.length < Number(result.total || 0), p);
-    } else if (feedKind === "week" && weekIssue && weekType) {
-      const p = page + 1;
-      await loadWeekList(weekIssue, weekType, p, false);
     }
   }
 
@@ -770,8 +734,10 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       window.scrollTo(0, 0);
     };
     if (from === "list") {
-      // 列表 → 详情：推拉转场（旧页后退，详情页从右滑入）
-      navTransition("push", enterDetail);
+      // 列表 → 详情：推拉转场（旧页后退，详情页从右滑入）。
+      // 必须 await：转场回调是异步执行的，若不等它落地就发起请求，
+      // 响应可能先回来并被随后的乐观快照覆盖（详情页会缺标签/简介）
+      await navTransition("push", enterDetail);
     } else {
       // 搜索结果页 → 详情：搜索层自带滑出动画，不再叠加整页转场
       enterDetail();
@@ -886,24 +852,22 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   const logged = Boolean(localStorage.getItem("jwttoken"));
 
-  if (mode === "week" && weekPayload) {
+  if (mode === "week" && week.payload) {
     return (
-      <div className="card">
-        <button className="ghost" onClick={exitWeekToHome}>返回列表</button>
-        <h2>周榜（选择期号 + 类型）</h2>
-        <div className="row">
-          <select value={weekIssue} onChange={(e) => setWeekIssue(e.target.value)}>
-            <option value="">选择期号</option>
-            {weekPayload.categories.map((c) => <option key={String(c.id)} value={String(c.id)}>{String(c.time || c.id)}</option>)}
-          </select>
-          <select value={weekType} onChange={(e) => setWeekType(e.target.value)}>
-            <option value="">全部类型</option>
-            {weekPayload.type.map((t) => <option key={String(t.id)} value={String(t.id)}>{String(t.title)}</option>)}
-          </select>
-          <button disabled={busy || !weekIssue || !weekType} onClick={() => loadWeekList(weekIssue, weekType, 1, true)}>加载该期</button>
-        </div>
-        <AlbumGrid key={"g" + settingTick} items={items} onOpen={openDetail} />
-      </div>
+      <WeekRank
+        payload={week.payload}
+        items={week.items}
+        issue={week.issue}
+        type={week.type}
+        busy={week.busy}
+        error={week.error}
+        gridKey={"week" + settingTick}
+        onIssueChange={week.setIssue}
+        onTypeChange={week.setType}
+        onLoad={() => { void week.load(week.issue, week.type, 1, true); }}
+        onOpenAlbum={openDetail}
+        onBack={() => { week.reset(); detailReqIdRef.current++; setMode("home"); }}
+      />
     );
   }
 

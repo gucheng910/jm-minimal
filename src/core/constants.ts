@@ -33,6 +33,8 @@ export const STORAGE_KEYS = {
   authExpiry: "authExpiry"
 } as const;
 // ---- UI 共享常量（架构收敛：列表排序 / 榜单 / 本地存储键） ----
+/** 官方接口每页条数（latest / search / week 一致） */
+export const PAGE_SIZE = 80;
 export const SORT_MODES: Array<[string, string]> = [["", "最新"], ["tf", "最多爱心"]];
 export const RANK_MODES: Array<[string, string]> = [
   ["mv", "人气榜"], ["mv_m", "月榜"], ["mv_w", "周榜"], ["mv_t", "日榜"]
