@@ -221,9 +221,19 @@ const assetCandidates = [
   ["jm-minimal-portable-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-portable-" + version + ".exe")]
 ];
 const assets = assetCandidates.filter(([n, f]) => {
-  if (existsSync(f)) return true;
-  log("  ! 产物不存在，跳过：" + n);
-  return false;
+  if (!existsSync(f)) {
+    log("  ! 产物不存在，跳过：" + n);
+    return false;
+  }
+  // latest.yml 是 PC 自动更新的元数据，版本不符会害老用户，必须校验后再上传
+  if (n === "latest.yml") {
+    const v = (readFileSync(f, "utf8").match(/^version:\s*(.+)$/m) || [])[1];
+    if (v !== version) {
+      log("  ! latest.yml 里是 " + v + "，与目标 " + version + " 不符，跳过（先跑完整打包生成新的）");
+      return false;
+    }
+  }
+  return true;
 });
 
 if (PUBLISH) {
