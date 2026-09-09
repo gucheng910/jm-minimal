@@ -7,16 +7,17 @@ import { downloadAlbum, isAlbumCached } from "./core/offline";
 import ReaderPanel from "./Reader";
 import Loading from "./ui/Loading";
 import { pushToast } from "./ui/toast";
-import { sanitizeCommentHtml } from "./core/commentRich";
 import { PAGE_SIZE, UI_KEYS } from "./core/constants";
 import { useWeekRank } from "./hooks/useWeekRank";
 import { useCategoryFeed } from "./hooks/useCategoryFeed";
 import { useSearchFeed } from "./hooks/useSearchFeed";
 import SearchFeed from "./pages/SearchFeed";
+import AlbumDetailPage from "./pages/AlbumDetail";
 import CategoryFeed from "./pages/CategoryFeed";
 import WeekRank from "./pages/WeekRank";
 import { AlbumGrid } from "./ui/AlbumGrid";
 import { albumCoverUrl, prefetchCovers } from "./ui/AlbumCard";
+import { parsePaid } from "./core/albumMeta";
 import { SearchResultPage } from "./ui/SearchResultPage";
 import type { SRKind } from "./ui/SearchResultPage";
 import { SkeletonGrid } from "./ui/SkeletonGrid";
@@ -44,25 +45,6 @@ function saveHistoryEntry(entry: AlbumSummary) {
   const list = loadHistory().filter((x) => String(x.id) !== String(entry.id));
   list.unshift(entry);
   debouncedSetJSON(HISTORY_KEY, list.slice(0, 50), 500);
-}
-
-/** 是否付费未购：price 为有效金额且 purchased 无已购标记 */
-function parsePaid(d: AlbumDetail): boolean {
-  const p = Number(d.price);
-  if (!(p > 0)) return false;
-  const own = typeof d.purchased === "string"
-    ? !["", "0", "false", "null", "undefined"].includes(String(d.purchased).toLowerCase())
-    : Boolean(d.purchased);
-  return !own;
-}
-
-/** 详情页作者：完整详情是 string[]，列表乐观快照可能是 "a/b" 字符串，两种都要兼容 */
-function authorNames(d: AlbumDetail | null): string[] {
-  if (!d) return [];
-  const raw = d.author as unknown;
-  if (Array.isArray(raw)) return raw.map((x) => String(x).trim()).filter(Boolean);
-  if (typeof raw === "string") return raw.split("/").map((x) => x.trim()).filter(Boolean);
-  return [];
 }
 
 /** 特殊搜索结果层（详情页作者/标签 → 只读搜索页）的完整状态 */
@@ -193,6 +175,13 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     setMode("detail");
     // 阅读器滚动很长：回到详情需先回到页面顶部（进度已由阅读器自行保存，不影响）
     requestAnimationFrame(() => window.scrollTo(0, 0));
+  }
+
+  /** 复制 JM 号（详情页按钮） */
+  function copyJmId() {
+    if (!detail) return;
+    navigator.clipboard.writeText(String(detail.id));
+    pushToast("JM号已复制", "ok");
   }
 
   /** 详情页返回：父级是搜索页就先回搜索页，否则回列表 */
@@ -754,76 +743,29 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   if (mode === "detail" && detail) {
-    const locked = parsePaid(detail);
-    const authors = authorNames(detail);
-    // 一律转字符串：官方 tags 实测为 string[]，但个别专辑若返回非字符串，
-    // 直接当 React 子节点渲染会抛 "Objects are not valid as a React child" 导致整屏白屏
-    const tags = Array.isArray(detail.tags) ? detail.tags.filter(Boolean).map((t) => String(t)) : [];
     return (
       <>
       {/* key 必须固定：否则 React 会把首页列表的 DOM 节点（含下拉刷新指示器）复用成本卡片，
           下拉刷新遗留的 180ms 定时器随后把 display:none 打到详情页上 → 白屏 */}
       <div key="detail-page" className={"page-push" + (srOpen ? " pushed" : "")} aria-hidden={srOpen}>
-      <div className="card">
-        <button className="ghost" onClick={detailBack}>{detailFrom === "search" && sr ? "返回搜索结果" : "返回列表"}</button>
-        <h2>{detail.name}</h2>
-        <p className="muted">JM号：{String(detail.id)}
-          <button className="ghost" style={{ marginLeft: 8 }} onClick={() => { navigator.clipboard.writeText(String(detail.id)); pushToast("JM号已复制", "ok"); }}>复制</button>
-        </p>
-        <p className="muted">作者：{authors.length > 0
-          ? authors.map((a, i) => (
-            <span key={"au" + i}>
-              {i > 0 && <span className="meta-sep"> / </span>}
-              <button className="link" onClick={() => openSpecialSearch("author", a)}>{a}</button>
-            </span>
-          ))
-          : "-"} · 页数：{String(detail.total_photos ?? "-")}</p>
-        <p className="muted">标签：{tags.length > 0
-          ? tags.map((t, i) => (
-            <span key={"tg" + i}>
-              {i > 0 && <span className="meta-sep">、</span>}
-              <button className="link" onClick={() => openSpecialSearch("tag", t)}>{t}</button>
-            </span>
-          ))
-          : "-"}</p>
-        {Array.isArray(detail.series) && detail.series.length > 1 && (
-          <div className="row">
-            <label>选择话数</label>
-            <select value={String(detail.id)} onChange={(e) => switchChapter(e.target.value)}>
-              {detail.series.map((s) => <option key={String(s.id)} value={String(s.id)}>{"#" + String(s.sort ?? "") + " " + (s.name || "")}</option>)}
-            </select>
-          </div>
-        )}
-        <p>{detail.description}</p>
-        {locked && !logged && <p className="err">官方付费内容：请先登录，再通过官方会员中心购买（本客户端不做绕过）</p>}
-        {locked && logged && <div className="row"><button disabled={busy} onClick={buyAlbum}>使用官方 JCoin 购买</button></div>}
-        {!locked && (
-          <div className="row action-row">
-            {logged && <button className="ghost" disabled={busy || Boolean(detail.is_favorite)} onClick={toggleFavorite}>{detail.is_favorite ? "已收藏" : "☆ 收藏"}</button>}
-            <button disabled={busy} onClick={startRead}>立即阅读</button>
-          </div>
-        )}
-        <div className="comments">
-          <h3>评论区（官方 forum?aid=）</h3>
-          {!comments && <p className="muted">加载中…</p>}
-          {comments && comments.list.length === 0 && <p className="muted">暂无评论</p>}
-          {comments?.list.map((c) => (
-            <div key={String(c.CID || c.id || Math.random())} className="comment-item">
-              <b>{String(c.nickname || c.username || "?")}</b>
-              <span className="muted"> · {String(c.update_at || c.addtime || "")}</span>
-              {String(c.spoiler) === "1" && <span className="tag-spoiler">含剧透</span>}
-              <div className="comment-body" dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(String(c.content || "")) }} />
-            </div>
-          ))}
-          {logged && (
-            <div className="comment-box">
-              <textarea value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="发表评论（真实动作，请谨慎）" rows={3} />
-              <div className="row"><button disabled={busy || !commentText.trim()} onClick={submitComment}>发送评论（官方 /comment）</button></div>
-            </div>
-          )}
-          {!logged && <p className="muted">登录后可评论</p>}
-        </div>
-      </div>
+      <AlbumDetailPage
+        detail={detail}
+        logged={logged}
+        busy={busy}
+        comments={comments}
+        commentText={commentText}
+        backLabel={detailFrom === "search" && sr ? "返回搜索结果" : "返回列表"}
+        onBack={detailBack}
+        onCopyId={copyJmId}
+        onOpenAuthor={(a) => openSpecialSearch("author", a)}
+        onOpenTag={(t) => openSpecialSearch("tag", t)}
+        onSwitchChapter={switchChapter}
+        onBuy={buyAlbum}
+        onToggleFavorite={toggleFavorite}
+        onRead={startRead}
+        onCommentChange={setCommentText}
+        onSubmitComment={submitComment}
+      />
       </div>
       <div className={"page-scrim" + (srOpen ? " on" : "")} aria-hidden="true" />
       {sr && (
