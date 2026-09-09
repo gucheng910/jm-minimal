@@ -7,27 +7,26 @@ import { downloadAlbum, isAlbumCached } from "./core/offline";
 import ReaderPanel from "./Reader";
 import Loading from "./ui/Loading";
 import { pushToast } from "./ui/toast";
-import { PAGE_SIZE, UI_KEYS } from "./core/constants";
+import { UI_KEYS } from "./core/constants";
 import { useWeekRank } from "./hooks/useWeekRank";
 import { useCategoryFeed } from "./hooks/useCategoryFeed";
 import { useSearchFeed } from "./hooks/useSearchFeed";
 import SearchFeed from "./pages/SearchFeed";
 import AlbumDetailPage from "./pages/AlbumDetail";
+import HomeFeed from "./pages/HomeFeed";
+import PullToRefresh from "./ui/PullToRefresh";
+import { useHomeFeed } from "./hooks/useHomeFeed";
 import CategoryFeed from "./pages/CategoryFeed";
 import WeekRank from "./pages/WeekRank";
-import { AlbumGrid } from "./ui/AlbumGrid";
 import { albumCoverUrl, prefetchCovers } from "./ui/AlbumCard";
 import { parsePaid } from "./core/albumMeta";
 import { SearchResultPage } from "./ui/SearchResultPage";
 import type { SRKind } from "./ui/SearchResultPage";
-import { SkeletonGrid } from "./ui/SkeletonGrid";
 import { debouncedSetJSON, getJSONNow } from "./core/debounceStorage";
 import { announceStartupReady, gatePassed } from "./core/startup";
 import type { AlbumDetail, AlbumSummary, ForumPayload, ReadPayload } from "./core/types";
 
 type Mode = "home" | "detail" | "reader" | "week";
-// 分类/周榜已各自持有列表状态，不再共用这里的 feedKind
-type FeedKind = "latest" | "search" | "favorites" | "history" | null;
 
 // 滚动恢复 key（sessionStorage 兜底，避免 ref 丢失）
 const SCROLL_KEY = "jm:pendingRestoreY";
@@ -63,10 +62,6 @@ interface ContentViewProps { initialAction?: string }
 export default function ContentView({ initialAction = "" }: ContentViewProps = {}) {
   const pageMode = initialAction === "categories" ? "categories" : initialAction === "search" ? "search" : "home";
   const [mode, setMode] = useState<Mode>("home");
-  const [items, setItems] = useState<AlbumSummary[]>([]);
-  const [feedKind, setFeedKind] = useState<FeedKind>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
   const [detail, setDetail] = useState<AlbumDetail | null>(null);
   // ---- 特殊搜索结果层（页面栈语义）----
   // 栈最多同时存在「详情页 + 搜索页」两层：
@@ -83,6 +78,16 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [error, setError] = useState("");
   const [history, setHistory] = useState<AlbumSummary[]>(loadHistory);
   const cat = useCategoryFeed();
+  // 首页内容流：列表/分页/错误都在 hook 内；onListShown 负责「是否切回 home」的编排
+  const home = useHomeFeed({
+    onListShown: () => {
+      // 用户已主动进入详情/阅读器时，不把首页预取结果打回 home
+      // （修复：从会员页收藏/足迹点进详情，被冷启动测速后的 showList 抢回首页）
+      if (modeRef.current === "detail" || modeRef.current === "reader") return;
+      setMode("home");
+    },
+    onRandomFail: () => pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns")
+  });
   const week = useWeekRank();
   // 搜索纯数字 JM 号时服务端返回 redirect_aid → 直接打开详情页
   const search = useSearchFeed((aid) => { void openDetail({ id: aid } as AlbumSummary); });
@@ -93,16 +98,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const [dlState, setDlState] = useState<"idle" | "run" | "done">("idle");
   const [curPage, setCurPage] = useState(1);
   const [jumpInput, setJumpInput] = useState("1");
-  // 下拉刷新：DOM 直接更新（无 setState 触发重渲染） + 固定阈值
-  const [refreshing, setRefreshing] = useState(false);
-  const ptrStartY = useRef(0);
-  const ptrPosRef = useRef(0);
-  const isRefreshingRef = useRef(false);
-  const ptrIndicatorRef = useRef<HTMLDivElement | null>(null);
-  const ptrArrowRef = useRef<HTMLSpanElement | null>(null);
-  const ptrLabelRef = useRef<HTMLSpanElement | null>(null);
-  const MAX_PULL = 110;          // 阻力公式校正：拉到 110px 时即可达到阈值
-  const REFRESH_THRESHOLD = 70;   // 阈值 70px，正常手指下滑一次即可触发
   // 同步 mode 的 ref：异步回调里判断用户是否已主动进入详情/阅读器（防止首页预取把页面打回 home）
   const modeRef = useRef<Mode>("home");
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -292,7 +287,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           }
         })();
       }
-      if (action === "latest") { loadLatest(); }
+      if (action === "latest") { void home.loadLatest(); }
       if (action === "ranking") { openWeek(); }
       if (action === "search") {
         setMode("home");
@@ -313,7 +308,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       setComments(null);
       setMode("home");
       window.scrollTo({ top: 0 });
-      loadRandom();
+      void home.loadRandom();
     };
     return on("jm:refreshHome", handler);
   }, [pageMode]);
@@ -370,7 +365,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           }
           if (alive && list) {
             setError("");
-            showList(list, "latest", false);
+            home.show(list, "latest", false, 1);
           } else if (alive) {
             setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
             pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
@@ -428,35 +423,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     finally { setBusy(false); }
   }
 
-  function showList(list: AlbumSummary[], kind: FeedKind, hasMoreFlag = false, p = 1) {
-    setItems(list);
-    setFeedKind(kind);
-    setPage(p);
-    setHasMore(hasMoreFlag);
-    // 用户已主动进入详情/阅读器时，不把首页预取结果打回 home
-    // （修复：从会员页收藏/足迹点进详情，被冷启动测速后的 showList 抢回首页）
-    if (modeRef.current === "detail" || modeRef.current === "reader") return;
-    setMode("home");
-    // 首屏前 6 张封面预取（不阻塞渲染，命中浏览器缓存后立即显示）
-    prefetchCovers(list);
-  }
-
-  async function loadLatest() {
-    const list = await run(() => client.getLatest());
-    if (list) showList(list, "latest", list.length >= PAGE_SIZE);
-  }
-
-  async function loadRandom() {
-    const list = await run(() => client.getRandomRecommend());
-    if (list) {
-      showList(list, "latest", false);
-    } else if (list === null) {
-      // run() 失败已置 error；这里统一为可操作的提示
-      setError("网络连接失败，推荐内容加载不出来。先去会员页「DNS 加速」配置 DoT 公共 DNS（可解决大多数运营商 DNS 污染）；配置后需删除后台重新进入 App 使设置生效，再重试；仍失败再尝试魔法或切换线路。");
-      pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
-    }
-  }
-
   /** 打开周榜：数据与分页都在 useWeekRank 内，这里只负责记滚动位置与切页 */
   async function openWeek() {
     if (mode === "home") saveScrollTarget(window.scrollY); // 记住打开周榜前列位置
@@ -471,113 +437,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     setComments(null);
     setMode("home");
     window.scrollTo({ top: 0 });
-    loadRandom();
-  }
-
-  function handlePTRStart(e: React.TouchEvent) {
-    if (window.scrollY > 0 || isRefreshingRef.current) return;
-    ptrStartY.current = e.touches[0].clientY;
-  }
-  function handlePTRMove(e: React.TouchEvent) {
-    if (ptrStartY.current === 0 || isRefreshingRef.current) return;
-    const raw = e.touches[0].clientY - ptrStartY.current;
-    if (raw <= 0) {
-      ptrPosRef.current = 0;
-      updatePTRUI(0);
-      return;
-    }
-    // 阻力公式（更平缓）：pos = raw / (1 + raw/k)
-    // raw=70 → pos≈53；raw=150 → pos≈91；raw=300 → pos≈120（封顶）
-    const pos = Math.min(raw / (1 + raw / 220), MAX_PULL);
-    ptrPosRef.current = pos;
-    updatePTRUI(pos);
-  }
-  function handlePTREnd() {
-    if (ptrStartY.current === 0) return;
-    ptrStartY.current = 0;
-    const finalPos = ptrPosRef.current;
-    ptrPosRef.current = 0;
-    hidePTRUI();
-    if (finalPos < REFRESH_THRESHOLD) return; // 未达阈值，自动回弹
-    isRefreshingRef.current = true;
-    setRefreshing(true);
-    showRefreshingUI();
-    Promise.resolve().then(() => retryHomeFeed()).finally(() => {
-      isRefreshingRef.current = false;
-      setRefreshing(false);
-    });
-  }
-  /**
-   * PTR 指示器全靠手动改 DOM（绕开 React 重渲染）。
-   * 切页时该节点可能被 React 复用成别的元素（如详情页卡片），所以动手前必须确认它还是它自己，
-   * 否则遗留的定时器会把 display:none 打到新页面元素上（1.6.2 白屏事故）。
-   */
-  function ptrIndicator(): HTMLDivElement | null {
-    const el = ptrIndicatorRef.current;
-    return el && el.isConnected && el.classList.contains("ptr-indicator") ? el : null;
-  }
-
-  // 直接操作 DOM，避免 React 重渲染造成的卡顿
-  function updatePTRUI(pos: number) {
-    const ind = ptrIndicator();
-    const arr = ptrArrowRef.current;
-    const lab = ptrLabelRef.current;
-    if (!ind || !arr || !lab) return;
-    const h = Math.min(pos * 0.7, 60);
-    ind.style.height = h + "px";
-    ind.style.opacity = String(Math.min(pos / REFRESH_THRESHOLD, 1));
-    ind.style.display = "flex";
-    const reachThreshold = pos >= REFRESH_THRESHOLD;
-    arr.style.transform = reachThreshold
-      ? "rotate(180deg)"
-      : "rotate(" + Math.min(pos / REFRESH_THRESHOLD * 180, 180) + "deg)";
-    arr.style.color = reachThreshold ? "var(--brand)" : "var(--ink-2)";
-    lab.textContent = reachThreshold ? "松手刷新" : "继续下拉";
-  }
-  function hidePTRUI() {
-    const ind = ptrIndicator();
-    if (ind) {
-      ind.style.transition = "height 0.18s ease, opacity 0.18s ease";
-      ind.style.height = "0px";
-      ind.style.opacity = "0";
-      setTimeout(() => {
-        // 180ms 后节点可能已被复用成别的元素：重新取一次并校验
-        const el = ptrIndicator();
-        if (el) {
-          el.style.display = "none";
-          el.style.transition = "";
-        }
-      }, 180);
-    }
-  }
-  function showRefreshingUI() {
-    const ind = ptrIndicator();
-    const arr = ptrArrowRef.current;
-    const lab = ptrLabelRef.current;
-    if (!ind || !arr || !lab) return;
-    ind.style.transition = "none";
-    ind.style.height = "60px";
-    ind.style.opacity = "1";
-    ind.style.display = "flex";
-    arr.style.transform = "none";
-    arr.className = "ptr-spinner";
-    lab.textContent = "正在刷新…";
-  }
-
-  async function loadMore() {
-    if (feedKind === "latest") {
-      const p = page + 1;
-      const list = await run(() => client.request<AlbumSummary[]>("/latest", { page: p }));
-      if (list) { const next = [...items, ...list]; showList(next, "latest", list.length >= PAGE_SIZE, p); }
-    }
-  }
-
-  async function loadFavorites() {
-    const result = await run(() => client.getFavorites());
-    if (!result) return;
-    const obj = result as { list?: AlbumSummary[]; content?: AlbumSummary[]; data?: { list?: AlbumSummary[] } };
-    const list = obj.list || obj.content || obj.data?.list || [];
-    showList(list, "favorites");
+    void home.loadRandom();
   }
 
   // from="list"：从任意列表进入（重置页面栈）；from="search"：从搜索结果页点进（背后保留搜索页）
@@ -887,27 +747,21 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }
 
   return (
-    <div onTouchStart={handlePTRStart} onTouchMove={handlePTRMove} onTouchEnd={handlePTREnd}>
-      <div ref={ptrIndicatorRef} className="ptr-indicator" style={{ height: 0, opacity: 0, display: "none" }}>
-        <span ref={ptrArrowRef} className="ptr-arrow">↓</span>
-        <span ref={ptrLabelRef}></span>
-      </div>
-      <div className="card row">
-        <button className="ghost" disabled={busy} onClick={() => gotoPage("latest")}>最新</button>
-        <button className="ghost" disabled={busy} onClick={() => gotoPage("ranking")}>排行榜</button>
-      </div>
-      {error && (
-        <div className="card err">
-          {error}
-          <div className="row" style={{ marginTop: 8 }}>
-            <button className="ghost" disabled={busy} onClick={retryHomeFeed}>重新加载推荐</button>
-            <button className="ghost" onClick={() => emit("jm:gotoDns")}>去配 DNS</button>
-          </div>
-        </div>
-      )}
-      {busy && items.length === 0 ? <SkeletonGrid /> : null}
-      <AlbumGrid key={"g" + settingTick} items={items} onOpen={openDetail} />
-      {hasMore && <div className="card row"><button disabled={busy} onClick={loadMore}>加载更多（第 {page + 1} 页）</button></div>}
-    </div>
+    <PullToRefresh onRefresh={retryHomeFeed}>
+      <HomeFeed
+        items={home.items}
+        page={home.page}
+        hasMore={home.hasMore}
+        busy={home.busy}
+        error={home.error}
+        gridKey={"g" + settingTick}
+        onLatest={() => gotoPage("latest")}
+        onRanking={() => gotoPage("ranking")}
+        onRetry={retryHomeFeed}
+        onGotoDns={() => emit("jm:gotoDns")}
+        onLoadMore={home.loadMore}
+        onOpenAlbum={openDetail}
+      />
+    </PullToRefresh>
   );
 }
