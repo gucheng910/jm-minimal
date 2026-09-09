@@ -118,12 +118,12 @@ if (VERIFY_ONLY) {
     ["latest.yml", path.join(ROOT, "release-pc/latest.yml")],
     ["jm-minimal-portable-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-portable-" + version + ".exe")]
   ];
-  assets.push(...candidates.filter(([n, f]) => {
+  const localAssets = candidates.filter(([n, f]) => {
     if (existsSync(f)) return true;
     log("  ! 本地缺少产物，跳过比对：" + n);
     return false;
-  }));
-  verifyRelease();
+  });
+  verifyRelease(localAssets);
   process.exit(0);
 }
 
@@ -266,13 +266,13 @@ const assets = assetCandidates.filter(([n, f]) => {
 });
 
 /** §5.4 发布后校验：走 gh API（资产下载域名在本机可能被墙） */
-function verifyRelease() {
+function verifyRelease(list) {
   const tag = "v" + version;
   step("发布后校验（BUILDING §5.4）");
   // 直接拿 JSON 自己解析：jq 表达式里的转义在 JS 字符串里极易写坏
   const onlineJson = capture("gh", ["release", "view", tag, "--repo", REPO, "--json", "assets"], { what: "gh release view" });
   const onlineSizes = new Map(((JSON.parse(onlineJson) || {}).assets || []).map((a) => [a.name, a.size]));
-  for (const [name, file] of assets) {
+  for (const [name, file] of list) {
     const size = statSync(file).size;
     const got = onlineSizes.get(name);
     if (got === undefined) die("线上缺少资产：" + name);
@@ -287,7 +287,7 @@ function verifyRelease() {
   const onlineSha = (onlineYml.match(/sha512:\s*(\S+)/) || [])[1];
   if (!onlineSha || onlineSha !== localSha) die("线上 latest.yml 的 sha512 与本地不一致（老用户差分更新会失败）");
   log("  ✓ latest.yml sha512 一致：" + onlineSha.slice(0, 16) + "…");
-  for (const [name] of assets) {
+  for (const [name] of list) {
     try {
       const code = capture("curl", ["-sIL", "-o", IS_WIN ? "NUL" : "/dev/null", "-w", "%{http_code}", "--max-time", "30", "https://github.com/" + REPO + "/releases/download/" + tag + "/" + name], { optional: true });
       log(code === "200" ? "  ✓ " + name + " → 200" : "  ! " + name + " HEAD " + code + "（本机网络受限，以 gh API 结果为准）");
@@ -325,7 +325,7 @@ if (PUBLISH) {
   capture("gh", ["release", "edit", tag, "--repo", REPO, "--draft=false", "--latest"], { what: "gh release edit" });
   log("  ✓ 已发布 " + tag + " 并标记 Latest");
 
-  verifyRelease();
+  verifyRelease(assets);
 } else {
   step("跳过发布（未加 --publish）");
   log("本地产物就绪。发布三步：");
