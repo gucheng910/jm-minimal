@@ -8,7 +8,14 @@ import { AlbumGrid } from "./AlbumGrid";
 import { SkeletonGrid } from "./SkeletonGrid";
 import type { AlbumSummary } from "../core/types";
 
-export type SRKind = "tag" | "author";
+export type SRKind = "tag" | "author" | "character";
+
+/** 只读搜索页标题与官方 search_type 的映射 */
+export const KIND_META: Record<SRKind, { label: string; searchType: string }> = {
+  tag: { label: "标签", searchType: "tag" },
+  author: { label: "作者", searchType: "author" },
+  character: { label: "登场人物", searchType: "character" }
+};
 
 interface Props {
   /** 是否在前台（false 时保持在 DOM 中但不可见/不可点，用于出场动画与滚动位置保留） */
@@ -71,7 +78,7 @@ export const SearchResultPage = memo(function SearchResultPage({
     return () => io.disconnect();
   }, [open, hasMore, busy, items.length]);
 
-  const label = kind === "tag" ? "标签" : "作者";
+  const label = KIND_META[kind].label;
 
   return (
     <section className={"sr-layer" + (entered ? " open" : "")} aria-hidden={!open}>

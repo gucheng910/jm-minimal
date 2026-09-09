@@ -20,6 +20,7 @@ import WeekRank from "./pages/WeekRank";
 import { albumCoverUrl } from "./ui/AlbumCard";
 import { SearchResultPage } from "./ui/SearchResultPage";
 import type { SRKind } from "./ui/SearchResultPage";
+import { KIND_META } from "./ui/SearchResultPage";
 import { announceStartupReady, gatePassed } from "./core/startup";
 import type { AlbumDetail, AlbumSummary } from "./core/types";
 
@@ -182,7 +183,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       try { await client.init(); } catch { /* 静默：详情页摘要仍可看 */ }
     }
     try {
-      const r = await client.search(q, p, 0, kind === "tag" ? "tag" : "author");
+      const r = await client.search(q, p, 0, KIND_META[kind].searchType);
       if (srReqIdRef.current !== reqId) return; // 已换词/已关闭，丢弃过期回包
       const content = r.content || [];
       const total = Number(r.total || 0);
@@ -469,6 +470,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         onCopyId={copyJmId}
         onOpenAuthor={(a) => openSpecialSearch("author", a)}
         onOpenTag={(t) => openSpecialSearch("tag", t)}
+        onOpenActor={(a) => openSpecialSearch("character", a)}
+        onOpenRelated={(a) => { void openDetail(a, "list"); }}
         onSwitchChapter={(id) => { void album.switchChapter(id); }}
         onBuy={() => { void album.buy(); }}
         onToggleFavorite={() => { void album.toggleFavorite(); }}

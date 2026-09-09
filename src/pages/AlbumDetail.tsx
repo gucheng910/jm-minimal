@@ -1,8 +1,9 @@
 // 详情页卡片：作者/标签可点搜索、章节切换、收藏/购买/阅读入口、评论区
 // 纯展示组件——数据与动作全部由 ContentView 提供（状态迁移见后续批次）
 import CommentList from "../ui/CommentList";
+import { AlbumGrid } from "../ui/AlbumGrid";
 import { albumTags, authorNames, parsePaid } from "../core/albumMeta";
-import type { AlbumDetail as AlbumDetailData, ForumPayload } from "../core/types";
+import type { AlbumDetail as AlbumDetailData, AlbumSummary, ForumPayload } from "../core/types";
 
 interface Props {
   detail: AlbumDetailData;
@@ -15,6 +16,10 @@ interface Props {
   onCopyId: () => void;
   onOpenAuthor: (name: string) => void;
   onOpenTag: (tag: string) => void;
+  /** 登场人物（走 search_type=character 的只读搜索页） */
+  onOpenActor: (name: string) => void;
+  /** 相关漫画点击 → 打开该漫画详情 */
+  onOpenRelated: (a: AlbumSummary) => void;
   onSwitchChapter: (id: string) => void;
   onBuy: () => void;
   onToggleFavorite: () => void;
@@ -34,6 +39,8 @@ export default function AlbumDetail({
   onCopyId,
   onOpenAuthor,
   onOpenTag,
+  onOpenActor,
+  onOpenRelated,
   onSwitchChapter,
   onBuy,
   onToggleFavorite,
@@ -44,6 +51,8 @@ export default function AlbumDetail({
   const locked = parsePaid(detail);
   const authors = authorNames(detail);
   const tags = albumTags(detail);
+  const actors = Array.isArray(detail.actors) ? detail.actors.filter(Boolean).map((x) => String(x)) : [];
+  const related = Array.isArray(detail.related_list) ? detail.related_list : [];
   return (
     <div className="card">
       <button className="ghost" onClick={onBack}>{backLabel}</button>
@@ -67,6 +76,14 @@ export default function AlbumDetail({
           </span>
         ))
         : "-"}</p>
+      {actors.length > 0 && (
+        <p className="muted">登场人物：{actors.map((a, i) => (
+          <span key={"ac" + i}>
+            {i > 0 && <span className="meta-sep">、</span>}
+            <button className="link" onClick={() => onOpenActor(a)}>{a}</button>
+          </span>
+        ))}</p>
+      )}
       {Array.isArray(detail.series) && detail.series.length > 1 && (
         <div className="row">
           <label>选择话数</label>
@@ -82,6 +99,12 @@ export default function AlbumDetail({
         <div className="row action-row">
           {logged && <button className="ghost" disabled={busy || Boolean(detail.is_favorite)} onClick={onToggleFavorite}>{detail.is_favorite ? "已收藏" : "☆ 收藏"}</button>}
           <button disabled={busy} onClick={onRead}>立即阅读</button>
+        </div>
+      )}
+      {related.length > 0 && (
+        <div className="related-block">
+          <h3>相关漫画</h3>
+          <AlbumGrid items={related} onOpen={onOpenRelated} />
         </div>
       )}
       <CommentList

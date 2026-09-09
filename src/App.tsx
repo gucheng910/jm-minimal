@@ -20,7 +20,7 @@ import DesktopUpdate from "./ui/DesktopUpdate";
 import { isDesktop } from "./core/dnsClean";
 import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
-import { LOCAL_VERSION, UI_KEYS } from "./core/constants";
+import { APP_VERSION, LOCAL_VERSION, UI_KEYS } from "./core/constants";
 import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
 import TagBlockSetting from "./ui/TagBlockSetting";
@@ -417,6 +417,16 @@ export default function App() {
   let currentHost = "";
   if (state.apiBase) { try { currentHost = new URL(state.apiBase).host; } catch { currentHost = ""; } }
 
+  // 协议漂移检测：官方 /setting 的 jm3_version 与客户端常量不一致时提示
+  // （APP_VERSION 参与 Tokenparam/Token 计算，官方改协议时客户端可能整体失效且此前毫无提示）
+  // 数据源用 client.setting + jm:setting 事件：state.setting 只有手动点「初始化官方配置」才会有
+  const [onlineProto, setOnlineProto] = useState(() => String(client.setting?.jm3_version || ""));
+  useEffect(() => on("jm:setting", () => setOnlineProto(String(client.setting?.jm3_version || ""))), []);
+  const protoDrift = Boolean(onlineProto) && !onlineProto.startsWith(APP_VERSION);
+  useEffect(() => {
+    if (protoDrift) console.warn("[jmd] proto drift: client=" + APP_VERSION + " server=" + onlineProto);
+  }, [protoDrift, onlineProto]);
+
   function navTo(action: string) {
     setTab(action);
     window.scrollTo({ top: 0 });
@@ -601,7 +611,7 @@ export default function App() {
           <h2>官方赞助</h2>
           <p className="muted">赞助支持项目持续更新；选择方案并支付后权益自动生效。</p>
           <div className="row">
-            {state.payment.plans.map((p) => (
+            {(state.payment.plans || []).map((p) => (
               <span key={p.key} className="muted" style={{ display: "block", marginBottom: 4 }}>{p.name} · USD {p.price} / {p.days} 天</span>
             ))}
           </div>
@@ -666,7 +676,10 @@ export default function App() {
           </div>
           <div className="menu-section">
             <h4>版本</h4>
-            <p className="muted menu-note">v{LOCAL_VERSION}（官方协议 2.1.5）</p>
+            <p className="muted menu-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}）</p>
+            {protoDrift && (
+              <p className="err small-err">官方协议已更新到 {onlineProto}，当前客户端按 {APP_VERSION} 通信；若出现异常请留意后续版本</p>
+            )}
             {isDesktop ? <DesktopUpdate /> : <UpdateSection />}
           </div>
         </div>
