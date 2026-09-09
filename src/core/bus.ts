@@ -33,6 +33,8 @@ export interface AppEvents {
   "jm:refreshHome": undefined;
   /** 请求跳到会员页的 DNS 配置卡 */
   "jm:gotoDns": undefined;
+  /** 登录态变化（登录/登出/自动续期）——各页面据此同步登录相关 UI */
+  "jm:authChanged": undefined;
 }
 
 type EmitArgs<K extends keyof AppEvents> = AppEvents[K] extends undefined ? [] : [detail: AppEvents[K]];

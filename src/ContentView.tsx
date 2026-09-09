@@ -14,6 +14,7 @@ import HomeFeed from "./pages/HomeFeed";
 import PullToRefresh from "./ui/PullToRefresh";
 import { useHomeFeed } from "./hooks/useHomeFeed";
 import { useAlbumDetail } from "./hooks/useAlbumDetail";
+import { useLoggedIn } from "./hooks/useLoggedIn";
 import CategoryFeed from "./pages/CategoryFeed";
 import WeekRank from "./pages/WeekRank";
 import { albumCoverUrl } from "./ui/AlbumCard";
@@ -410,7 +411,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   /** 搜索结果页里的卡片点击 → 详情页（背后保留搜索页） */
   const openAlbumFromSearch = useCallback((a: AlbumSummary) => { void openDetail(a, "search"); }, [openDetail]);
 
-  const logged = Boolean(localStorage.getItem("jwttoken"));
+  const logged = useLoggedIn();
 
   if (mode === "week" && week.payload) {
     return (

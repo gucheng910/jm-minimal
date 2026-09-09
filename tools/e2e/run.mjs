@@ -50,13 +50,20 @@ async function main() {
     if (!(await waitForServer())) throw new Error("dev server 没起来：" + URL_);
     console.log("\n==== 导航 / 页面栈回归 ====");
     const nav = await runNode("harness.mjs");
+
+    console.log("\n==== 登录态一致性（会员页 vs 详情页）====");
+    const auth = await runNode("harness.mjs", {
+      DRIVER: "driver-auth.js",
+      TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "e2eauth=1"
+    });
+
     let ptrCode = 0;
     if (!process.env.E2E_SKIP_PTR) {
       console.log("\n==== 下拉刷新（CDP 原生触摸）====");
       ptrCode = await runNode("ptr.mjs", { E2E_PORT: String(Number(PORT) + 1) });
     }
-    if (nav || ptrCode) process.exitCode = 1;
-    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
+    if (nav || auth || ptrCode) process.exitCode = 1;
+    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
   } finally {
     if (server) { try { server.kill(); } catch (e) { /* 忽略 */ } }
   }

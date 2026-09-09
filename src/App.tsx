@@ -10,6 +10,7 @@ import { authService } from "./state/auth";
 import ContentView from "./ContentView";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { emit, on } from "./core/bus";
+import { useLoggedIn } from "./hooks/useLoggedIn";
 import ToastHost, { pushToast } from "./ui/toast";
 import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
@@ -61,7 +62,8 @@ function signedToday(daily: DailyPayload | null): boolean {
 
 export default function App() {
   const [state, setState] = useState<DemoState>({ apiBase: sessionStore.apiUrl, busy: false, error: "", msg: "" });
-  const [member, setMember] = useState<MemberInfo | null>(sessionStore.hasValidSession() ? sessionStore.memberInfo : null);
+  // member = 会员资料（展示用）。登录态不看它；它缺失/过期时下面的 effect 会静默续期
+  const [member, setMember] = useState<MemberInfo | null>(() => sessionStore.memberInfo);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
@@ -411,10 +413,28 @@ export default function App() {
     }
   }
 
-  const logged = Boolean(member && sessionStore.token);
+  // 登录态唯一判据（有 token 即已登录）；member 只是「会员资料」，缺失/过期时后台自愈
+  const logged = useLoggedIn();
   const availableLines = client.hostConfig?.jm3_Server || [];
   let currentHost = "";
   if (state.apiBase) { try { currentHost = new URL(state.apiBase).host; } catch { currentHost = ""; } }
+
+  // 登录态变化（登录/登出/自动续期）→ 同步会员资料
+  useEffect(() => on("jm:authChanged", () => setMember(sessionStore.memberInfo)), []);
+
+  // 有 token 但会员资料缺失或本地有效期已过 → 用记住的账号静默续期（没记住账号就等用户手动登录）
+  useEffect(() => {
+    if (!logged || !sessionStore.needsMemberRefresh()) return;
+    if (!sessionStore.account) return;
+    let alive = true;
+    (async () => {
+      // 必须先确保线路就绪，否则续期请求会以「API base 未初始化」直接失败
+      try { if (!client.apiBase) await client.init(); } catch { return; }
+      const info = await authService.reloginFromStoredAccount().catch(() => null);
+      if (alive && info) setMember(info);
+    })();
+    return () => { alive = false; };
+  }, [logged, member]);
 
   // 协议漂移检测：官方 /setting 的 jm3_version 与客户端常量不一致时提示
   // （APP_VERSION 参与 Tokenparam/Token 计算，官方改协议时客户端可能整体失效且此前毫无提示）

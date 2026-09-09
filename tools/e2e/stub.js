@@ -5,6 +5,13 @@
     localStorage.setItem("jmclient.autoSelect.v1", JSON.stringify({ host: HOST, shunt: "1", ts: Date.now() }));
     localStorage.setItem("jmclient.tosAccepted.v1", "1");
     localStorage.setItem("jmclient.theme", "light");
+    // ?e2eauth=1：种一个「有 token 但本地有效期已过」的会话，用于验证登录态判据一致性
+    if (location.search.includes("e2eauth=1")) {
+      localStorage.setItem("jwttoken", JSON.stringify("stale-token"));
+      localStorage.setItem("memberInfo", JSON.stringify({ uid: 7, username: "旧资料", coin: 1 }));
+      localStorage.setItem("authExpiry", String(Date.now() - 60000));
+      localStorage.setItem("memberAccount", JSON.stringify({ username: "tester", password: "pw" }));
+    }
   } catch (e) {}
   window.__reqs = [];
   // 用 DOM Touch 事件模拟手指（React 的 onTouchStart/Move/End 能收到）
@@ -28,6 +35,8 @@
     if (p === "setting") return json({ version: "1", test_version: "1", jm3_version: "2.1.6", ipcountry: "CN", ad_cache_version: 1, float_ad: false, is_cn: 1, cn_base_url: "", base_url: "", main_web_host: "", img_host: "", app_shunts: [{ key: "1", title: "图源1" }] });
     if (p === "random_recommend") { window.__reqs.push({ path: p }); return json(mk("A", 8, "作者甲")); }
     if (p === "hot_tags") return json(["热词1", "热词2"]);
+    if (p === "login") { window.__reqs.push({ path: p }); return json({ jwttoken: "fresh-token", uid: 7, username: "tester", coin: 42, level: 3, exp: 100 }); }
+    if (p === "tasks" || p === "daily") { window.__reqs.push({ path: p }); return json({ list: [] }); }
     if (p === "payment") return json({ plans: [{ key: "p1", name: "月卡", price: 1, days: 30 }], pay_methods: [], uid: 1, orders: [], web_host: "", checkout: "" });
     if (p === "ad_content_all") return json({});
     if (p === "categories") return json({ categories: [{ id: 1, slug: "doujin", name: "同人", sub_categories: [{ id: 11, slug: "cg", name: "CG" }] }, { id: 2, slug: "hanman", name: "韩漫" }] });
