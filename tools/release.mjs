@@ -1,0 +1,266 @@
+#!/usr/bin/env node
+/**
+ * tools/release.mjs —— JM极简版发版一条龙
+ *
+ * 用法：
+ *   node tools/release.mjs 1.7.1                 # 只做本地：版本同步 → web 构建 → APK → PC 包（不上传）
+ *   node tools/release.mjs 1.7.1 --publish       # 额外创建 GitHub Release（draft → 上传 → 发布 → 校验）
+ *   node tools/release.mjs 1.7.1 --dry-run       # 只打印将要改什么/做什么，不落盘
+ *   node tools/release.mjs 1.7.1 --skip-pc       # 跳过 Electron 打包（只想出 APK 时）
+ *   node tools/release.mjs 1.7.1 --skip-android  # 跳过 Android 打包
+ *
+ * 编码进去的坑（都是踩过的）：
+ *   1) cap sync 必须在仓库根跑，否则静默用旧 web 资源 → 脚本会比对 dist 与 android 资产的哈希
+ *   2) 版本号四处同步：package.json / build.gradle / BUILDING.md 表 / README 下载表
+ *   3) gh release 走 draft → 逐个上传（失败重试）→ publish（84MB 的 portable 曾中途断过）
+ *   4) 发布后自动做 BUILDING §5.4 校验：线上 latest.yml sha512 对比 + 资产 HEAD 200
+ */
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync, copyFileSync, existsSync, statSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const IS_WIN = process.platform === "win32";
+const REPO = "gucheng910/jm-minimal";
+
+const argv = process.argv.slice(2);
+const version = argv.find((a) => /^\d+\.\d+\.\d+$/.test(a));
+const flags = new Set(argv.filter((a) => a.startsWith("--")));
+const PUBLISH = flags.has("--publish");
+const DRY = flags.has("--dry-run");
+const SKIP_PC = flags.has("--skip-pc");
+const SKIP_ANDROID = flags.has("--skip-android");
+const notesArg = argv.indexOf("--notes");
+
+const log = (...a) => console.log(...a);
+const step = (t) => log("\n" + "=".repeat(4) + " " + t);
+const die = (msg) => { console.error("\n[失败] " + msg); process.exit(1); };
+const exe = (name) => (IS_WIN ? name + ".cmd" : name);
+
+// Windows 上 .cmd/.bat 必须经 cmd /c 启动（Node 20+ 不允许直接 spawn .cmd）
+function shellOf(cmd, args) {
+  if (IS_WIN && /.(cmd|bat)$/i.test(cmd)) return { cmd: "cmd", args: ["/c", cmd, ...args] };
+  return { cmd, args };
+}
+function run(cmd, args, opts = {}) {
+  const s = shellOf(cmd, args);
+  const r = spawnSync(s.cmd, s.args, { cwd: opts.cwd || ROOT, stdio: opts.quiet ? "pipe" : "inherit", encoding: "utf8" });
+  if (r.status !== 0) die((opts.what || cmd + " " + args.join(" ")) + " 退出码 " + r.status);
+  return (r.stdout || "").trim();
+}
+function capture(cmd, args, opts = {}) {
+  const s = shellOf(cmd, args);
+  try {
+    return execFileSync(s.cmd, s.args, { cwd: opts.cwd || ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch (e) {
+    if (opts.optional) return "";
+    die((opts.what || cmd) + " 执行失败：" + (e.stderr || e.message));
+  }
+}
+const readText = (rel) => readFileSync(path.join(ROOT, rel), "utf8");
+const writeText = (rel, text) => { if (!DRY) writeFileSync(path.join(ROOT, rel), text); };
+const sha256 = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
+const mb = (p) => (statSync(p).size / 1048576).toFixed(2) + " MB";
+const semver = (v) => v.split(".").map(Number);
+
+function assertNewer(next, cur) {
+  const a = semver(next), b = semver(cur);
+  for (let i = 0; i < 3; i++) { if (a[i] > b[i]) return; if (a[i] < b[i]) die("版本号 " + next + " 不大于当前 " + cur); }
+  die("版本号与当前相同：" + cur);
+}
+
+// ---------------------------------------------------------------- 预检
+step("预检");
+if (!version) die("用法：node tools/release.mjs <x.y.z> [--publish|--dry-run|--skip-pc|--skip-android]");
+const pkg = JSON.parse(readText("package.json"));
+const curVersion = pkg.version;
+assertNewer(version, curVersion);
+
+const gradlePath = "android/app/build.gradle";
+const gradle = readText(gradlePath);
+const mCode = gradle.match(/versionCode\s+(\d+)/);
+const mName = gradle.match(/versionName\s+"([^"]+)"/);
+if (!mCode || !mName) die("解析 " + gradlePath + " 失败");
+const nextCode = Number(mCode[1]) + 1;
+
+// 只拦「已跟踪文件被改」，未跟踪的新文件（如本脚本自身）不算脏
+const dirty = capture("git", ["status", "--porcelain", "--untracked-files=no"]);
+if (dirty && !DRY) die("工作区有未提交改动，先提交或 stash：\n" + dirty);
+const branch = capture("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+if (PUBLISH && branch !== "main") die("发布只允许在 main 上（当前 " + branch + "）");
+if (PUBLISH && !capture("gh", ["auth", "status"], { optional: true })) die("gh 未登录");
+const jbr = "C:/Program Files/Android/Android Studio/jbr";
+if (!SKIP_ANDROID && IS_WIN && !existsSync(jbr)) die("找不到 Android Studio JBR：" + jbr);
+
+log("仓库      " + ROOT);
+log("版本      " + curVersion + "  →  " + version);
+log("versionCode " + mCode[1] + "  →  " + nextCode);
+log("模式      " + (DRY ? "dry-run（不写文件）" : PUBLISH ? "本地构建 + 发布 GitHub" : "仅本地构建（不上传）"));
+log("分支      " + branch + (dirty ? "（有未提交改动）" : "（干净）"));
+
+// ---------------------------------------------------------------- 版本同步
+step("同步版本号（4 处 + BUILD_TAG）");
+const today = new Date();
+const stamp = "v" + today.getFullYear() + String(today.getMonth() + 1).padStart(2, "0") + String(today.getDate()).padStart(2, "0") + "-" + version;
+
+const edits = [];
+// 1) package.json（只改第一个 version 字段）
+const pkgNew = readText("package.json").replace(/"version":\s*"[^"]+"/, '"version": "' + version + '"');
+edits.push(["package.json", pkgNew]);
+// 1b) package-lock.json（根 version + packages[""].version 两处）
+let lockNew = readText("package-lock.json");
+let hit = 0;
+lockNew = lockNew.replace(/"version":\s*"([^"]+)"/g, (m, v) => (v === curVersion && hit++ < 2 ? m.replace(curVersion, version) : m));
+edits.push(["package-lock.json", lockNew]);
+// 2) build.gradle
+edits.push([gradlePath, gradle.replace(/versionCode\s+\d+/, "versionCode " + nextCode).replace(/versionName\s+"[^"]+"/, 'versionName "' + version + '"')]);
+// 3) BUILDING.md 版本表
+edits.push(["BUILDING.md", readText("BUILDING.md")
+  .replace(/(\| PC \+ 前端 \| package\.json → version \| )[^|]+(\|)/, "$1" + version + " $2")
+  .replace(/(\| Android \| android\/app\/build\.gradle → defaultConfig \| )[^|]+(\|)/, "$1versionName " + version + " / versionCode " + nextCode + " $2")]);
+// 4) README 下载表与链接
+edits.push(["README.md", readText("README.md").split("-" + curVersion).join("-" + version).split("v" + curVersion + "/").join("v" + version + "/")]);
+// 5) BUILD_TAG
+edits.push(["src/core/constants.ts", readText("src/core/constants.ts").replace(/export const BUILD_TAG = "[^"]*";/, 'export const BUILD_TAG = "' + stamp + '";')]);
+
+for (const [f, text] of edits) {
+  const changed = text !== readText(f);
+  log((changed ? "  ✎ " : "  · ") + f + (changed ? "" : "（无变化）"));
+  if (changed) writeText(f, text);
+}
+
+if (DRY) {
+  step("dry-run：到此为止");
+  log("将要执行：npm run build → npx cap sync android（含资产哈希比对）→ build-rel.cmd");
+  if (!SKIP_PC) log("           → npm run pc:pack（nsis + portable）→ 校验 latest.yml 版本与 size");
+  log(PUBLISH ? "           → gh release create(draft) → 上传 6 个资产(重试) → publish → §5.4 校验" : "           → 跳过发布（未加 --publish）");
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------- web 构建
+step("构建 web 产物（tsc --noEmit + vite build）");
+run(exe("npm"), ["run", "build"]);
+
+// ---------------------------------------------------------------- Android
+let apkPath = "";
+if (!SKIP_ANDROID) {
+  step("同步 Android 资产（必须在仓库根执行）");
+  run(exe("npx"), ["cap", "sync", "android"]);
+
+  const distAssets = readdirSync(path.join(ROOT, "dist/assets")).sort();
+  const androidAssets = readdirSync(path.join(ROOT, "android/app/src/main/assets/public/assets")).sort();
+  if (distAssets.join("|") !== androidAssets.join("|")) {
+    die("dist 与 android 资产不一致（cap sync 没生效？）\n  dist:    " + distAssets.join(",") + "\n  android: " + androidAssets.join(","));
+  }
+  const main = distAssets.find((f) => /^index-.*\.js$/.test(f));
+  const h1 = sha256(path.join(ROOT, "dist/assets", main));
+  const h2 = sha256(path.join(ROOT, "android/app/src/main/assets/public/assets", main));
+  if (h1 !== h2) die("主 bundle 哈希不一致，android 里是旧资源：" + main);
+  log("  ✓ 资产一致，主 bundle " + main + " sha256 " + h1.slice(0, 12) + "…");
+
+  step("构建正式 APK（gradlew assembleRelease）");
+  run("cmd", ["/c", path.join(ROOT, "build-rel.cmd")], { cwd: path.join(ROOT, "android") });
+
+  apkPath = path.join(ROOT, "android/app/build/outputs/apk/release/app-release.apk");
+  if (!existsSync(apkPath)) die("没找到 APK：" + apkPath);
+  const modern = path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk");
+  const compat = path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk");
+  if (!DRY) { copyFileSync(apkPath, modern); copyFileSync(apkPath, compat); }
+  log("  ✓ " + path.basename(modern) + "  " + mb(apkPath) + "  sha256 " + sha256(apkPath).slice(0, 16) + "…");
+  log("  ✓ " + path.basename(compat) + "（同字节，官方「双名上传」约定）");
+
+  // 校验 APK 内的版本号（apkanalyzer 存在才查）
+  const aapt = IS_WIN ? capture("where", ["apkanalyzer"], { optional: true }) : capture("which", ["apkanalyzer"], { optional: true });
+  if (aapt) {
+    const vn = capture("apkanalyzer", ["manifest", "version-name", apkPath], { optional: true });
+    const vc = capture("apkanalyzer", ["manifest", "version-code", apkPath], { optional: true });
+    if (vn && vn !== version) die("APK 内 versionName=" + vn + " 与目标 " + version + " 不一致");
+    log("  ✓ APK versionName=" + (vn || "?") + " versionCode=" + (vc || "?"));
+  }
+}
+
+// ---------------------------------------------------------------- PC
+let pcFiles = [];
+if (!SKIP_PC) {
+  step("构建 PC 包（electron-builder nsis + portable）");
+  run(exe("npm"), ["run", "pc:pack"]);
+  const ymlPath = path.join(ROOT, "release-pc/latest.yml");
+  if (!existsSync(ymlPath)) die("缺少 release-pc/latest.yml");
+  const yml = readFileSync(ymlPath, "utf8");
+  const ymlVer = (yml.match(/^version:\s*(.+)$/m) || [])[1];
+  if (ymlVer !== version) die("latest.yml 版本 " + ymlVer + " ≠ " + version);
+  const setup = path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe");
+  const portable = path.join(ROOT, "release-pc/jm-minimal-portable-" + version + ".exe");
+  const blockmap = setup + ".blockmap";
+  for (const f of [setup, blockmap, portable]) if (!existsSync(f)) die("缺少产物：" + f);
+  const ymlSize = Number((yml.match(/size:\s*(\d+)/) || [])[1]);
+  const realSize = statSync(setup).size;
+  if (ymlSize !== realSize) die("latest.yml 里的 size(" + ymlSize + ") 与 setup exe(" + realSize + ") 不一致（混搭了旧 latest.yml？）");
+  log("  ✓ latest.yml 版本与 size 一致（" + realSize + " 字节）");
+  pcFiles = [
+    ["jm-minimal-setup-" + version + ".exe", setup],
+    ["jm-minimal-setup-" + version + ".exe.blockmap", blockmap],
+    ["latest.yml", ymlPath],
+    ["jm-minimal-portable-" + version + ".exe", portable]
+  ];
+  for (const [n, p] of pcFiles) log("  · " + n + "  " + mb(p));
+}
+
+// ---------------------------------------------------------------- 发布
+const assets = [];
+if (!SKIP_ANDROID) assets.push(["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")], ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")]);
+assets.push(...pcFiles);
+
+if (PUBLISH) {
+  step("创建 GitHub Release（draft → 上传 → 发布）");
+  const tag = "v" + version;
+  const notesFile = notesArg > -1 ? argv[notesArg + 1] : "";
+  const createArgs = ["release", "create", tag, "--repo", REPO, "--draft", "--title", "JM极简版 " + version];
+  if (notesFile && existsSync(notesFile)) createArgs.push("--notes-file", notesFile);
+  else createArgs.push("--generate-notes");
+  capture("gh", createArgs, { what: "gh release create" });
+  log("  ✓ draft 已创建 " + tag);
+
+  for (const [name, file] of assets) {
+    let ok = false;
+    for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+      try {
+        run("gh", ["release", "upload", tag, file, "--repo", REPO, "--clobber"], { quiet: true, what: "上传 " + name });
+        ok = true;
+        log("  ✓ 上传 " + name);
+      } catch {
+        log("  ! " + name + " 第 " + attempt + " 次失败，重试…");
+      }
+    }
+    if (!ok) die("资产上传失败：" + name + "（draft 仍在，修好后可 gh release upload 补传）");
+  }
+
+  capture("gh", ["release", "edit", tag, "--repo", REPO, "--draft=false", "--latest"], { what: "gh release edit" });
+  log("  ✓ 已发布 " + tag + " 并标记 Latest");
+
+  step("发布后校验（BUILDING §5.4）");
+  const onlineYml = capture("curl", ["-sL", "--max-time", "30", "https://github.com/" + REPO + "/releases/download/" + tag + "/latest.yml"], { what: "拉取线上 latest.yml" });
+  const localSha = (readFileSync(path.join(ROOT, "release-pc/latest.yml"), "utf8").match(/sha512:\s*(\S+)/) || [])[1];
+  const onlineSha = (onlineYml.match(/sha512:\s*(\S+)/) || [])[1];
+  if (!onlineSha || onlineSha !== localSha) die("线上 latest.yml 的 sha512 与本地不一致（老用户差分更新会失败）");
+  log("  ✓ latest.yml sha512 一致：" + onlineSha.slice(0, 16) + "…");
+  for (const [name] of assets) {
+    const code = capture("curl", ["-sIL", "-o", IS_WIN ? "NUL" : "/dev/null", "-w", "%{http_code}", "--max-time", "30", "https://github.com/" + REPO + "/releases/download/" + tag + "/" + name], { what: "HEAD " + name });
+    if (code !== "200") die("资产不可达：" + name + " → HTTP " + code);
+    log("  ✓ " + name + " → 200");
+  }
+  log("\nRelease: https://github.com/" + REPO + "/releases/tag/" + tag);
+} else {
+  step("跳过发布（未加 --publish）");
+  log("本地产物就绪，确认无误后执行：");
+  log("  node tools/release.mjs " + version + " --publish --skip-pc --skip-android   # 直接复用本次产物上传（需 --skip-* 以免重复构建）");
+}
+
+// ---------------------------------------------------------------- 汇总
+step("完成");
+log("版本        " + version + "（versionCode " + nextCode + "）");
+log("模式        " + (DRY ? "dry-run" : PUBLISH ? "已发布" : "仅本地"));
+for (const [name, file] of assets) if (existsSync(file)) log("  " + name.padEnd(38) + mb(file) + "  sha256 " + sha256(file).slice(0, 16) + "…");
+if (!DRY && !PUBLISH) log("\n提醒：版本号已写入工作区，未提交；确认产物后 git commit && git push，再跑 --publish。");

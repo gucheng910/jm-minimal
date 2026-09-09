@@ -223,9 +223,15 @@ npx electron .       # 桌面壳跑 dist（未打包=开发态：DNS 清洗可�
 ```
 ### 7.2 打包 / 发布（按 §3/§4/§5 顺序）
 ```bash
+# 推荐：一条命令走完「版本同步 → web 构建 → APK → PC 包 →（可选）GitHub Release → 自动校验」
+node tools/release.mjs 1.7.1              # 仅本地：改版本号、出包、校验，不上传
+node tools/release.mjs 1.7.1 --publish    # 额外创建 Release（draft → 逐个上传重试 → 发布 → §5.4 校验）
+node tools/release.mjs 1.7.1 --dry-run    # 只打印会改哪些文件 / 会做哪些步骤
+node tools/release.mjs 1.7.1 --skip-pc    # 只出 APK
+# 手动分步（脚本内部就是按这个顺序调用的）
 npx electron-builder --win nsis          # PC 安装版 → release-pc/
 npx electron-builder --win portable      # PC 便携版
-npx cap sync android                     # Android 同步
+npx cap sync android                     # Android 同步（必须在仓库根！）
 cd android && ..\build-rel.cmd           # APK（assembleRelease）
 gh release create/upload …               # 见 §5
 ```
