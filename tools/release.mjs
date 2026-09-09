@@ -108,6 +108,25 @@ log("versionCode " + mCode[1] + "  →  " + nextCode);
 log("模式      " + (DRY ? "dry-run（不写文件）" : PUBLISH ? "本地构建 + 发布 GitHub" : "仅本地构建（不上传）"));
 log("分支      " + branch + (dirty ? "（有未提交改动）" : "（干净）"));
 
+if (VERIFY_ONLY) {
+  // 只校验已发布的 Release：不构建、不改版本号
+  const candidates = [
+    ["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")],
+    ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")],
+    ["jm-minimal-setup-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe")],
+    ["jm-minimal-setup-" + version + ".exe.blockmap", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe.blockmap")],
+    ["latest.yml", path.join(ROOT, "release-pc/latest.yml")],
+    ["jm-minimal-portable-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-portable-" + version + ".exe")]
+  ];
+  assets.push(...candidates.filter(([n, f]) => {
+    if (existsSync(f)) return true;
+    log("  ! 本地缺少产物，跳过比对：" + n);
+    return false;
+  }));
+  verifyRelease();
+  process.exit(0);
+}
+
 // ---------------------------------------------------------------- 版本同步
 // 复用产物发布（--skip-pc --skip-android）时产物已按当前版本号构建好，
 // 再改版本号会与实际产物对不上（尤其 versionCode 会凭空 +1）
@@ -250,11 +269,9 @@ const assets = assetCandidates.filter(([n, f]) => {
 function verifyRelease() {
   const tag = "v" + version;
   step("发布后校验（BUILDING §5.4）");
-  const onlineList = capture("gh", ["release", "view", tag, "--repo", REPO, "--json", "assets", "--jq", '.assets[] | "\(.name) \(.size)"'], { what: "gh release view" });
-  const onlineSizes = new Map(onlineList.split(/\r?\n/).filter(Boolean).map((line) => {
-    const i = line.lastIndexOf(" ");
-    return [line.slice(0, i), Number(line.slice(i + 1))];
-  }));
+  // 直接拿 JSON 自己解析：jq 表达式里的转义在 JS 字符串里极易写坏
+  const onlineJson = capture("gh", ["release", "view", tag, "--repo", REPO, "--json", "assets"], { what: "gh release view" });
+  const onlineSizes = new Map(((JSON.parse(onlineJson) || {}).assets || []).map((a) => [a.name, a.size]));
   for (const [name, file] of assets) {
     const size = statSync(file).size;
     const got = onlineSizes.get(name);
@@ -279,11 +296,6 @@ function verifyRelease() {
     }
   }
   log("\nRelease: https://github.com/" + REPO + "/releases/tag/" + tag);
-}
-
-if (VERIFY_ONLY) {
-  verifyRelease();
-  process.exit(0);
 }
 
 if (PUBLISH) {
