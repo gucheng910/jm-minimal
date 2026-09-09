@@ -1102,6 +1102,8 @@ button.ghost.danger { color: var(--err); border-color: #f6cdc9; }
 
 /* 缓存中心：按「书」分组 + 离线详情页目录 */
 .book-group { align-items: flex-start; }
+/* 进行中列表的封面占位（GroupCover 不再写内联尺寸，交给 CSS） */
+.cache-item .thumb.empty { width: 52px; height: 70px; }
 .chapter-progress { margin-top: 8px; }
 .chapter-actions { gap: 6px; margin-top: 4px; }
 .chapter-actions button { padding: 4px 9px; font-size: 12px; }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
 import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
-import { releaseOfflinePageUrls, scanCachedChapters, toOfflinePageUrls } from "./core/offline";
+import { pagesFromCache, releaseOfflinePageUrls, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "./core/offline";
 import { chapterLabel, getChapter, listChapters, type BookChapter, type ChapterMeta } from "./core/offlineMeta";
 import { saveHistory } from "./core/history";
 import { useBackHandler } from "./hooks/useBackHandler";
@@ -135,7 +135,7 @@ export default function ReaderPanel({
   const [chapOpen, setChapOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
   const [cacheSel, setCacheSel] = useState<Set<string>>(new Set());
-  const [cachedIds, setCachedIds] = useState<Set<string>>(new Set());
+  const [cachedIds, setCachedIds] = useState<Map<string, CachedChapterInfo>>(new Map());
   const [chapterMetas, setChapterMetas] = useState<ChapterMeta[]>([]);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
@@ -166,13 +166,18 @@ export default function ReaderPanel({
     return on("jm:caches", () => setTask(cacheList().find((t) => t.id === String(albumId))));
   }, [albumId]);
 
-  /** 已缓存话集合 + 每话缓存记录（弹窗里显示「已缓存 · N 页」，与详情页一致） */
+  /**
+   * 已缓存话实况 + 每话缓存记录（弹窗显示「已缓存 · N 页」）。
+   * 依赖 bookId 而不是 bookMeta 对象：bookMeta 每次渲染都是新对象，
+   * 之前用它会每渲染一次就重扫一遍 Cache API（实测静置 5s 触发 5 次）。
+   */
+  const bookId = bookMeta?.bookId || "";
   const refreshCached = useCallback(async () => {
     setCachedIds(await scanCachedChapters());
-    if (bookMeta) setChapterMetas(await listChapters(bookMeta.bookId));
-  }, [bookMeta]);
+    if (bookId) setChapterMetas(await listChapters(bookId));
+  }, [bookId]);
 
-  useEffect(() => { if (bookMeta) void refreshCached(); }, [bookMeta, refreshCached]);
+  useEffect(() => { if (bookId) void refreshCached(); }, [bookId, refreshCached]);
 
   // 弹窗打开时，系统返回键先关弹窗（子组件在父级之前注册监听，先收到事件）
   useBackHandler(() => {
@@ -492,17 +497,28 @@ export default function ReaderPanel({
     onBack();
   }
 
-  /** 取某话页列表：当前话用内存数据（离线 blob 除外）→ IDB → 网络 */
-  async function resolvePages(id: string): Promise<{ pages: ReadPage[]; scrambleId?: number | string } | null> {
+  /**
+   * 取某话的原始页列表（不含 blob 转换，用于缓存）：
+   * 当前话内存 → IndexedDB 记录 → 从 Cache API 反推（IDB 记录丢失时的补救）→ 网络。
+   */
+  async function rawPages(id: string): Promise<{ pages: ReadPage[]; scrambleId?: number | string } | null> {
     if (id === String(albumId) && pages.length > 0 && !String(pages[0].image || "").startsWith("blob:")) {
       return { pages, scrambleId };
     }
     const rec = await getChapter(id);
     if (rec && rec.pages.length > 0) return { pages: rec.pages, scrambleId: rec.scrambleId };
-    if (offline) return null;
-    const r = await client.getRead(id);
+    const recovered = await pagesFromCache(id);
+    if (recovered.length > 0) return { pages: recovered };
+    const r = await client.getRead(id).catch(() => null);
     if (!r || !Array.isArray(r.images) || r.images.length === 0) return null;
     return { pages: r.images, scrambleId: r.scramble_id };
+  }
+
+  /** 阅读用页列表：本地命中就把已缓存页换成 blob URL，未缓存页回落原 URL */
+  async function resolvePages(id: string): Promise<{ pages: ReadPage[]; scrambleId?: number | string } | null> {
+    const raw = await rawPages(id);
+    if (!raw) return null;
+    return { pages: await toOfflinePageUrls(id, raw.pages), scrambleId: raw.scrambleId };
   }
 
   function recordHistory(id: string, label: string, sort?: number) {
@@ -527,14 +543,8 @@ export default function ReaderPanel({
     if (id === String(albumId)) { setChapOpen(false); return; }
     setSwitchBusy(true);
     try {
-      let next: { pages: ReadPage[]; scrambleId?: number | string } | null = null;
-      if (offline || cachedIds.has(id)) {
-        const rec = await getChapter(id);
-        if (rec && rec.pages.length > 0) next = { pages: await toOfflinePageUrls(id, rec.pages), scrambleId: rec.scrambleId };
-      }
-      if (!next && offline) { pushToast("该话未缓存，无法离线阅读", "err"); return; }
-      if (!next) next = await resolvePages(id);
-      if (!next) { pushToast("该话暂无可用图片（可能需要购买或登录）", "err"); return; }
+      const next = await resolvePages(id);
+      if (!next) { pushToast("该话本地数据缺失，联网后可加载", "err"); return; }
       setOverride({ id, pages: next.pages, scrambleId: next.scrambleId, label, sort: Number(c.sort) || undefined });
       setCurrent(1);
       setJumpInput("1");
@@ -562,7 +572,7 @@ export default function ReaderPanel({
     const t = cacheList().find((x) => x.id === id);
     if (t && (t.status === "queued" || t.status === "running")) { pushToast("该话已在缓存队列中", "info"); return false; }
     if (t && t.status === "done") { pushToast("该话已缓存", "info"); return false; }
-    const resolved = await resolvePages(id);
+    const resolved = await rawPages(id);
     if (!resolved || resolved.pages.length === 0) { pushToast("该话暂无可用图片，无法缓存", "err"); return false; }
     await enqueueCache({
       id,
@@ -662,6 +672,12 @@ export default function ReaderPanel({
     );
   }
 
+  const cacheTaskBusy = Boolean(task && (task.status === "queued" || task.status === "running"));
+  /** 整本（或单本当前话）已全部缓存 → 按钮显示「已缓存」且不可点 */
+  const allCached = chapters.length > 0
+    ? chapters.every((c) => cachedIds.has(String(c.id)))
+    : cachedIds.has(String(albumId));
+
   const toolbar = (
     <div className="reader-toolbar">
       <button onClick={handleBack}>返回</button>
@@ -685,15 +701,19 @@ export default function ReaderPanel({
           {deseam ? "去条纹 ✓" : "去条纹"}
         </button>
       )}
-      <button
-        disabled={!pages.length || Boolean(task && (task.status === "queued" || task.status === "running"))}
-        onClick={openCacheDialog}
-        title={chapters.length > 1 ? "选择要缓存的话数" : "缓存本话"}
-      >
-        {task && (task.status === "queued" || task.status === "running")
-          ? <span className="mono-num">{"缓存中 " + task.done + "/" + task.total}</span>
-          : "缓存"}
-      </button>
+      {allCached && !cacheTaskBusy ? (
+        <button className="btn-cached" disabled title="本作品已全部缓存">已缓存</button>
+      ) : (
+        <button
+          disabled={!pages.length || cacheTaskBusy}
+          onClick={openCacheDialog}
+          title={chapters.length > 1 ? "选择要缓存的话数" : "缓存本话"}
+        >
+          {cacheTaskBusy
+            ? <span className="mono-num">{"缓存中 " + (task?.done ?? 0) + "/" + (task?.total ?? 0)}</span>
+            : "缓存"}
+        </button>
+      )}
     </div>
   );
 
@@ -742,15 +762,18 @@ export default function ReaderPanel({
                 const id = String(c.id);
                 const label = chapterLabel(c) || ("#" + id);
                 const isCur = id === String(albumId);
-                const cached = cachedIds.has(id);
+                const info = cachedIds.get(id);
+                const cached = Boolean(info);
                 const rec = chapterMetas.find((m) => m.chapterId === id);
+                const pagesText = info
+                  ? "已缓存 · " + info.pages + " 页" + (rec && rec.total > info.pages ? "/" + rec.total : "")
+                  : "未缓存";
                 return (
                   <button key={id} className={"list-item sheet-row" + (isCur ? " active" : "")} onClick={() => { void switchToChapter(c); }}>
                     <div>
                       <div className="title">{label}{isCur ? "（当前）" : ""}</div>
                       <div className="muted">
-                        {[cached ? "已缓存" + (rec ? " · " + rec.total + " 页" : "") : "未缓存",
-                          !cached && offline ? "离线不可读" : ""].filter(Boolean).join(" · ")}
+                        {[pagesText, !cached && offline ? "离线不可读" : ""].filter(Boolean).join(" · ")}
                       </div>
                     </div>
                     <span className={"badge" + (cached ? " ok" : "")}>{cached ? "✓" : ""}</span>
@@ -774,7 +797,8 @@ export default function ReaderPanel({
               {chapters.map((c) => {
                 const id = String(c.id);
                 const label = chapterLabel(c) || ("#" + id);
-                const cached = cachedIds.has(id);
+                const info = cachedIds.get(id);
+                const cached = Boolean(info);
                 const rec = chapterMetas.find((m) => m.chapterId === id);
                 return (
                   <label key={id} className={"sheet-row check-row" + (cached ? " disabled" : "")}>
@@ -786,7 +810,9 @@ export default function ReaderPanel({
                     />
                     <span className="check-main">
                       <span className="title">{label}{id === String(albumId) ? "（当前）" : ""}</span>
-                      <span className="muted">{cached ? "已缓存" + (rec ? " · " + rec.total + " 页" : "") : "未缓存"}</span>
+                      <span className="muted">{info
+                        ? "已缓存 · " + info.pages + " 页" + (rec && rec.total > info.pages ? "/" + rec.total : "")
+                        : "未缓存"}</span>
                     </span>
                     {cached && <span className="badge ok">✓</span>}
                   </label>

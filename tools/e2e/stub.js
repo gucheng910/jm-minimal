@@ -100,6 +100,8 @@
         for (const p of pages(4)) await c.put(p.image, img());
         await c.put("https://mock.jm.local/media/albums/900001_3x4.jpg?v=1_cover_", img());
       }
+      // 第3话只留一个「空 cache」：模拟历史版本 caches.open 的副作用（没有页条目，不应算已缓存）
+      await caches.open("jm-offline-900003");
       return true;
     })();
   }

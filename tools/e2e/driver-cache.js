@@ -40,6 +40,7 @@
   rows[0].click();
   await waitFor(".book-chapters");
   await sleep(400);
+  const statuses = qa(".chapter-main .muted").map(txt);
   log.push({
     step: "offline-detail",
     title: txt(q(".cache-header h2")),
@@ -49,8 +50,12 @@
     chapters: qa(".chapter-row").length,
     cachedBadges: qa(".badge.ok").length,
     labels: qa(".chapter-main .title").map(txt),
-    statuses: qa(".chapter-main .muted").map(txt)
+    statuses
   });
+  // 第3话只有一个空 cache（stub 故意造的）：必须判为「未缓存」，否则点进去会卡死
+  if (statuses.filter((s) => s.startsWith("已缓存")).length !== 2) {
+    throw new Error("缓存判定错误，空 cache 被当成已缓存：" + JSON.stringify(statuses));
+  }
 
   // ---- 未缓存话（第3话）→ 正常走网络 ----
   const ch3 = qa(".chapter-row").find((r) => /第3话/.test(txt(r)));

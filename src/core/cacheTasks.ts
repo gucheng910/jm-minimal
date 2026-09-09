@@ -1,7 +1,8 @@
 // 缓存任务中心：队列化下载（暂停/继续/删除/失败提示），退出 App 即自动停止（无需额外处理）。
 // 存储分层（docs/28 §2.2 实测）：队列状态小、需同步读 → localStorage；
 // 每话 pages 约 5 KB、写频繁 → IndexedDB（localStorage 全量重写会卡主线程且 9.4 MB 硬顶）。
-import { cacheCover, cachePage, clearAllAlbumCaches, deleteAlbumCache } from "./offline";
+import { cacheCover, cachePage, clearAllAlbumCaches, deleteAlbumCache, pruneEmptyCaches } from "./offline";
+import { ensureBookMeta } from "./bookSync";
 import { emit } from "./bus";
 import { clearAllMeta, deleteBook, deleteChapter, getChapter, listChapters, putBook, putChapter, type BookMeta } from "./offlineMeta";
 import { knownBookId } from "./series";
@@ -95,6 +96,8 @@ function init(): void {
   });
   save();
   void migrateLegacy();
+  // 清掉历史版本 caches.open 副作用留下的空 cache（跳过正在下载的话）
+  void pruneEmptyCaches(new Set(tasks.filter((t) => t.status === "queued" || t.status === "running").map((t) => t.id)));
 }
 
 /** v1 → IDB：把内联在 localStorage 里的 pages 搬进 chapters store，成功后删掉 v1 键 */
@@ -117,6 +120,19 @@ async function migrateLegacy(): Promise<void> {
 }
 
 init();
+
+/** 书 id 纠正：把旧任务从「话 id 当书 id」改挂到真正的书 id（分组/元数据才对得上） */
+export function rekeyBook(oldBookId: string, newBookId: string, title?: string): void {
+  if (!oldBookId || !newBookId || oldBookId === newBookId) return;
+  let changed = false;
+  for (const t of tasks) {
+    if (t.bookId !== oldBookId) continue;
+    t.bookId = newBookId;
+    if (title) t.title = title;
+    changed = true;
+  }
+  if (changed) { save(); notify(); }
+}
 
 export function cacheList(): CacheTaskMeta[] {
   return tasks.map((t) => ({ ...t }));
@@ -238,10 +254,11 @@ export async function removeCache(id: number | string): Promise<void> {
   if (rest.length === 0) await deleteBook(bookId);
 }
 
-/** 重下：清空该话图片缓存后重新排队（保留元数据与页列表） */
+/** 重下：补齐书级元数据（旧缓存没有作者/标签/简介）→ 清空该话图片缓存 → 重新排队 */
 export async function reDownloadCache(id: number | string): Promise<void> {
   const t = tasks.find((x) => x.id === String(id));
   if (!t) return;
+  await ensureBookMeta(String(id)).catch(() => { /* 联网失败不阻塞重下 */ });
   loopGen += 1;
   await deleteAlbumCache(String(id));
   t.done = 0;

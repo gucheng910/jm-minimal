@@ -131,6 +131,17 @@ export async function clearAllMeta(): Promise<void> {
   await tx(BOOKS, "readwrite", (s) => s.clear());
 }
 
+/**
+ * 书 id 纠正：旧版本把「话 id」当成了书 id 存下来，联网拿到 series_id 后要把
+ * 该书记录改挂到正确的书 id 上，否则 listChapters(新书 id) 会是空的。
+ */
+export async function rebindBook(oldBookId: string, newBookId: string): Promise<void> {
+  if (!oldBookId || !newBookId || oldBookId === newBookId) return;
+  const chapters = await listChapters(oldBookId);
+  for (const c of chapters) await putChapter({ ...c, bookId: newBookId });
+  await tx(BOOKS, "readwrite", (s) => s.delete(oldBookId));
+}
+
 /** 从详情构造书级元数据（话级 payload 的作者/简介为空，调用前应先用 getAlbumFull 补全） */
 export function bookMetaFromDetail(d: AlbumDetail, cover?: string): BookMeta {
   const series = Array.isArray(d.series) ? d.series : [];

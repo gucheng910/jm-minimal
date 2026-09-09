@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useBackHandler } from "./hooks/useBackHandler";
 import { navTransition } from "./core/viewTransition";
 import { emit, on } from "./core/bus";
@@ -415,6 +415,17 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   const logged = useLoggedIn();
 
+  /**
+   * 阅读器用书级元数据：必须 memo（否则每次渲染都是新对象，
+   * 阅读器里依赖它的 effect 会每渲染一次重扫一遍 Cache API —— 1.7.2 卡顿根因之一）。
+   */
+  const readerBookMeta = useMemo(() => {
+    const d = album.detail;
+    if (!d) return undefined;
+    const bookId = bookIdOf(d);
+    return bookMetaFromDetail(d, albumCoverUrl({ id: bookId, name: d.book_name || d.name || "", update_at: d.addtime }));
+  }, [album.detail]);
+
   if (mode === "week" && week.payload) {
     return (
       <WeekRank
@@ -485,7 +496,6 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   if (mode === "reader" && album.read) {
     const d = album.detail;
     const chapter = d?.series?.find((s) => String(s.id) === String(album.read!.id));
-    const bookId = d ? bookIdOf(d) : "";
     return (
       <ReaderPanel
         albumId={album.read.id}
@@ -497,7 +507,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           author: Array.isArray(d?.author) ? d!.author.join("/") : (typeof d?.author === "string" ? d.author : ""),
           cover: d ? albumCoverUrl({ id: d.id, name: d.name || "", update_at: d.addtime }) : ""
         }}
-        bookMeta={d ? bookMetaFromDetail(d, albumCoverUrl({ id: bookId, name: d.book_name || d.name || "", update_at: d.addtime })) : undefined}
+        bookMeta={readerBookMeta}
         chapterName={chapterLabel(chapter)}
         chapterSort={chapter ? Number(chapter.sort) || undefined : undefined}
       />

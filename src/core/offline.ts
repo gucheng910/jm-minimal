@@ -1,33 +1,61 @@
+// 离线图片缓存（Cache API）：每话一个 cache，键名 jm-offline-<话id>
+//
+// ⚠ 关键坑（1.7.2 事故根因）：caches.open() 会「创建」不存在的 cache（实测：open 之后
+// caches.keys() 就多出一个空 cache，条目数 0）。因此：
+//   - 所有只读路径必须先 caches.has()，否则读一次就凭空造一个空 cache；
+//   - 写入路径必须「先 fetch 成功再 open + put」，否则下载失败就留下空 cache；
+//   - 判断「某话是否已缓存」不能只看 cache 名，必须确认里面有「页」条目。
+// 详见 docs/30-1.7.2回归问题定位与修复.md
 import type { ReadPage } from "./types";
 
-const CONCURRENCY = 4;
+export const OFFLINE_PREFIX = "jm-offline-";
+const COVER_SUFFIX = "_cover_";
 
 export function cacheName(id: number | string): string {
-  return "jm-offline-" + String(id);
+  return OFFLINE_PREFIX + String(id);
 }
 
-export async function isAlbumCached(id: number | string): Promise<boolean> {
-  if (!("caches" in window)) return false;
-  const cache = await caches.open(cacheName(id));
-  const keys = await cache.keys();
-  return keys.length > 0;
+/** 已缓存话的实况：真正落盘的页数（不含封面） */
+export interface CachedChapterInfo {
+  pages: number;
+  cover: boolean;
 }
 
-export async function downloadAlbum(id: number | string, pages: ReadPage[], onProgress?: (done: number, total: number) => void): Promise<number> {
-  const cache = await caches.open(cacheName(id));
-  let done = 0;
-  for (let i = 0; i < pages.length; i += CONCURRENCY) {
-    const batch = pages.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(async (p) => {
+let scanCache: { at: number; value: Map<string, CachedChapterInfo> } | null = null;
+const SCAN_TTL_MS = 1500;
+
+/** 缓存被写入/删除后调用，让下一次扫描重新计算（避免高频扫描同时保证及时性） */
+export function invalidateCacheScan(): void {
+  scanCache = null;
+}
+
+/**
+ * 扫描「已缓存的话」：cache 名只是候选，必须确认里面有非封面条目。
+ * 结果带 1.5s 记忆（阅读器 + 缓存中心 + 弹窗可能在同一瞬间各扫一次）。
+ */
+export async function scanCachedChapters(): Promise<Map<string, CachedChapterInfo>> {
+  if (scanCache && Date.now() - scanCache.at < SCAN_TTL_MS) return scanCache.value;
+  const value = new Map<string, CachedChapterInfo>();
+  if (!("caches" in window)) return value;
+  try {
+    const names = (await caches.keys()).filter((n) => n.startsWith(OFFLINE_PREFIX));
+    await Promise.all(names.map(async (name) => {
+      const id = name.slice(OFFLINE_PREFIX.length);
       try {
-        const resp = await fetch(p.image, { mode: "cors", cache: "no-store" });
-        if (resp.ok) await cache.put(p.image, resp.clone());
-      } catch { /* single image failure tolerated */ }
-      done += 1;
-      onProgress?.(done, pages.length);
+        const cache = await caches.open(name); // 名字来自 keys()，不会新建
+        const keys = await cache.keys();
+        let pages = 0;
+        let cover = false;
+        for (const k of keys) {
+          if (String(k.url).includes(COVER_SUFFIX)) cover = true;
+          else pages += 1;
+        }
+        if (pages > 0) value.set(id, { pages, cover });
+      } catch { /* 单个 cache 读失败不影响其它 */ }
     }));
-  }
-  return done;
+  } catch { /* ignore */ }
+  scanCache = { at: Date.now(), value };
+  return value;
 }
 
 function pageFileName(url: string): string {
@@ -47,9 +75,16 @@ export function releaseOfflinePageUrls(): number {
   return n;
 }
 
+/** 把已缓存页替换成 blob URL；cache 不存在时原样返回（不创建 cache） */
 export async function toOfflinePageUrls(id: number | string, pages: ReadPage[]): Promise<ReadPage[]> {
   if (!("caches" in window)) return pages;
-  const cache = await caches.open(cacheName(id));
+  const name = cacheName(id);
+  try {
+    if (!(await caches.has(name))) return pages;
+  } catch {
+    return pages;
+  }
+  const cache = await caches.open(name);
   const out: ReadPage[] = [];
   for (const p of pages) {
     const hit = await cache.match(p.image);
@@ -66,18 +101,40 @@ export async function toOfflinePageUrls(id: number | string, pages: ReadPage[]):
   return out;
 }
 
-// ---- 缓存中心支持（页面级原样缓存 + 封面） ----
+/**
+ * 从 cache 反推页列表：IndexedDB 记录丢失（老版本配额溢出/迁移中断）时，
+ * 只要图片还在就能继续离线阅读。scramble 需要的 scrambleId 由调用方另行补。
+ */
+export async function pagesFromCache(id: number | string): Promise<ReadPage[]> {
+  if (!("caches" in window)) return [];
+  const name = cacheName(id);
+  try {
+    if (!(await caches.has(name))) return [];
+    const cache = await caches.open(name);
+    const keys = await cache.keys();
+    const urls = keys.map((k) => String(k.url)).filter((u) => !u.includes(COVER_SUFFIX)).sort();
+    return urls.map((u, i) => ({ page: i + 1, image: u, name: pageFileName(u) }));
+  } catch {
+    return [];
+  }
+}
 
-/** 缓存单页图片（若已存在则跳过），网络抖动时即时重试 1 次 */
+/** 缓存单页图片（已存在则跳过）；先下载成功再 open+put，避免失败留下空 cache */
 export async function cachePage(id: number | string, url: string): Promise<boolean> {
   if (!("caches" in window)) return false;
-  const cache = await caches.open(cacheName(id));
-  const hit = await cache.match(url);
-  if (hit && hit.ok) return true;
+  const name = cacheName(id);
+  try {
+    if (await caches.has(name)) {
+      const cache = await caches.open(name);
+      const hit = await cache.match(url);
+      if (hit && hit.ok) return true;
+    }
+  } catch { /* 继续走下载 */ }
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const resp = await fetch(url, { mode: "cors", cache: "no-store" });
       if (resp.ok) {
+        const cache = await caches.open(name);
         await cache.put(url, resp.clone());
         return true;
       }
@@ -87,37 +144,31 @@ export async function cachePage(id: number | string, url: string): Promise<boole
   return false;
 }
 
-export async function cachedPageCount(id: number | string): Promise<number> {
-  if (!("caches" in window)) return 0;
-  try {
-    const cache = await caches.open(cacheName(id));
-    const keys = await cache.keys();
-    return keys.filter((k) => !String(k.url).includes("_cover_")).length;
-  } catch {
-    return 0;
-  }
-}
-
-/** 封面按 URL 缓存在专辑同名 cache（key 与页面图区分） */
+/** 封面按 URL 缓存在专辑同名 cache（key 与页面图区分）；同样先下载成功再建 cache */
 export async function cacheCover(id: number | string, coverUrl: string): Promise<void> {
   if (!("caches" in window) || !coverUrl) return;
+  const name = cacheName(id);
   try {
-    const cache = await caches.open(cacheName(id));
-    const key = coverUrl + "_cover_";
-    const hit = await cache.match(key);
-    if (hit) return;
+    if (await caches.has(name)) {
+      const cache = await caches.open(name);
+      if (await cache.match(coverUrl + COVER_SUFFIX)) return;
+    }
     // 必须 cors + ok：opaque(no-cors) 响应无法存入 Cache API，会导致离线封面永远缺失
     const resp = await fetch(coverUrl, { mode: "cors", cache: "no-store" });
-    if (resp.ok) await cache.put(key, resp);
+    if (!resp.ok) return;
+    const cache = await caches.open(name);
+    await cache.put(coverUrl + COVER_SUFFIX, resp);
   } catch { /* 封面缓存失败不阻塞 */ }
 }
 
-/** 读取已缓存封面为 blob URL（失败返回空） */
+/** 读取已缓存封面为 blob URL（cache 不存在时直接返回空，不创建 cache） */
 export async function cachedCoverUrl(id: number | string, coverUrl: string): Promise<string> {
   if (!("caches" in window) || !coverUrl) return "";
+  const name = cacheName(id);
   try {
-    const cache = await caches.open(cacheName(id));
-    const hit = await cache.match(coverUrl + "_cover_");
+    if (!(await caches.has(name))) return "";
+    const cache = await caches.open(name);
+    const hit = await cache.match(coverUrl + COVER_SUFFIX);
     if (hit && hit.ok) {
       const blob = await hit.blob();
       return URL.createObjectURL(blob);
@@ -126,25 +177,12 @@ export async function cachedCoverUrl(id: number | string, coverUrl: string): Pro
   return "";
 }
 
-/**
- * 一次性扫描所有离线 cache 名 → 已缓存的话 id 集合。
- * 比逐话 cache.keys() 快得多（缓存中心/阅读器弹窗展示「哪些话已缓存」用）。
- */
-export async function scanCachedChapters(): Promise<Set<string>> {
-  const ids = new Set<string>();
-  if (!("caches" in window)) return ids;
-  try {
-    for (const name of await caches.keys()) {
-      const prefix = cacheName("");
-      if (name.startsWith(prefix)) ids.add(name.slice(prefix.length));
-    }
-  } catch { /* ignore */ }
-  return ids;
-}
-
 export async function deleteAlbumCache(id: number | string): Promise<void> {
   if (!("caches" in window)) return;
-  try { await caches.delete(cacheName(id)); } catch { /* ignore */ }
+  try {
+    await caches.delete(cacheName(id));
+    invalidateCacheScan();
+  } catch { /* ignore */ }
 }
 
 /** 清理全部离线专辑缓存（含封面），返回删除的专辑缓存数量 */
@@ -153,9 +191,33 @@ export async function clearAllAlbumCaches(): Promise<number> {
   let n = 0;
   try {
     const names = await caches.keys();
-    await Promise.all(names.filter((name) => name.startsWith("jm-offline-")).map(async (name) => {
+    await Promise.all(names.filter((name) => name.startsWith(OFFLINE_PREFIX)).map(async (name) => {
       try { await caches.delete(name); n += 1; } catch { /* ignore */ }
     }));
   } catch { /* ignore */ }
+  invalidateCacheScan();
+  return n;
+}
+
+/**
+ * 清理零条目的空 cache（历史版本 caches.open 副作用留下的垃圾）。
+ * exclude 传「正在下载中的话 id」，避免打断进行中的任务。
+ */
+export async function pruneEmptyCaches(exclude: Set<string> = new Set()): Promise<number> {
+  if (!("caches" in window)) return 0;
+  let n = 0;
+  try {
+    const names = (await caches.keys()).filter((name) => name.startsWith(OFFLINE_PREFIX));
+    await Promise.all(names.map(async (name) => {
+      const id = name.slice(OFFLINE_PREFIX.length);
+      if (exclude.has(id)) return;
+      try {
+        const cache = await caches.open(name);
+        const keys = await cache.keys();
+        if (keys.length === 0) { await caches.delete(name); n += 1; }
+      } catch { /* ignore */ }
+    }));
+  } catch { /* ignore */ }
+  if (n > 0) invalidateCacheScan();
   return n;
 }

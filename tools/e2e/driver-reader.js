@@ -134,6 +134,10 @@
   });
   btn("关闭").click();
   await waitGone(".reader-sheet");
+  // 整本缓存后：工具栏按钮应变成不可点的「已缓存」
+  await waitUntil(() => tbButtons().includes("已缓存"), 8000, "已缓存按钮");
+  const cachedBtn = qa(".reader-toolbar button").find((b) => txt(b) === "已缓存");
+  log.push({ step: "cache-button-disabled", disabled: cachedBtn.disabled, toolbar: tbButtons() });
   log.push({ step: "final", fatal: (document.getElementById("jm-fatal") || {}).textContent || "", errs: window.__errs.slice(0, 5) });
   return log;
 })()

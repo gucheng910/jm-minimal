@@ -7,10 +7,11 @@ import { useBackHandler } from "../hooks/useBackHandler";
 import { client } from "../core/api";
 import { emit, on } from "../core/bus";
 import {
-  cacheList, chapterPages, clearAllCacheTasks, pauseCache, reDownloadCache, removeCache, resumeCache,
+  cacheList, chapterPages, clearAllCacheTasks, pauseCache, reDownloadCache, rekeyBook, removeCache, resumeCache,
   type CacheTaskMeta
 } from "../core/cacheTasks";
-import { cachedCoverUrl, scanCachedChapters, toOfflinePageUrls } from "../core/offline";
+import { cachedCoverUrl, pagesFromCache, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "../core/offline";
+import { ensureBookMeta } from "../core/bookSync";
 import { chapterLabel, getBook, getChapter, listChapters, type BookMeta, type ChapterMeta } from "../core/offlineMeta";
 import { saveHistory } from "../core/history";
 import type { ReadPage } from "../core/types";
@@ -67,8 +68,8 @@ function groupByBook(list: CacheTaskMeta[]): BookGroup[] {
   return arr.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/** 封面：优先本书任意一话缓存下来的封面，否则回落到远程 URL */
-function GroupCover({ group, size = 52 }: { group: BookGroup; size?: number }) {
+/** 封面：优先本书任意一话缓存下来的封面，否则回落到远程 URL（尺寸交给 CSS，避免覆盖 .list-item 的卡片布局） */
+function GroupCover({ group }: { group: BookGroup }) {
   const [src, setSrc] = useState("");
   const blobRef = useRef("");
   useEffect(() => {
@@ -86,9 +87,9 @@ function GroupCover({ group, size = 52 }: { group: BookGroup; size?: number }) {
       if (blobRef.current) { try { URL.revokeObjectURL(blobRef.current); } catch { /* ignore */ } blobRef.current = ""; }
     };
   }, [group.bookId, group.cover, group.chapters]);
-  if (!src) return <div className="thumb empty" style={{ width: size, height: size * 1.34 }}>{group.title.slice(0, 1)}</div>;
+  if (!src) return <div className="thumb empty">{group.title.slice(0, 1)}</div>;
   return (
-    <span className="thumb-box" style={{ width: size, height: size * 1.34 }}>
+    <span className="thumb-box">
       <img className="thumb" src={src} alt={group.title} onError={(e) => { e.currentTarget.style.opacity = "0"; }} />
       <span className="thumb-fallback">{group.title.slice(0, 1)}</span>
     </span>
@@ -100,7 +101,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<"active" | "done">("active");
   const [view, setView] = useState<View>({ kind: "list" });
   const [reading, setReading] = useState<Reading | null>(null);
-  const [cachedIds, setCachedIds] = useState<Set<string>>(new Set());
+  const [cachedIds, setCachedIds] = useState<Map<string, CachedChapterInfo>>(new Map());
   const [book, setBook] = useState<BookMeta | null>(null);
   const [bookChapters, setBookChapters] = useState<ChapterMeta[]>([]);
   const [loadingBook, setLoadingBook] = useState(false);
@@ -119,20 +120,37 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
     return () => { emit("jm:immersive", false); };
   }, [reading]);
 
-  const loadBook = useCallback(async (bookId: string) => {
+  /** 读本地书数据；旧版本缓存缺书级元数据时联网补一次（失败保持降级显示） */
+  const loadBook = useCallback(async (bookId: string): Promise<string> => {
     setLoadingBook(true);
-    const [meta, chapters] = await Promise.all([getBook(bookId), listChapters(bookId)]);
+    let [meta, chapters] = await Promise.all([getBook(bookId), listChapters(bookId)]);
+    let effective = bookId;
+    if ((!meta || meta.chapters.length === 0) && chapters.length > 0) {
+      const filled = await ensureBookMeta(chapters[0].chapterId).catch(() => null);
+      if (filled && filled.bookId) {
+        effective = filled.bookId;
+        meta = filled;
+        if (effective !== bookId) {
+          // 旧数据把话 id 当书 id：把任务与话记录一起改挂到真书 id
+          rekeyBook(bookId, effective, filled.name);
+          setTasks(cacheList());
+        }
+        chapters = await listChapters(effective);
+      }
+    }
     setBook(meta);
     setBookChapters(chapters);
     setLoadingBook(false);
     void refreshCached();
+    return effective;
   }, [refreshCached]);
 
   async function openBook(bookId: string) {
     setView({ kind: "book", bookId });
     setBook(null);
     setBookChapters([]);
-    await loadBook(bookId);
+    const effective = await loadBook(bookId);
+    if (effective !== bookId) setView({ kind: "book", bookId: effective });
     window.scrollTo(0, 0);
   }
 
@@ -167,9 +185,12 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
   /** 离线阅读：页列表来自 IDB，图片来自 Cache API */
   async function readOffline(chapterId: string, label: string) {
     const rec = await getChapter(chapterId);
-    const pages = rec && rec.pages && rec.pages.length ? rec.pages : await chapterPages(chapterId);
+    let pages = rec && rec.pages && rec.pages.length ? rec.pages : await chapterPages(chapterId);
+    // IndexedDB 记录丢失（老版本配额溢出/迁移中断）时，只要图片还在就能继续离线读
+    if (!pages.length) pages = await pagesFromCache(chapterId);
     if (!pages.length) {
-      pushToast("该话没有可用的离线数据，请重新缓存", "err");
+      // 本地确实没有：回落网络，没网就走正常报错
+      await readOnline(chapterId, label);
       return;
     }
     const urls = await toOfflinePageUrls(chapterId, pages);
@@ -264,17 +285,21 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
             {chapters.map((c) => {
               const id = String(c.id);
               const label = chapterLabel(c) || ("#" + id);
-              const cached = cachedIds.has(id);
+              const info = cachedIds.get(id);
+              const cached = Boolean(info);
               const task = tasks.find((t) => t.id === id);
               const meta = bookChapters.find((m) => m.chapterId === id);
+              const cachedText = info
+                ? "已缓存 · " + info.pages + " 页" + (meta && meta.total > info.pages ? "/" + meta.total : "")
+                : null;
               return (
                 <div key={id} className="chapter-row">
                   <button className="chapter-main" onClick={() => { void (cached ? readOffline(id, label) : readOnline(id, label)); }}>
                     <div>
                       <div className="title one-line">{label}</div>
                       <div className="muted">
-                        {cached
-                          ? "已缓存" + (meta ? " · " + meta.total + " 页" : "")
+                        {cachedText
+                          ? cachedText
                           : task ? STATUS_TEXT[task.status] + (task.status === "running" || task.status === "queued" ? " · " + task.done + "/" + task.total + " 页" : "")
                             : "未缓存"}
                       </div>
@@ -314,7 +339,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
         <button className="ghost danger" onClick={async () => {
           const n = await clearAllCacheTasks();
           setTasks([]);
-          setCachedIds(new Set());
+          setCachedIds(new Map());
           pushToast(n > 0 ? "已清理全部缓存（" + n + " 个话）" : "没有可清理的缓存", "ok");
         }}>清理全部缓存</button>
       </div>

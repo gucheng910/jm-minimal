@@ -1,10 +1,13 @@
 // JM极简版 PWA 离线壳：文档走网络优先（更新即时生效），静态资源缓存优先，API/图片不劫持
 const CACHE = "jmmin-v2";
+// ⚠ 离线漫画缓存的键名是 jm-offline-<话id>（见 src/core/offline.ts），
+// 绝不能在这里被当成旧版本清掉——否则一次 SW 激活就抹掉用户整个离线库。
+const keepCache = (name) => name === CACHE || name.startsWith("jm-offline-");
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["./", "./index.html", "./manifest.webmanifest", "./loading.svg"])).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => !keepCache(k)).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", (e) => {
   const req = e.request;
