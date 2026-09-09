@@ -8,6 +8,7 @@
  *   node tools/release.mjs 1.7.1 --dry-run       # 只打印将要改什么/做什么，不落盘
  *   node tools/release.mjs 1.7.1 --skip-pc       # 跳过 Electron 打包（只想出 APK 时）
  *   node tools/release.mjs 1.7.1 --skip-android  # 跳过 Android 打包
+ *   node tools/release.mjs 1.7.1 --verify-only  # 只校验已发布的 Release（走 gh API，本机被墙也能用）
  *
  * 编码进去的坑（都是踩过的）：
  *   1) cap sync 必须在仓库根跑，否则静默用旧 web 资源 → 脚本会比对 dist 与 android 资产的哈希
@@ -16,7 +17,7 @@
  *   4) 发布后自动做 BUILDING §5.4 校验：线上 latest.yml sha512 对比 + 资产 HEAD 200
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, copyFileSync, existsSync, statSync, readdirSync } from "node:fs";
+import fs, { readFileSync, writeFileSync, copyFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +33,7 @@ const PUBLISH = flags.has("--publish");
 const DRY = flags.has("--dry-run");
 const SKIP_PC = flags.has("--skip-pc");
 const SKIP_ANDROID = flags.has("--skip-android");
+const VERIFY_ONLY = flags.has("--verify-only");
 const notesArg = argv.indexOf("--notes");
 
 const log = (...a) => console.log(...a);
@@ -77,7 +79,7 @@ if (!version) die("用法：node tools/release.mjs <x.y.z> [--publish|--dry-run|
 const pkg = JSON.parse(readText("package.json"));
 const curVersion = pkg.version;
 // --skip-pc --skip-android = 复用上一轮产物发布，此时版本号必然与当前一致（不再要求递增）
-const reuseOnly = SKIP_PC && SKIP_ANDROID;
+const reuseOnly = (SKIP_PC && SKIP_ANDROID) || VERIFY_ONLY;
 if (reuseOnly) {
   if (version !== curVersion) die("复用产物发布时版本号必须与 package.json 一致（当前 " + curVersion + "，传入 " + version + "）");
 } else {
@@ -107,7 +109,9 @@ log("模式      " + (DRY ? "dry-run（不写文件）" : PUBLISH ? "本地构�
 log("分支      " + branch + (dirty ? "（有未提交改动）" : "（干净）"));
 
 // ---------------------------------------------------------------- 版本同步
-step("同步版本号（4 处 + BUILD_TAG）");
+// 复用产物发布（--skip-pc --skip-android）时产物已按当前版本号构建好，
+// 再改版本号会与实际产物对不上（尤其 versionCode 会凭空 +1）
+step(reuseOnly ? "复用产物发布：跳过版本号同步" : "同步版本号（4 处 + BUILD_TAG）");
 const today = new Date();
 const stamp = "v" + today.getFullYear() + String(today.getMonth() + 1).padStart(2, "0") + String(today.getDate()).padStart(2, "0") + "-" + version;
 
@@ -131,7 +135,7 @@ edits.push(["README.md", readText("README.md").split("-" + curVersion).join("-" 
 // 5) BUILD_TAG
 edits.push(["src/core/constants.ts", readText("src/core/constants.ts").replace(/export const BUILD_TAG = "[^"]*";/, 'export const BUILD_TAG = "' + stamp + '";')]);
 
-for (const [f, text] of edits) {
+for (const [f, text] of reuseOnly ? [] : edits) {
   const changed = text !== readText(f);
   log((changed ? "  ✎ " : "  · ") + f + (changed ? "" : "（无变化）"));
   if (changed) writeText(f, text);
@@ -242,6 +246,46 @@ const assets = assetCandidates.filter(([n, f]) => {
   return true;
 });
 
+/** §5.4 发布后校验：走 gh API（资产下载域名在本机可能被墙） */
+function verifyRelease() {
+  const tag = "v" + version;
+  step("发布后校验（BUILDING §5.4）");
+  const onlineList = capture("gh", ["release", "view", tag, "--repo", REPO, "--json", "assets", "--jq", '.assets[] | "\(.name) \(.size)"'], { what: "gh release view" });
+  const onlineSizes = new Map(onlineList.split(/\r?\n/).filter(Boolean).map((line) => {
+    const i = line.lastIndexOf(" ");
+    return [line.slice(0, i), Number(line.slice(i + 1))];
+  }));
+  for (const [name, file] of assets) {
+    const size = statSync(file).size;
+    const got = onlineSizes.get(name);
+    if (got === undefined) die("线上缺少资产：" + name);
+    if (got !== size) die("线上资产大小不符：" + name + " 线上 " + got + " / 本地 " + size);
+    log("  ✓ " + name + "  " + size + " 字节（线上一致）");
+  }
+  const tmp = path.join(ROOT, "_archive/.verify");
+  fs.mkdirSync(tmp, { recursive: true });
+  run("gh", ["release", "download", tag, "--repo", REPO, "--pattern", "latest.yml", "--dir", tmp, "--clobber"], { quiet: true });
+  const onlineYml = readFileSync(path.join(tmp, "latest.yml"), "utf8");
+  const localSha = (readFileSync(path.join(ROOT, "release-pc/latest.yml"), "utf8").match(/sha512:\s*(\S+)/) || [])[1];
+  const onlineSha = (onlineYml.match(/sha512:\s*(\S+)/) || [])[1];
+  if (!onlineSha || onlineSha !== localSha) die("线上 latest.yml 的 sha512 与本地不一致（老用户差分更新会失败）");
+  log("  ✓ latest.yml sha512 一致：" + onlineSha.slice(0, 16) + "…");
+  for (const [name] of assets) {
+    try {
+      const code = capture("curl", ["-sIL", "-o", IS_WIN ? "NUL" : "/dev/null", "-w", "%{http_code}", "--max-time", "30", "https://github.com/" + REPO + "/releases/download/" + tag + "/" + name], { optional: true });
+      log(code === "200" ? "  ✓ " + name + " → 200" : "  ! " + name + " HEAD " + code + "（本机网络受限，以 gh API 结果为准）");
+    } catch {
+      log("  ! " + name + " 可达性检查失败（本机网络受限，以 gh API 结果为准）");
+    }
+  }
+  log("\nRelease: https://github.com/" + REPO + "/releases/tag/" + tag);
+}
+
+if (VERIFY_ONLY) {
+  verifyRelease();
+  process.exit(0);
+}
+
 if (PUBLISH) {
   step("创建 GitHub Release（draft → 上传 → 发布）");
   const tag = "v" + version;
@@ -269,18 +313,7 @@ if (PUBLISH) {
   capture("gh", ["release", "edit", tag, "--repo", REPO, "--draft=false", "--latest"], { what: "gh release edit" });
   log("  ✓ 已发布 " + tag + " 并标记 Latest");
 
-  step("发布后校验（BUILDING §5.4）");
-  const onlineYml = capture("curl", ["-sL", "--max-time", "30", "https://github.com/" + REPO + "/releases/download/" + tag + "/latest.yml"], { what: "拉取线上 latest.yml" });
-  const localSha = (readFileSync(path.join(ROOT, "release-pc/latest.yml"), "utf8").match(/sha512:\s*(\S+)/) || [])[1];
-  const onlineSha = (onlineYml.match(/sha512:\s*(\S+)/) || [])[1];
-  if (!onlineSha || onlineSha !== localSha) die("线上 latest.yml 的 sha512 与本地不一致（老用户差分更新会失败）");
-  log("  ✓ latest.yml sha512 一致：" + onlineSha.slice(0, 16) + "…");
-  for (const [name] of assets) {
-    const code = capture("curl", ["-sIL", "-o", IS_WIN ? "NUL" : "/dev/null", "-w", "%{http_code}", "--max-time", "30", "https://github.com/" + REPO + "/releases/download/" + tag + "/" + name], { what: "HEAD " + name });
-    if (code !== "200") die("资产不可达：" + name + " → HTTP " + code);
-    log("  ✓ " + name + " → 200");
-  }
-  log("\nRelease: https://github.com/" + REPO + "/releases/tag/" + tag);
+  verifyRelease();
 } else {
   step("跳过发布（未加 --publish）");
   log("本地产物就绪。发布三步：");

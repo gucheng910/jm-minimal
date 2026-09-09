@@ -52,7 +52,7 @@
 | PC + 前端 | package.json → version | 1.7.1 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
 | Android | android/app/build.gradle → defaultConfig | versionName 1.7.1 / versionCode 42 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
-> ⚠️ 现值 = **工作区状态**（1.6.0 本次发版）；线上 Release 为 1.5.0，本次发布后同步到 1.6.0。
+> ⚠️ 现值 = **工作区状态**（1.7.1 已发布，线上 Latest = v1.7.1）。
 
 规则：
 - **每次都同步升**：PC 装包 / APK / 更新判断都依赖这两个值；只改一处会造成"新版拉不下来"或"显示已最新但下载的其实是旧协议版本"。
