@@ -120,11 +120,32 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     try { sessionStorage.setItem(SCROLL_KEY, String(y)); } catch { /* ignore */ }
   }
 
-  /** useLayoutEffect: mode 从非 home 切回 home 时，在浏览器绘制前同步恢复滚动 */
+  /**
+   * useLayoutEffect: mode 从非 home 切回 home 时，在浏览器绘制前同步恢复滚动。
+   * 列表是异步渲染 + 图片懒加载的，刚切回来时文档可能还不够高，scrollTo 会被浏览器截断到当前最大滚动量；
+   * 因此补两次「如果没到位就再滚一次」（下一帧 + 120ms + 400ms），用户一旦自己滑动就立即放弃，不抢用户的手。
+   */
   useLayoutEffect(() => {
     if (mode !== "home") return;
     const y = listScrollRef.current || Number(sessionStorage.getItem(SCROLL_KEY) || "0");
-    if (y > 0) window.scrollTo(0, y);
+    if (y <= 0) return;
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    window.addEventListener("touchstart", cancel, { once: true, passive: true });
+    window.addEventListener("wheel", cancel, { once: true, passive: true });
+    const apply = () => { if (!cancelled && Math.abs(window.scrollY - y) > 4) window.scrollTo(0, y); };
+    window.scrollTo(0, y);
+    const raf = requestAnimationFrame(apply);
+    const t1 = window.setTimeout(apply, 120);
+    const t2 = window.setTimeout(apply, 400);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.removeEventListener("touchstart", cancel);
+      window.removeEventListener("wheel", cancel);
+    };
   }, [mode]);
 
   /** 清空搜索结果层与栈记忆（离开详情页 / 回首页时调用） */

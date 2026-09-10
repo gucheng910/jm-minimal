@@ -41,9 +41,21 @@ export default function UnderlineTabs({ items, value, onChange, scroll, classNam
     if (!scroll) return;
     const wrap = wrapRef.current;
     const el = wrap && wrap.querySelector<HTMLElement>('[data-on="1"]');
-    if (el && typeof el.scrollIntoView === "function") {
-      el.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
-    }
+    if (!wrap || !el) return;
+    /**
+     * ⚠️ 这里绝对不能用 el.scrollIntoView()：它会把「所有可滚动祖先」一起滚，window 也在内。
+     * 从详情页返回列表时，滚动位置刚被 useLayoutEffect 恢复（可能几千 px），
+     * 本组件若在此刻挂载/变化，scrollIntoView({block:"nearest"}) 会把整页平滑滚回顶部
+     * —— 即「分类页下滑进详情，返回后回到列表开头」的真机 bug（2026-09-11 定位）。
+     * 只计算标签行自身需要的横向位移，纵向位置完全不动。
+     */
+    const target = Math.max(0, Math.min(
+      el.offsetLeft - (wrap.clientWidth - el.offsetWidth) / 2,
+      wrap.scrollWidth - wrap.clientWidth
+    ));
+    if (Math.abs(target - wrap.scrollLeft) < 1) return;
+    try { wrap.scrollTo({ left: target, behavior: "smooth" }); }
+    catch { wrap.scrollLeft = target; }
   }, [value, scroll]);
 
   return (

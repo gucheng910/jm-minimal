@@ -151,6 +151,25 @@
           log.push({ step: "category-sub", catReqs: (window.__reqs || []).filter((r) => r.path === "categories/filter").slice(-1) });
         }
       }
+      // ---- 列表位置记忆：进详情再返回，列表不能跳回开头 ----
+      // （真机曾因标签行用 el.scrollIntoView 把整页平滑滚回顶部；这里守住"返回后位置不变"）
+      window.scrollTo(0, 260);
+      await sleep(500);
+      const beforeY = Math.round(window.scrollY);
+      const card = q(".list-item");
+      if (card && beforeY > 50) {
+        card.click();
+        await waitFor(".page-push .card h2", 20000);
+        await sleep(1500);
+        const inDetailY = Math.round(window.scrollY);
+        back();
+        await sleep(1500);
+        const afterY = Math.round(window.scrollY);
+        log.push({ step: "category-back-keeps-scroll", beforeY, inDetailY, afterY, kept: Math.abs(afterY - beforeY) < 40 });
+        if (Math.abs(afterY - beforeY) >= 40) throw new Error("从详情返回后列表位置没恢复：" + beforeY + " → " + afterY);
+      } else {
+        log.push({ step: "category-back-keeps-scroll", skipped: "页面不够长，滚不到 260", beforeY });
+      }
       const homeNav2 = qa(".nav-item").find((b) => /首页/.test(b.textContent || ""));
       if (homeNav2) homeNav2.click();
       await sleep(1500);
