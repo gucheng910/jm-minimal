@@ -86,6 +86,73 @@
     }
   }
 
+  // ---- 注册表单（官方字段：用户名/密码/重新输入密码/EMAIL/性别 + 两个勾选拦截）----
+  const setInput = (el, v) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setter.call(el, v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const regReqs = () => (window.__reqs || []).filter((r) => r.path === "register");
+  const toastText = () => (qa(".toast").map((t) => t.textContent || "").join(" ") || "").trim();
+  const backToMember = async () => {
+    const n = qa(".nav-item").find((b) => /会员/.test(b.textContent || ""));
+    n?.click();
+    await sleep(2000);
+  };
+  await backToMember();
+  const openReg = qa("button").find((b) => (b.textContent || "").trim() === "注册");
+  if (openReg) {
+    openReg.click();
+    await sleep(800);
+    const form = q(".member-page form");
+    const inputs = form ? Array.from(form.querySelectorAll("input")) : [];
+    log.push({
+      step: "register-form",
+      title: (q(".member-page h2") || {}).textContent || "",
+      labels: qa(".member-page form label").map((l) => (l.textContent || "").trim()).slice(0, 8),
+      fields: inputs.map((i) => i.type + ":" + (i.name || i.id || "")),
+      hasLoginButton: qa(".member-page form button").some((b) => /返回登录/.test(b.textContent || ""))
+    });
+    const submit = () => qa(".member-page form button").find((b) => /^(注册|注册中…)$/.test((b.textContent || "").trim()));
+    // ① 两个勾选都没勾 → 本地拦截，不发请求
+    submit()?.click();
+    await sleep(600);
+    log.push({ step: "register-need-18", toast: toastText(), reqs: regReqs().length });
+    // ② 只勾 18+ → 仍被条款拦截
+    const checks = qa(".member-page form input[type=checkbox]");
+    checks[0] && checks[0].click();
+    await sleep(300);
+    submit()?.click();
+    await sleep(600);
+    log.push({ step: "register-need-terms", toast: toastText(), reqs: regReqs().length });
+    // ③ 勾选条款 + 填字段但漏选性别 → 服务端 fail 分支（提示用服务端 msg）
+    checks[1] && checks[1].click();
+    await sleep(200);
+    setInput(inputs[0], "tester2");
+    setInput(inputs[1], "pw123456");
+    setInput(inputs[2], "pw123456");
+    setInput(inputs[3], "tester2@example.com");
+    await sleep(300);
+    submit()?.click();
+    await sleep(1200);
+    log.push({ step: "register-server-fail", toast: toastText(), reqs: regReqs().slice(-1) });
+    // ④ 选性别 → 成功分支：入参必须与官方一致
+    const female = qa(".member-page form input[value=Female]")[0];
+    female && female.click();
+    await sleep(300);
+    submit()?.click();
+    await sleep(1500);
+    log.push({
+      step: "register-ok",
+      toast: toastText(),
+      req: regReqs().slice(-1)[0],
+      backToLogin: !!q("input[autocomplete='username']"),
+      usernameKept: (q("input[autocomplete='username']") || {}).value || ""
+    });
+  } else {
+    log.push({ step: "register-form", error: "登录表单上找不到「注册」按钮" });
+  }
+
   log.push({ step: "summary", loggedIn: Boolean(localStorage.getItem("jwttoken")) });
   return log;
 })()

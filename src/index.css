@@ -929,6 +929,19 @@ h3 { font-size: 14px; margin: 4px 0; }
 }
 .member-page .card button:hover { background: var(--surface-2); }
 .member-page .card button:active { background: #E6E4D9; }
+/* 登录/注册：两个按钮并排，注册为次级样式（全页只留一个黑底主按钮） */
+.member-page form.card .form-actions { display: flex; gap: 10px; margin-top: 14px; }
+.member-page form.card .form-actions button { flex: 1; }
+.member-page form.card button.ghost {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  font-weight: 600;
+}
+.gender-row { display: flex; gap: 24px; margin-top: 6px; }
+.gender-row label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink); cursor: pointer; }
+.reg-hint { font-size: 13px; color: var(--ink-2); line-height: 1.6; margin: 6px 0 0; }
+
 .member-page form.card button {
   background: var(--black);
   color: #fff;
@@ -1821,6 +1834,24 @@ html[data-nav="pop"]::view-transition-new(root) { animation-name: jmNavInLeft; }
 /* 搜索页在前台时锁住底层页面滚动 */
 body.jm-scroll-lock { overflow: hidden; }
 
+/* ---------- 滚动隔离 ----------
+   现象：在缓存中心 / 侧边抽屉 / 底部浮层里滑动，滚到底会把背后的页面一起带着滚，
+   关掉浮层后外层列表已经移位（真机反馈）。
+   两层防护：① 内层滚动容器 overscroll-behavior: contain（不把滚动链传给祖先）；
+   ② 打开整屏浮层时给 body 加 .jm-scroll-lock（JS 侧引用计数，见 core/uiLocks 的 lockBodyScroll）。 */
+.cache-overlay,
+.side-drawer,
+.drawer-body,
+.source-drawer,
+.tos-scroll,
+.sheet-scroll,
+.tag-block-list,
+.reader-cont,
+.sr-body {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* 搜索结果层（自身是滚动容器，与详情页的 window 滚动互不干扰） */
 .sr-layer {
   position: fixed;
@@ -2136,6 +2167,8 @@ body.jm-scroll-lock { overflow: hidden; }
 .ditem .switch.on { background: var(--ink); }
 .ditem .switch.on i { transform: translateX(18px); }
 .drawer-note { margin: 10px 0 0; }
+/* 仓库入口和上面的「检查更新」之间留出间距，避免两块粘在一起 */
+.ditem.repo-link { margin-top: 14px; }
 
 /* ---------- 会员页（v6）：分组卡 + 账号/签到展开 ---------- */
 .member-title { margin: 4px 0 16px; font-size: 16px; font-weight: 500; letter-spacing: -0.005em; }

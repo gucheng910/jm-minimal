@@ -24,6 +24,7 @@ import { KIND_META } from "./ui/SearchResultPage";
 import { announceStartupReady, gatePassed } from "./core/startup";
 import { bookIdOf } from "./core/series";
 import { hasOpenSheet } from "./core/uiLocks";
+import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
 import { bookMetaFromDetail, chapterLabel } from "./core/offlineMeta";
 import type { AlbumDetail, AlbumSummary } from "./core/types";
 
@@ -88,11 +89,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   }, [mode]);
 
   // 搜索页在前台时锁住底层详情页的滚动（搜索页自带滚动容器）
-  useEffect(() => {
-    if (!srOpen) return;
-    document.body.classList.add("jm-scroll-lock");
-    return () => document.body.classList.remove("jm-scroll-lock");
-  }, [srOpen]);
+  useBodyScrollLock(srOpen);
 
   // setting/图床配置迟到时刷新封面（例如测速兜底后才拿到 img_host）
   const [settingTick, setSettingTick] = useState(0);

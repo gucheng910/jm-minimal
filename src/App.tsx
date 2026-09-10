@@ -11,6 +11,7 @@ import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { emit, on } from "./core/bus";
 import { useLoggedIn } from "./hooks/useLoggedIn";
 import { useBackHandler } from "./hooks/useBackHandler";
+import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
 import ToastHost, { pushToast } from "./ui/toast";
 import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
@@ -67,6 +68,13 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
+  /**
+   * 注册表单（默认收起，点登录按钮旁的「注册」切换）。
+   * 字段与官方 2.1.6 前端的 signUp 表单逐字对齐：用户名 / 密码 / 重新输入密码 / EMAIL / 性别；
+   * adult、terms 是官方前端的本地勾选拦截（未勾选直接报错，不参与请求体）。
+   */
+  const [regOpen, setRegOpen] = useState(false);
+  const [reg, setReg] = useState({ username: "", password: "", password_confirm: "", email: "", gender: "", adult: false, terms: false });
   const [daily, setDaily] = useState<DailyPayload | null>(null);
   const [tab, setTab] = useState("home");
   // 每次冷启动显示 18+ 确认（与自动测源同频）；确认期间后台完成测速与首屏预取
@@ -218,6 +226,9 @@ export default function App() {
     return on("jm:coinChanged", handler);
   }, []);
 
+  // 整屏浮层（侧边抽屉 / 缓存中心 / 收藏足迹 / 换源抽屉）打开时锁住底层页面滚动
+  useBodyScrollLock(menuOpen || showCache || libPanel !== null || showSource);
+
   // 侧边抽屉是浮层：返回键先关抽屉，不做页面跳转。
   // App 在挂载时就注册（早于阅读器/缓存中心），因此是链上第一个；抽屉没开时返回 false 放行。
   useBackHandler(() => {
@@ -281,6 +292,48 @@ export default function App() {
       patch({ busy: false, msg: "登录成功" });
     } catch (err) {
       patch({ busy: false, error: String(err) });
+    }
+  }
+
+  /** 一次性更新注册表单的某个字段（表单字段多，避免 7 个 setter） */
+  function patchReg(p: Partial<typeof reg>) { setReg((r) => ({ ...r, ...p })); }
+
+  /**
+   * 注册提交：逻辑照抄官方前端（chunk 3464 的 te("signUp")）
+   *   1) 未勾「我已满18岁」→ 提示「请确认满18岁」，不发请求；
+   *   2) 未勾「同意条款」  → 提示「请确认同意条款和隐私政策」，不发请求；
+   *   3) 通过后 POST register，入参 {username,email,password,password_confirm,gender}；
+   *   4) 提示文案直接用服务端 data.msg，成功与否看 data.status === "ok"。
+   */
+  async function handleRegister(e: FormEvent) {
+    e.preventDefault();
+    if (reg.adult !== true) { pushToast("请确认满18岁", "err"); return; }
+    if (reg.terms !== true) { pushToast("请确认同意条款和隐私政策", "err"); return; }
+    if (!reg.username.trim() || !reg.password) { pushToast("请填写用户名和密码", "err"); return; }
+    patch({ busy: true, error: "", msg: "" });
+    try {
+      await ensureInit();
+      const r = await authService.register({
+        username: reg.username.trim(),
+        email: reg.email.trim(),
+        password: reg.password,
+        password_confirm: reg.password_confirm,
+        gender: reg.gender
+      });
+      const ok = r.status === "ok";
+      // 官方只用 msg；服务端还会给 errors[]（逐字段校验文案），msg 缺失时兜底用它
+      const fallback = Array.isArray(r.errors) && r.errors.length > 0 ? r.errors.join("；") : "";
+      const text = String(r.msg || fallback || r.errorMsg || (ok ? "注册成功，请返回登录" : "注册失败"));
+      pushToast(text, ok ? "ok" : "err");
+      patch({ busy: false, msg: text });
+      if (ok) {
+        // 官方注册成功后停在原地（只弹提示）；这里顺手把用户名带到登录表单，少打一次字
+        setUsername(reg.username.trim());
+        setRegOpen(false);
+      }
+    } catch (err) {
+      patch({ busy: false, error: String(err) });
+      pushToast(String(err).replace(/^Error: /, "").slice(0, 80), "err");
     }
   }
 
@@ -571,6 +624,35 @@ export default function App() {
         </div>
       )}
       {!logged ? (
+        regOpen ? (
+          <form className="card" onSubmit={handleRegister}>
+            <h2>会员注册</h2>
+            <label className="field">用户名
+              <input value={reg.username} maxLength={50} autoComplete="username" onChange={(e) => patchReg({ username: e.target.value })} />
+            </label>
+            <label className="field">密码
+              <input type="password" value={reg.password} maxLength={50} autoComplete="new-password" onChange={(e) => patchReg({ password: e.target.value })} />
+            </label>
+            <label className="field">重新输入密码
+              <input type="password" value={reg.password_confirm} maxLength={50} autoComplete="new-password" onChange={(e) => patchReg({ password_confirm: e.target.value })} />
+            </label>
+            <label className="field">EMAIL
+              <input type="email" value={reg.email} placeholder="email" pattern="^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" autoComplete="email" onChange={(e) => patchReg({ email: e.target.value })} />
+            </label>
+            <div className="field">性别
+              <div className="gender-row">
+                <label><input type="radio" name="gender" value="Male" checked={reg.gender === "Male"} onChange={() => patchReg({ gender: "Male" })} /> 男</label>
+                <label><input type="radio" name="gender" value="Female" checked={reg.gender === "Female"} onChange={() => patchReg({ gender: "Female" })} /> 女</label>
+              </div>
+            </div>
+            <label className="row"><input type="checkbox" checked={reg.adult} onChange={(e) => patchReg({ adult: e.target.checked })} /> 我保证我已满18岁</label>
+            <label className="row"><input type="checkbox" checked={reg.terms} onChange={(e) => patchReg({ terms: e.target.checked })} /> 我同意使用条款和隐私政策</label>
+            <div className="form-actions">
+              <button type="button" className="ghost" onClick={() => setRegOpen(false)}>返回登录</button>
+              <button disabled={state.busy}>{state.busy ? "注册中…" : "注册"}</button>
+            </div>
+          </form>
+        ) : (
         <form className="card" onSubmit={handleLogin}>
           <h2>官方账号登录</h2>
           <label className="field">账号
@@ -580,8 +662,12 @@ export default function App() {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
           </label>
           <label className="row"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> 记住登录（本地保存账号，用于刷新会话）</label>
-          <button disabled={state.busy}>登录</button>
+          <div className="form-actions">
+            <button type="button" className="ghost" onClick={() => { setRegOpen(true); patch({ error: "", msg: "" }); }}>注册</button>
+            <button disabled={state.busy}>登录</button>
+          </div>
         </form>
+        )
       ) : (
         <div className="member-body">
           <h2 className="member-title">会员中心（官方数据）</h2>
@@ -744,7 +830,7 @@ export default function App() {
               <p className="err small-err">官方协议已更新到 {onlineProto}，当前客户端按 {APP_VERSION} 通信；若出现异常请留意后续版本</p>
             )}
             {isDesktop ? <DesktopUpdate /> : <UpdateSection />}
-            <button className="ditem" onClick={() => openExternal(REPO_URL)}>
+            <button className="ditem repo-link" onClick={() => openExternal(REPO_URL)}>
               <span>GitHub 仓库</span><span className="v">↗</span>
             </button>
           </div>

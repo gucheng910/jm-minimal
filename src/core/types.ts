@@ -89,6 +89,26 @@ export interface LoginResult extends MemberInfo {
   jwttoken?: string;
 }
 
+/**
+ * 官方注册响应（POST register）。
+ * 官方前端只读 data.status / data.msg：status === "ok" 视为成功，msg 直接当提示文案。
+ */
+export interface RegisterResult {
+  status?: string;
+  msg?: string;
+  errorMsg?: string;
+  [k: string]: unknown;
+}
+
+/** 官方注册入参：用户名 / 邮箱 / 密码 / 确认密码 / 性别（Male | Female） */
+export interface RegisterPayload {
+  username: string;
+  email: string;
+  password: string;
+  password_confirm: string;
+  gender: string;
+}
+
 // ---- M2 内容流类型（探测自官方只读接口） ----
 export interface AlbumSummary {
   id: number | string;

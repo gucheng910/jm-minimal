@@ -108,10 +108,19 @@
     })();
   }
 
-  window.fetch = async (input) => {
+  window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : (input && input.url) || "";
     const u = new URL(url, location.href);
     const p = u.pathname.replace(/^\//, "");
+    // 请求方法 / 表单字段（注册等 POST 用例要断言真实入参）
+    const method = String((init && init.method) || (input && input.method) || "GET").toUpperCase();
+    let fields = {};
+    try {
+      const body = init && init.body;
+      if (body instanceof FormData) fields = Object.fromEntries([...body.entries()].map(([k, v]) => [k, String(v)]));
+      else if (typeof body === "string") fields = Object.fromEntries(new URLSearchParams(body));
+      else if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) fields = Object.fromEntries(body);
+    } catch { /* 忽略 */ }
     // 图片：图源1 的图床刻意慢 300ms，用于验证「更快的源」自动选中更快的那一个
     if (/\.(jpg|jpeg|png|webp)$/i.test(u.pathname)) {
       if (u.hostname.startsWith("mock-img1")) await new Promise((r) => setTimeout(r, 300));
@@ -126,6 +135,14 @@
     // /latest 返回 AlbumSummary[]（80 条/页），首页「最新」分段 + 无限滚动用
     if (p === "latest") { const pg = u.searchParams.get("page") || "1"; window.__reqs.push({ path: p, page: pg }); return json(mk("L" + pg + "-", 8, "作者甲")); }
     if (p === "hot_tags") return json(["热词1", "热词2"]);
+    // 官方注册：入参 {username,email,password,password_confirm,gender}，响应 {status,msg,errors[]}
+    // （真实响应形状来自 2026-09-11 对官方 register 的只读探针）
+    if (p === "register") {
+      window.__reqs.push({ path: p, method, fields });
+      if (!fields.gender) return json({ type: "", status: "fail", msg: "请选择您的性别", errors: ["请选择您的性别"] });
+      if (!fields.email) return json({ type: "", status: "fail", msg: "电子邮件字段不能为空!", errors: ["电子邮件字段不能为空!"] });
+      return json({ type: "", status: "ok", msg: "注册成功" });
+    }
     if (p === "login") { window.__reqs.push({ path: p }); return json({ jwttoken: "fresh-token", uid: 7, username: "tester", coin: 42, level: 3, exp: 100 }); }
     if (p === "tasks" || p === "daily") { window.__reqs.push({ path: p }); return json({ list: [] }); }
     if (p === "payment") return json({ plans: [{ key: "p1", name: "月卡", price: 1, days: 30 }], pay_methods: [], uid: 1, orders: [], web_host: "", checkout: "" });
