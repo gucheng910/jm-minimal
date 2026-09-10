@@ -13,9 +13,32 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="color-scheme" content="light dark" />
     <title>JM极简版</title>
+    <style>
+      #jm-old-webview { max-width: 560px; margin: 15vh auto 0; padding: 0 20px; font: 15px/1.7 -apple-system, "Segoe UI", Roboto, sans-serif; color: #17181d; }
+      #jm-old-webview h1 { font-size: 18px; margin: 0 0 10px; }
+      #jm-old-webview p { margin: 0 0 8px; color: #5c6570; }
+      @media (prefers-color-scheme: dark) { #jm-old-webview { color: #e6e8ec; } #jm-old-webview p { color: #a3abb8; } }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <!-- 老内核兜底：模块脚本与 legacy 包都要求 Promise/fetch 等基础能力；
+         完全不具备时给出可读提示，而不是白屏（ES5 语法，老引擎也能执行） -->
+    <div id="jm-old-webview" hidden>
+      <h1>系统 WebView 版本过低</h1>
+      <p>本应用需要较新的系统 WebView（Chromium 61 以上，建议 80 以上）。</p>
+      <p>请到应用商店更新「Android System WebView」（华为/荣耀机型为「华为浏览器内核」或系统更新），然后重新打开本应用。</p>
+    </div>
+    <script>
+      (function () {
+        var ok = window.Promise && window.fetch && window.Symbol && window.Object && Object.assign &&
+          Array.prototype.includes && window.URL && window.URLSearchParams;
+        if (!ok) {
+          var el = document.getElementById("jm-old-webview");
+          if (el) el.hidden = false;
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

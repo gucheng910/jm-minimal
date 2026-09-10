@@ -18,12 +18,15 @@
 
 | 文件 | 适用 | 下载 |
 |---|---|---|
-| `jm-minimal-modern-1.8.1.apk` | Android 10+ / 新系统（targetSdk 36） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.8.1/jm-minimal-modern-1.8.1.apk) |
-| `jm-minimal-compat-1.8.1.apk` | 旧 Android / 带安卓兼容层的鸿蒙 2~4 | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.8.1/jm-minimal-compat-1.8.1.apk) |
+| `jm-minimal-modern-1.8.1.apk` | Android 7.0+，系统 WebView 80 以上（绝大多数机型） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.8.1/jm-minimal-modern-1.8.1.apk) |
+| `jm-minimal-compat-1.8.1.apk` | Android 7.0+，**老系统内核也能跑**（WebView 61 以上；含 ES5 兼容包，体积略大） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.8.1/jm-minimal-compat-1.8.1.apk) |
 | `jm-minimal-portable-1.8.1.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.8.1/jm-minimal-portable-1.8.1.exe) |
 | `jm-minimal-setup-1.8.1.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.8.1/jm-minimal-setup-1.8.1.exe) |
 
-> 注意：HarmonyOS NEXT（纯血鸿蒙）不支持 APK，请使用官方支持的渠道；兼容版适用于 HarmonyOS 2~4 等带 Android 兼容层的系统。
+> **系统要求**：两个包都需要 **Android 7.0 及以上**（受 Capacitor 8 的 Cordova 兼容层限制，无法再往下降）；
+> 区别只在**系统 WebView / 内核版本**——modern 包要求 Chromium 80 以上，compat 包内置 ES5 兼容产物，Chromium 61 以上即可运行。
+> 如果你的手机打开后白屏或提示「系统 WebView 版本过低」，请先到应用商店更新「Android System WebView」，或改用 compat 包。
+> HarmonyOS 2~4 基于 Android 10~12，两个包都能装；HarmonyOS NEXT（纯血鸿蒙）不支持 APK，请走官方渠道。
 
 App 内「左侧菜单 → 版本 → 检查更新」同样读取本仓库最新 Release，可一键下载更新。
 

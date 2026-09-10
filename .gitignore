@@ -1,6 +1,7 @@
 # deps / build outputs
 node_modules/
 dist/
+dist-compat/
 release-pc/
 android/app/build/
 android/build/

@@ -138,20 +138,31 @@ node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('rel
 - 单工程 android/，包名 dev.jmclient.app；minSdk 24 / targetSdk 36 / compileSdk 36（见 docs/00 → docs/_archive/16-Android打包.md 历史首包记录）。
 - 签名走 android/keystore.properties（storeFile/storePassword/keyAlias/keyPassword，**不入库**）；缺失时 assembleRelease 会用 debug 签名，无法覆盖安装旧正式版。
 - 正式构建命令：`cd android && ..\build-rel.cmd`（封装 JAVA_HOME → Android Studio JBR）＝ gradlew assembleRelease。
-- **modern/compat 双名现状**：gradle 无变体，历史上（1.3.1/1.4.0）两 APK 字节相同，即**同一 APK 双名上传**。
-  1.4.1 目前只本地构建了 jm-minimal-modern-1.4.1.apk（测试用）；正式发布时按 §5.3 双名上传（复制改名即可）。
-  "compat 供旧系统/targetSdk29"的 README 说法与现状不符，属遗留文案，改版时注意（README 行文仍保留该表述）。
+- **modern / compat 现在是两份真正不同的构建**（1.8.2 起；此前是同一份文件复制改名，见 §8.11）：
+  | 变体 | web 产物 | 构建命令 | 目标内核 | 体积 |
+  |---|---|---|---|---|
+  | modern | `dist/`（target es2022，含 `?.`/`??` 等语法） | `npm run build` | WebView / Chromium **80+** | ≈3.9 MB |
+  | compat | `dist-compat/`（额外产出 nomodule 的 ES5 legacy 包 + core-js polyfills） | `npm run build:compat` | Chromium **61+**（靠 `@vitejs/plugin-legacy` 的现代性探测自动选包） | ≈4.5 MB |
+  - 两者 **minSdk 都是 24（Android 7.0+）**：实测把 minSdk 降到 21/23 会被 `org.apache.cordova:framework:14.0.1`（Capacitor 8 自带 Cordova 兼容层）挡住，
+    报 `uses-sdk:minSdkVersion 21 cannot be smaller than version 24`；要突破只能 `tools:overrideLibrary`（官方警告可能运行时崩）或降级 Capacitor，收益低（那批设备 WebView 普遍跑不动）。
+  - `index.html` 内置 ES5 兜底提示：内核连 Promise/fetch 都没有时显示「请更新系统 WebView」，不再白屏。
 
 ### 4.1 命令
 
 ```bash
-npm run build            # 1) 前端产物
-npx cap sync android     # 2) 同步 web 资源进 android 工程
-cd android
-..\build-rel.cmd         # 3) 构建正式 APK（assembleRelease，keystore 正式签名）
-# 产物：android/app/build/outputs/apk/release/app-release.apk（约 4MB）
+# 现代包
+npm run build                              # 1) dist/
+JM_WEB_DIR=dist npx cap copy android       # 2)（PowerShell: $env:JM_WEB_DIR="dist"）
+cd android; ..\build-rel.cmd; cd ..        # 3) 构建正式 APK（assembleRelease，keystore 正式签名）
+# 兼容包（老内核）：换 dist-compat 再来一遍
+npm run build:compat
+$env:JM_WEB_DIR="dist-compat"; npx cap copy android
+cd android; ..\build-rel.cmd; cd ..
+# 产物：android/app/build/outputs/apk/release/app-release.apk（每次覆盖，需自行改名）
+# 两条都跑推荐直接用：node tools/release.mjs <版本> --skip-pc
 # 调试/模拟器：gradlew assembleDebug → …/apk/debug/app-debug.apk（仅开发）
 ```
+> `cap copy` 按 `capacitor.config.ts` 的 `webDir` 取值，`JM_WEB_DIR` 环境变量可临时切换（release.mjs 即用此法出双包）。
 > gradle wrapper 已切腾讯镜像（distributionUrl=…gradle-8.14.3-bin.zip），services.gradle.org 被墙不影响。
 > Android 应用内更新（src/ui/UpdateSection.tsx + AppUpdaterPlugin）检查 GitHub Release，按资产名匹配 modern/compat。
 
@@ -193,8 +204,8 @@ gh release upload v1.4.1 release-pc/latest.yml release-pc/jm-minimal-setup-1.4.1
 
 | 平台 | 文件名 | 备注 |
 |---|---|---|
-| Android | jm-minimal-modern-<ver>.apk | 更新器匹配子串 "modern" |
-| Android | jm-minimal-compat-<ver>.apk | 更新器匹配子串 "compat" |
+| Android | jm-minimal-modern-<ver>.apk | 更新器匹配子串 "modern"；现代内核构建（WebView 80+） |
+| Android | jm-minimal-compat-<ver>.apk | 更新器匹配子串 "compat"；**老内核构建**（含 ES5 legacy 包，Chromium 61+），与 modern 不是同一份文件 |
 | PC 安装 | jm-minimal-setup-<ver>.exe | electron-updater 严格按 latest.yml 找它 |
 | PC 便携 | jm-minimal-portable-<ver>.exe | README 链接 |
 
@@ -311,9 +322,13 @@ gh auth status && gh release view v1.4.1 --repo gucheng910/jm-minimal --json ass
 ### 8.10 asar 列目录的坑
 - npx asar list … | Select-String 里正则反斜杠/管道容易失配（曾出现"搜不到实际存在文件"的假阴性）。输出到文件后用 findstr /C:"…" 或 Select-String -SimpleMatch。
 
-### 8.11 Android "modern/compat" 现状
-- gradle 无变体、历史双 APK 字节相同（同一文件双名）；README 的 compat=旧 targetSdk 说明是遗留文案。若真要做 compat 需在 gradle 加变体/改 targetSdk 再构建，别直接复制改名假装支持。
-- 1.4.1：本地仅构建并测试 jm-minimal-modern-1.4.1.apk，发布时仍按双名上传（§5.3）。
+### 8.11 Android "modern/compat" 的历史与现状
+- **1.8.1 及以前**：gradle 无变体，两个 APK **字节完全相同**（`copyFileSync` 复制改名），README 里"compat 供旧系统"属遗留文案——用户实测发现后于 1.8.2 修正。
+- **1.8.2 起**：compat 是真的老内核包（`vite build --mode compat` + `@vitejs/plugin-legacy` → ES5 legacy chunk 510 KB + polyfills 156 KB），
+  现代包不加 polyfill（体积优先）。两包 sha256 不同，构建流程见 §4。
+- **minSdk 不能低于 24**（实测，见 §4）；"支持鸿蒙/老安卓"要分清：HarmonyOS 2~4 基于 AOSP 10~12，本就能装；
+  HarmonyOS NEXT 完全不支持 APK；Android 5/6 因 minSdk 装不上。
+- 教训：**别用复制改名假装支持**——要么真构建，要么把命名和说明写实。
 
 ### 8.12 网络与证书（速记）
 - api.github.com 稳定；github.com 网页/对象存储间歇被墙；下载 release 资产失败先重试或 hosts pin（详见本机 AGENTS.md 网络段）。

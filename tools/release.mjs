@@ -48,7 +48,12 @@ function shellOf(cmd, args) {
 }
 function run(cmd, args, opts = {}) {
   const s = shellOf(cmd, args);
-  const r = spawnSync(s.cmd, s.args, { cwd: opts.cwd || ROOT, stdio: opts.quiet ? "pipe" : "inherit", encoding: "utf8" });
+  const r = spawnSync(s.cmd, s.args, {
+    cwd: opts.cwd || ROOT,
+    stdio: opts.quiet ? "pipe" : "inherit",
+    encoding: "utf8",
+    env: opts.env ? { ...process.env, ...opts.env } : process.env
+  });
   if (r.status !== 0) die((opts.what || cmd + " " + args.join(" ")) + " 退出码 " + r.status);
   return (r.stdout || "").trim();
 }
@@ -168,48 +173,73 @@ if (DRY) {
   process.exit(0);
 }
 
-// ---------------------------------------------------------------- web 构建
-step("构建 web 产物（tsc --noEmit + vite build）");
-run(exe("npm"), ["run", "build"]);
+/**
+ * 把某个 web 产物同步进 Android 工程（cap copy 按 JM_WEB_DIR 选目录）。
+ * 同步前清掉旧的 assets/public，避免上一轮（兼容包）的 legacy 文件残留。
+ */
+function syncAndroidAssets(webDir) {
+  const pub = path.join(ROOT, "android/app/src/main/assets/public");
+  if (existsSync(pub)) rmSync(pub, { recursive: true, force: true });
+  run(exe("npx"), ["cap", "copy", "android"], { env: { JM_WEB_DIR: webDir } });
+}
 
-// ---------------------------------------------------------------- Android
-let apkPath = "";
-if (!SKIP_ANDROID) {
-  step("同步 Android 资产（必须在仓库根执行）");
-  run(exe("npx"), ["cap", "sync", "android"]);
+/**
+ * 用指定 web 产物构建 APK，产物落到 release/jm-minimal-<variant>-<version>.apk。
+ * variant: "modern"（现代包）| "compat"（老内核兼容包）
+ */
+function buildAndroidApk(variant, webDir) {
+  step("同步 Android 资产（" + variant + " ← " + webDir + "）");
+  syncAndroidAssets(webDir);
 
-  const distAssets = readdirSync(path.join(ROOT, "dist/assets")).sort();
-  const androidAssets = readdirSync(path.join(ROOT, "android/app/src/main/assets/public/assets")).sort();
+  const assetsRel = "android/app/src/main/assets/public/assets";
+  const distAssets = readdirSync(path.join(ROOT, webDir, "assets")).sort();
+  const androidAssets = readdirSync(path.join(ROOT, assetsRel)).sort();
   if (distAssets.join("|") !== androidAssets.join("|")) {
-    die("dist 与 android 资产不一致（cap sync 没生效？）\n  dist:    " + distAssets.join(",") + "\n  android: " + androidAssets.join(","));
+    die(webDir + " 与 android 资产不一致（cap copy 没生效？）\n  " + webDir + ": " + distAssets.join(",") + "\n  android: " + androidAssets.join(","));
   }
   const main = distAssets.find((f) => /^index-.*\.js$/.test(f));
-  const h1 = sha256(path.join(ROOT, "dist/assets", main));
-  const h2 = sha256(path.join(ROOT, "android/app/src/main/assets/public/assets", main));
+  const h1 = sha256(path.join(ROOT, webDir, "assets", main));
+  const h2 = sha256(path.join(ROOT, assetsRel, main));
   if (h1 !== h2) die("主 bundle 哈希不一致，android 里是旧资源：" + main);
   log("  ✓ 资产一致，主 bundle " + main + " sha256 " + h1.slice(0, 12) + "…");
 
-  step("构建正式 APK（gradlew assembleRelease）");
+  step("构建 APK（gradlew assembleRelease · " + variant + "）");
   run("cmd", ["/c", path.join(ROOT, "build-rel.cmd")], { cwd: path.join(ROOT, "android") });
 
-  apkPath = path.join(ROOT, "android/app/build/outputs/apk/release/app-release.apk");
-  if (!existsSync(apkPath)) die("没找到 APK：" + apkPath);
-  const modern = path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk");
-  const compat = path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk");
-  if (!DRY) { copyFileSync(apkPath, modern); copyFileSync(apkPath, compat); }
-  log("  ✓ " + path.basename(modern) + "  " + mb(apkPath) + "  sha256 " + sha256(apkPath).slice(0, 16) + "…");
-  log("  ✓ " + path.basename(compat) + "（同字节，官方「双名上传」约定）");
+  const built = path.join(ROOT, "android/app/build/outputs/apk/release/app-release.apk");
+  if (!existsSync(built)) die("没找到 APK：" + built);
+  const out = path.join(ROOT, "release/jm-minimal-" + variant + "-" + version + ".apk");
+  if (!DRY) copyFileSync(built, out);
+  log("  ✓ " + path.basename(out) + "  " + mb(built) + "  sha256 " + sha256(built).slice(0, 16) + "…");
 
   // 校验 APK 内的版本号（apkanalyzer 存在才查）
   // 注意：Windows 上 apkanalyzer 是 .bat，必须拿 where 解析出的完整路径再走 cmd /c（直接 spawn 名字会静默失败）
   const aapt = (IS_WIN ? capture("where", ["apkanalyzer"], { optional: true }) : capture("which", ["apkanalyzer"], { optional: true }))
     .split(/\r?\n/)[0].trim();
   if (aapt) {
-    const vn = capture(aapt, ["manifest", "version-name", apkPath], { optional: true });
-    const vc = capture(aapt, ["manifest", "version-code", apkPath], { optional: true });
+    const vn = capture(aapt, ["manifest", "version-name", built], { optional: true });
+    const vc = capture(aapt, ["manifest", "version-code", built], { optional: true });
     if (vn && vn !== version) die("APK 内 versionName=" + vn + " 与目标 " + version + " 不一致");
-    log("  ✓ APK versionName=" + (vn || "?") + " versionCode=" + (vc || "?"));
+    log("  ✓ APK versionName=" + (vn || "?") + " versionCode=" + (vc || "?") + "（" + variant + "）");
   }
+  return out;
+}
+
+// ---------------------------------------------------------------- web 构建（现代包）
+step("构建 web 产物（现代包：tsc --noEmit + vite build）");
+run(exe("npm"), ["run", "build"]);
+
+// ---------------------------------------------------------------- Android（现代包 + 兼容包）
+let apkPath = "";
+if (!SKIP_ANDROID) {
+  apkPath = buildAndroidApk("modern", "dist");
+
+  step("构建兼容包 web 产物（vite build --mode compat：额外产出 ES5 legacy 包 + polyfills）");
+  run(exe("npm"), ["run", "build:compat"]);
+  buildAndroidApk("compat", "dist-compat");
+
+  step("还原 Android 资产为现代包（工作区不留兼容包资源）");
+  syncAndroidAssets("dist");
 }
 
 // ---------------------------------------------------------------- PC

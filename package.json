@@ -11,7 +11,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cap:sync": "cap sync android",
-    "pc:pack": "vite build && electron-builder --win nsis portable"
+    "pc:pack": "vite build && electron-builder --win nsis portable",
+    "build:compat": "tsc --noEmit && vite build --mode compat"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",
@@ -28,6 +29,7 @@
     "@types/crypto-js": "^4.2.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-legacy": "^8.2.3",
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^33.4.11",
     "electron-builder": "^26.0.12",
