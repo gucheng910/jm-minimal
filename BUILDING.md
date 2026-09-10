@@ -293,10 +293,18 @@ gh auth status && gh release view v1.4.1 --repo gucheng910/jm-minimal --json ass
 - 机制：electron-builder 安装器升级 = 先静默卸载旧版（uninstallOldVersion，installUtil.nsh）→ 再装；**旧版 App 运行中**则卸载器删不掉文件 → 循环 5 次失败 → 安装器退出码 2（handleUninstallResult）→ 用户看到"错误"。
 - 正解：装前 Get-Process -Name 'JM极简版' | Stop-Process -Force；或交给应用内更新（先 quit 再装）。手动重装同理。
 - 附加：旧卸载器单独跑 exit 0 也可能**留空目录**（%LOCALAPPDATA%\Programs\jm-client），装前 Remove-Item -Recurse -Force 兜底。
-- **2026-09-10 复现记录（"PC 端点了更新没反应"的真凶）**：本机装的是早期调试包（exe/package.json 版本号 1.3.1，但 asar 里已含 updater.cjs）。
-  现象链：应用内检查 ✓ 发现 1.8.3 → 差分下载 sha512 不匹配 → 自动退化为整包下载 ✓ 落盘到
-  `%LOCALAPPDATA%\jm-client-updater\pending\jm-minimal-setup-1.8.3.exe` → 点「重启并安装」→ **安装器退出码 2**（旧版卸载步骤失败）→ App 已退出、版本没变，
-  用户视角就是"点了没反应"。手工执行旧卸载器（`Uninstall JM极简版.exe /S`，exit 0、留空目录）后同一个安装器 **exit 0 装好 1.8.3**。
+- **2026-09-10 定位到真正的根因（"PC 端点了更新没反应"）**：不是"旧版在跑"，而是 electron-builder 的**卸载器在 --updated 模式下自己 Abort**：
+  1. 安装器先跑旧卸载器：`old-uninstaller.exe /S /KEEP_APP_DATA /currentuser --updated _?=<安装目录>`；
+  2. 带 `--updated` 时卸载器走 `un.atomicRMDir`（uninstaller.nsh:152）：把安装目录里的文件**逐个改名**到 `$PLUGINSDIR\old-install`；
+     只要有一个改名失败，就 `un.restoreFiles`（还原）+ **`Abort`** → **卸载器退出码 2**（实测：不带 `--updated` 返回 0，带就返回 2，目录原样不动）；
+  3. installUtil.nsh 的 `handleUninstallResult` 见 `$R0 != 0` → `SetErrorLevel 2` + `Quit` → **整个安装器失败**。
+  现象链：应用内检查 ✓ 发现新版本 → 下载 ✓（差分下载 sha512 不匹配会自动退化为整包下载）→ 落盘
+  `%LOCALAPPDATA%\jm-client-updater\pending\jm-minimal-setup-<ver>.exe` → 点「重启并安装」→ 安装器退出码 2 → App 已退出、版本没变 = "点了没反应"。
+- **修复（1.8.4 起）**：`build/installer.nsh`（由 package.json 的 `build.nsis.include` 引入）定义
+  `customUnInstallCheck` / `customUnInstallCheckCurrentUser` —— 这是 electron-builder 官方留的钩子，命中后
+  `handleUninstallResult` 直接 Return，**忽略卸载失败继续安装**（旧目录已被 restoreFiles 还原，新包会覆盖）。
+  实测：修复前"有旧版时安装"必 exit 2 → 修复后连续两次覆盖安装均 **exit 0**。
+  代价：极少数情况下旧版遗留的多余文件不会被清掉（我们每次发布都是完整包，文件集稳定，可接受）。
 - 排查命令（照抄）：
   ```powershell
   # 看装的是哪版（exe 元数据可能与实际代码不符，以 asar 内 package.json 为准）

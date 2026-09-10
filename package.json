@@ -64,7 +64,8 @@
       "icon": "build/icon.png"
     },
     "nsis": {
-      "artifactName": "jm-minimal-setup-${version}.${ext}"
+      "artifactName": "jm-minimal-setup-${version}.${ext}",
+      "include": "build/installer.nsh"
     },
     "portable": {
       "artifactName": "jm-minimal-portable-${version}.${ext}"
