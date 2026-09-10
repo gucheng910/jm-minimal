@@ -18,10 +18,10 @@
 
 | 文件 | 适用 | 下载 |
 |---|---|---|
-| `jm-minimal-modern-1.9.1.apk` | Android 7.0+，系统 WebView 80 以上（绝大多数机型） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.1/jm-minimal-modern-1.9.1.apk) |
-| `jm-minimal-compat-1.9.1.apk` | Android 7.0+，**老系统内核也能跑**（WebView 61 以上；含 ES5 兼容包，体积略大） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.1/jm-minimal-compat-1.9.1.apk) |
-| `jm-minimal-portable-1.9.1.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.1/jm-minimal-portable-1.9.1.exe) |
-| `jm-minimal-setup-1.9.1.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.1/jm-minimal-setup-1.9.1.exe) |
+| `jm-minimal-modern-1.9.2.apk` | Android 7.0+，系统 WebView 80 以上（绝大多数机型） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.2/jm-minimal-modern-1.9.2.apk) |
+| `jm-minimal-compat-1.9.2.apk` | Android 7.0+，**老系统内核也能跑**（WebView 61 以上；含 ES5 兼容包，体积略大） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.2/jm-minimal-compat-1.9.2.apk) |
+| `jm-minimal-portable-1.9.2.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.2/jm-minimal-portable-1.9.2.exe) |
+| `jm-minimal-setup-1.9.2.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v1.9.2/jm-minimal-setup-1.9.2.exe) |
 
 > **系统要求**：两个包都需要 **Android 7.0 及以上**（受 Capacitor 8 的 Cordova 兼容层限制，无法再往下降）；
 > 区别只在**系统 WebView / 内核版本**——modern 包要求 Chromium 80 以上，compat 包内置 ES5 兼容产物，Chromium 61 以上即可运行。

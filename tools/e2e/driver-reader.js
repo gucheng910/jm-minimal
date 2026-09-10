@@ -184,7 +184,7 @@
     step: "chapter-open-after-cache",
     rows: qa(".reader-sheet .sheet-row").map((r) => ({ title: txt(r.querySelector(".title")), meta: txt(r.querySelector(".muted")), cached: !!r.querySelector(".badge.ok") }))
   });
-  btn("关闭").click();
+  q(".reader-sheet .sheet-close").click(); // 关闭按钮已改成右上角叉
   await waitGone(".reader-sheet");
   // 整本缓存后：工具栏按钮应变成不可点的「已缓存」
   await waitUntil(() => tbButtons().includes("已缓存"), 8000, "已缓存按钮");

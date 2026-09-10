@@ -2,12 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { App as CapApp } from "@capacitor/app";
 import { client } from "./core/api";
-import { measureAll } from "./core/speed";
-import type { SpeedSample } from "./core/speed";
 import { sessionStore } from "./core/storage";
 import { BookIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, SearchIcon, UserIcon } from "./ui/icons";
 import SourceSheet from "./ui/SourceSheet";
-import { zh } from "./core/zh";
 import { authService } from "./state/auth";
 import ContentView from "./ContentView";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
@@ -71,7 +68,6 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
   const [daily, setDaily] = useState<DailyPayload | null>(null);
-  const [speedResult, setSpeedResult] = useState<SpeedSample[]>([]);
   const [tab, setTab] = useState("home");
   // 每次冷启动显示 18+ 确认（与自动测源同频）；确认期间后台完成测速与首屏预取
   const [ageGate, setAgeGate] = useState(true);
@@ -104,7 +100,9 @@ export default function App() {
   }
   const [showSource, setShowSource] = useState(false);
   // 会员页的「诊断与线路」默认折叠：线路 / 图源 / 协议版本 / 测速都是排障信息
-  const [diagOpen, setDiagOpen] = useState(false);
+  // 会员页「网络与内容」两个设置行：默认都收起（用不到就不占首屏）
+  const [dnsOpen, setDnsOpen] = useState(false);
+  const [tagOpen, setTagOpen] = useState(false);
   // 会员页分组行里的展开态：签到（活动信息 + 立即签到）、账号（资料 + 兑换）
   const [dailyOpen, setDailyOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -417,25 +415,6 @@ export default function App() {
     }
   }
 
-  /** 线路测速：仅测 5 条官方 API 线路的连通与延迟（图源已改为在阅读器内按漫画实测） */
-  async function runLineSpeed() {
-    if (!client.hostConfig) { patch({ error: "请先初始化官方配置" }); return; }
-    patch({ busy: true, error: "", msg: "" });
-    setSpeedResult([]);
-    try {
-      const lineItems = (client.hostConfig.jm3_Server || []).map(([host, name]) => ({
-        label: "线路" + name + "（" + host + "）",
-        url: "https://" + host + "/static/jmapp3apk/version.json?t=" + Date.now()
-      }));
-      const samples = await measureAll(lineItems);
-      setSpeedResult(samples);
-      const okCount = samples.filter((s) => s.ok).length;
-      patch({ busy: false, msg: okCount > 0 ? "线路测速完成，可手动选择最快线路" : "线路测速失败，请检查网络" });
-    } catch (err) {
-      patch({ busy: false, error: String(err) });
-    }
-  }
-
   // 登录态唯一判据（有 token 即已登录）；member 只是「会员资料」，缺失/过期时后台自愈
   const logged = useLoggedIn();
   const availableLines = client.hostConfig?.jm3_Server || [];
@@ -602,7 +581,6 @@ export default function App() {
           </label>
           <label className="row"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> 记住登录（本地保存账号，用于刷新会话）</label>
           <button disabled={state.busy}>登录</button>
-          <p className="muted">登录/会话/兑换均走官方后端；本地不做任何账务修改。</p>
         </form>
       ) : (
         <div className="member-body">
@@ -674,43 +652,32 @@ export default function App() {
         </div>
       )}
 
-      {/* 标签屏蔽：官方服务端过滤，需登录 + 等级 >= 8 + 冷却机制（仅登录态可见） */}
-      {logged && <TagBlockSetting />}
-
-      {/* DNS 加速引导（非登录态也可见，用于解决运营商 DNS 污染） */}
-      <DnsGuide />
-
-      {/*
-        诊断与线路：默认折叠。这些是排障信息（当前线路 / 官方协议版本 / 图源域名 / 测速），
-        一年点一次，不该占据会员页首屏；线路与图源的"切换"统一走换源浮层，这里不重复放下拉框。
-      */}
-      <section className="card diag">
-        <button className="diag-head" onClick={() => setDiagOpen((o) => !o)} aria-expanded={diagOpen}>
-          <span>诊断与线路</span>
-          <span className="v">{currentHost ? zh(currentHost) : "未初始化"}</span>
-          <span className={"chev chev-toggle" + (diagOpen ? " open" : "")}>›</span>
+      {/* 网络与内容过滤：都是默认收起的设置行，用不到就不占首屏 */}
+      <p className="sectitle">网络与内容</p>
+      <div className="group">
+        <button className="grow" onClick={() => setDnsOpen((o) => !o)} aria-expanded={dnsOpen}>
+          <span>DNS 加速</span>
+          <span className={"chev chev-toggle" + (dnsOpen ? " open" : "")}>›</span>
         </button>
-        {diagOpen && (
-          <div className="diag-body">
-            <p className="mono">{state.apiBase || "（尚未初始化官方配置）"}</p>
-            {state.setting && (
-              <p className="mono diag-meta">
-                jm3_version={state.setting.jm3_version} · ipcountry={state.setting.ipcountry} · img_host={String(state.setting.img_host || "")} · ad_cache_version={String(state.setting.ad_cache_version)}
-              </p>
-            )}
-            <div className="row diag-actions">
-              <button className="btn soft sm" onClick={() => { setMenuOpen(false); emit("jm:openSource"); }}>换源（图源 / 线路）</button>
-              <button className="btn soft sm" disabled={state.busy} onClick={runLineSpeed}>线路测速</button>
-              <button className="btn soft sm" disabled={state.busy} onClick={bootstrap}>初始化官方配置</button>
-            </div>
-            {speedResult.length > 0 && (
-              <ul className="speed-list">
-                {speedResult.map((r) => <li key={r.label} className={r.ok ? "ok" : "fail"}>{r.ok ? "✔" : "✘"} {r.label} · {r.ok ? r.ms + " ms" : "超时/失败"}</li>)}
-              </ul>
-            )}
+        {dnsOpen && (
+          <div className="grow-body">
+            <DnsGuide />
           </div>
         )}
-      </section>
+        {logged && (
+          <>
+            <button className="grow" onClick={() => setTagOpen((o) => !o)} aria-expanded={tagOpen}>
+              <span>标签屏蔽</span>
+              <span className={"chev chev-toggle" + (tagOpen ? " open" : "")}>›</span>
+            </button>
+            {tagOpen && (
+              <div className="grow-body">
+                <TagBlockSetting />
+              </div>
+            )}
+          </>
+        )}
+      </div>
       {state.payment && (
         <div className="card">
           <h2>官方赞助</h2>
@@ -762,9 +729,6 @@ export default function App() {
             <button className="ditem" onClick={() => openExternal("https://comic18j-bibi.me/payment?link=homepage_icon")}>
               <span>前往官方赞助页面</span><span className="v">↗</span>
             </button>
-            <button className="ditem" onClick={() => openExternal(REPO_URL)}>
-              <span>GitHub 仓库</span><span className="v">↗</span>
-            </button>
           </div>
           <div className="drawer-sec">
             <h5>设置</h5>
@@ -780,6 +744,9 @@ export default function App() {
               <p className="err small-err">官方协议已更新到 {onlineProto}，当前客户端按 {APP_VERSION} 通信；若出现异常请留意后续版本</p>
             )}
             {isDesktop ? <DesktopUpdate /> : <UpdateSection />}
+            <button className="ditem" onClick={() => openExternal(REPO_URL)}>
+              <span>GitHub 仓库</span><span className="v">↗</span>
+            </button>
           </div>
         </div>
       </aside>

@@ -185,10 +185,6 @@ export default function AlbumDetail({
         )}
       </div>
 
-      {!commentsOpen && !relatedOpen && (
-        <p className="d-tail">话数、评论与相关漫画都在上面一行里，点开才占用屏幕。</p>
-      )}
-
       {relatedOpen && (
         <div className="related-block">
           <h3>相关漫画</h3>

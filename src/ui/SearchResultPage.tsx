@@ -58,8 +58,11 @@ export const SearchResultPage = memo(function SearchResultPage({
 
   useEffect(() => {
     if (!open) { setEntered(false); return; }
-    const id = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(id);
+    // 双 rAF：第一帧让浏览器把「关闭态（translateX(100%)）」真正绘制出来，
+    // 第二帧再加 .open —— 单 rAF 时 React 会在同一帧内完成挂载+改类，过渡不会触发（表现为"没有动画"）。
+    let id2 = 0;
+    const id1 = requestAnimationFrame(() => { id2 = requestAnimationFrame(() => setEntered(true)); });
+    return () => { cancelAnimationFrame(id1); if (id2) cancelAnimationFrame(id2); };
   }, [open]);
 
   // 换搜索词：回到顶部（同一个组件实例复用，不会重新挂载）

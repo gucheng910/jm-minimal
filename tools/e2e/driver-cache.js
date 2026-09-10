@@ -115,7 +115,7 @@
       step: "offline-chapter-sheet",
       rows: qa(".reader-sheet .sheet-row").map((r) => ({ title: txt(r.querySelector(".title")), meta: txt(r.querySelector(".muted")) }))
     });
-    qa(".reader-sheet button").find((b) => txt(b) === "关闭").click();
+    q(".reader-sheet .sheet-close").click(); // 关闭按钮已改成右上角叉
     await sleep(400);
   }
 

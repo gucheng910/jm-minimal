@@ -410,16 +410,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       // 新页从顶部开始（列表位置已存进 listScrollRef，返回时恢复）
       window.scrollTo(0, 0);
     };
-    if (from === "list") {
-      // 列表 → 详情：推拉转场（旧页后退，详情页从右滑入）。
-      // 必须 await：转场回调是异步执行的，若不等它落地就发起请求，
-      // 响应可能先回来并被随后的乐观快照覆盖（详情页会缺标签/简介）
-      await navTransition("push", enterDetail);
-    } else {
-      // 搜索结果页 → 详情：搜索层自带滑出动画，不再叠加整页转场
-      enterDetail();
-      requestAnimationFrame(() => window.scrollTo(0, 0));
-    }
+    // 列表 → 详情、搜索结果 → 详情，都走同一套推拉转场（旧页后退、新页从右滑入）。
+    // 必须 await：转场回调是异步执行的，若不等它落地就发起请求，
+    // 响应可能先回来并被随后的乐观快照覆盖（详情页会缺标签/简介）
+    await navTransition("push", enterDetail);
+    if (from !== "list") requestAnimationFrame(() => window.scrollTo(0, 0));
     // 并行拉取完整详情 + 评论（reqId 守卫在 hook 内，离开/切章后自动丢弃回包）
     await album.load(item.id, reqId);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -40,6 +40,14 @@
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
   --sh-1: 0 1px 2px rgba(16,15,15,0.05);
   --sh-2: 0 8px 24px -10px rgba(16,15,15,0.14);
+  /* 动效：4 档时长 + 2 条曲线（只改 transform / opacity；取值与 docs/minimal-preview-v6.html 一致）
+     ⚠️ 这些变量被全站 30 多处 transition 引用，漏定义会让所有过渡静默失效（2026-09-11 修复） */
+  --t-press: 120ms;
+  --t-ui: 220ms;
+  --t-enter: 280ms;
+  --t-page: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-emph: cubic-bezier(0.2, 0.9, 0.25, 1);
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
     "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --top-h: 54px;
@@ -1014,15 +1022,35 @@ h3 { font-size: 14px; margin: 4px 0; }
   gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 10px 11px;
+  padding: 9px 12px;
   background: var(--surface);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r-md);
-  box-shadow: var(--sh-1);
+  box-shadow: none;
   color: var(--ink);
   font-size: 13px;
-  transition: box-shadow 0.15s ease, transform 0.12s ease, border-color 0.15s ease;
+  transition: background var(--t-press) linear, border-color var(--t-ui) linear, transform var(--t-press) var(--ease-out);
 }
+/* 浮层右上角的关闭：只用叉，不带文字 */
+.sheet-head .sheet-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 20px;
+  line-height: 1;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background var(--t-press) linear, color var(--t-press) linear;
+}
+.sheet-head .sheet-close:hover { background: var(--surface-2); color: var(--ink); }
+.sheet-head .sheet-close:active { transform: scale(0.94); }
 .sheet-row .title { padding: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
 .sheet-row .muted { padding: 3px 0 0; font-size: 13px; color: var(--ink-2); }
 /* 可点的行给个箭头，避免看着像禁用 */
@@ -1951,7 +1979,6 @@ body.jm-scroll-lock { overflow: hidden; }
   appearance: none; -webkit-appearance: none;
 }
 .selectrow select:focus { box-shadow: none; }
-.d-tail { font-size: 13px; color: var(--ink-3); margin: 4px 0 0; line-height: 1.7; }
 
 /* ============================================================
    分类页（极简版 v6）：下划线标签 + 行尾钉住的「更多」+ 工具行
@@ -2017,7 +2044,7 @@ body.jm-scroll-lock { overflow: hidden; }
   .member-page { max-width: var(--col); margin-left: auto; margin-right: auto; }
 
   /* 长文：再收到 476（约 34 汉字，见 W3C clreq） */
-  .d-title, .d-desc, .d-meta, .actrow, .d-tail, .comment-body, .book-desc { max-width: var(--measure); }
+  .d-title, .d-desc, .d-meta, .actrow, .comment-body, .book-desc { max-width: var(--measure); }
 
   /* 主按钮不全宽：它只需要一个拇指够得着的尺寸 */
   .actrow .btn.primary { flex: 0 0 auto; min-width: 200px; }

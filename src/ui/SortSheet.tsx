@@ -40,7 +40,6 @@ export default function SortSheet({ open, onClose, value, onChange }: Props) {
             );
           })}
         </div>
-        <p className="sheet-result">排序只改当前列表的顺序。排行榜不在这里——它是分类行里的一个去处。</p>
       </div>
     </div>
   );

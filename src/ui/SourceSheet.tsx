@@ -43,7 +43,10 @@ export default function SourceSheet({
   return (
     <div className="drawer-backdrop" onClick={onClose}>
       <div className="source-drawer app-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-head"><h3>换源</h3></div>
+        <div className="sheet-head">
+          <h3>换源</h3>
+          <button type="button" className="sheet-close" aria-label="关闭" onClick={onClose}>×</button>
+        </div>
 
         <p className="sheet-sec">图源</p>
         <div className="sheet-list">
@@ -86,7 +89,6 @@ export default function SourceSheet({
         </div>
 
         <div className="row sheet-actions">
-          <button type="button" className="ghost" onClick={onClose}>关闭</button>
           <button type="button" disabled={busy || testing} onClick={() => { void runTest(); }}>
             {testing ? "测速中…" : "一键测速并切换"}
           </button>

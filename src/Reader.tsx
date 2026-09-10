@@ -887,14 +887,14 @@ export default function ReaderPanel({
           <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>更快的源</h3>
-              <button className="ghost" onClick={closeSourcePicker}>关闭</button>
+              <button className="sheet-close" aria-label="关闭" onClick={closeSourcePicker}>×</button>
             </div>
-            <p className="muted">{testing ? "正在测速，自动切换到最快图源…" : "已自动选择最快图源，也可以手动点选（弹窗不会自动关闭）"}</p>
+            <p className="muted">{testing ? "正在测速…" : "已自动选择最快图源"}</p>
             <div className="list sheet-list">
               {sourceRows.map((s) => {
                 const active = String(client.imageShunt) === s.key;
                 return (
-                  <button key={s.key} className={"list-item sheet-row" + (active ? " active" : "")} onClick={() => { void changeSource(s.key); }}>
+                  <button key={s.key} className={"sheet-row" + (active ? " active" : "")} onClick={() => { void changeSource(s.key); }}>
                     <div>
                       <div className="title">{s.title}{active ? "（当前）" : ""}</div>
                       <div className="muted">{[s.host, s.ms != null ? s.ms + " ms" : (testing ? "测速中…" : ""), s.ok === false && !testing ? "不可用" : ""].filter(Boolean).join(" · ")}</div>
@@ -917,19 +917,19 @@ export default function ReaderPanel({
           <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>阅读设置</h3>
-              <button className="ghost" onClick={() => setSettingsOpen(false)}>关闭</button>
+              <button className="sheet-close" aria-label="关闭" onClick={() => setSettingsOpen(false)}>×</button>
             </div>
             <p className="muted">阅读模式</p>
             <div className="sheet-list">
               <button
-                className={"list-item sheet-row" + (mode === "continuous" ? " active" : "")}
+                className={"sheet-row" + (mode === "continuous" ? " active" : "")}
                 onClick={() => setMode("continuous")}
               >
                 <div><div className="title">连续滚动</div><div className="muted">上下滚动，图片铺满整宽</div></div>
                 <span className={"badge" + (mode === "continuous" ? " ok" : "")}>{mode === "continuous" ? "✓" : ""}</span>
               </button>
               <button
-                className={"list-item sheet-row" + (mode === "single" ? " active" : "")}
+                className={"sheet-row" + (mode === "single" ? " active" : "")}
                 onClick={() => setMode("single")}
               >
                 <div><div className="title">单页</div><div className="muted">点左右两侧翻页</div></div>
@@ -971,7 +971,7 @@ export default function ReaderPanel({
           <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>{"切换话数" + (bookMeta?.name ? "：" + bookMeta.name : "")}</h3>
-              <button className="ghost" onClick={() => setChapOpen(false)}>关闭</button>
+              <button className="sheet-close" aria-label="关闭" onClick={() => setChapOpen(false)}>×</button>
             </div>
             <p className="muted">共 {chapters.length} 话 · 当前 {curLabel || "第1话"}</p>
             <div className="list sheet-list">
@@ -986,7 +986,7 @@ export default function ReaderPanel({
                   ? "已缓存 · " + info.pages + " 页" + (rec && rec.total > info.pages ? "/" + rec.total : "")
                   : "未缓存";
                 return (
-                  <button key={id} className={"list-item sheet-row" + (isCur ? " active" : "")} onClick={() => { void switchToChapter(c); }}>
+                  <button key={id} className={"sheet-row" + (isCur ? " active" : "")} onClick={() => { void switchToChapter(c); }}>
                     <div>
                       <div className="title">{label}{isCur ? "（当前）" : ""}</div>
                       <div className="muted">
@@ -1007,9 +1007,9 @@ export default function ReaderPanel({
           <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>选择要缓存的话数</h3>
-              <button className="ghost" disabled={cacheBusy} onClick={() => setCacheOpen(false)}>关闭</button>
+              <button className="sheet-close" aria-label="关闭" disabled={cacheBusy} onClick={() => setCacheOpen(false)}>×</button>
             </div>
-            <p className="muted">默认只选中当前话；已缓存的话不可重复选择</p>
+            <p className="muted">已缓存的话不可重复选择</p>
             <div className="list sheet-list">
               {chapters.map((c) => {
                 const id = String(c.id);
