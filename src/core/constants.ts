@@ -16,6 +16,18 @@ declare const __APP_VERSION__: string;
 export const LOCAL_VERSION =
   (typeof globalThis !== "undefined" && (globalThis as { __builtinVersion?: string }).__builtinVersion) ||
   (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0");
+/**
+ * 构建变体：modern（现代内核）/ compat（老内核兼容包）。
+ * 由 vite.config.ts 的 define 注入 __BUILD_VARIANT__（--mode compat 时为 "compat"）。
+ * **应用内更新器据此挑选对应的 APK 资产**——两个包同名同 versionName，只能靠构建期注入区分，
+ * 否则 compat 用户会被引导下载 modern 包。
+ */
+declare const __BUILD_VARIANT__: string;
+export const BUILD_VARIANT: string =
+  (typeof __BUILD_VARIANT__ !== "undefined" ? String(__BUILD_VARIANT__) : "modern").toLowerCase() === "compat"
+    ? "compat"
+    : "modern";
+
 export const HOST_URLS: string[] = [
   "https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt",
   "https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt",

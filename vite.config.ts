@@ -40,6 +40,8 @@ export default defineConfig(({ mode }) => {
     // 构建时从 package.json 读取版本，注入前端常量（构建产物中 LOCAL_VERSION 始终与 package.json 一致）
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
+      // 构建变体：更新器据此挑选对应的 APK 资产（modern / compat 同名同版本，只能构建期区分）
+      __BUILD_VARIANT__: JSON.stringify(compat ? "compat" : "modern"),
     }
   };
 });

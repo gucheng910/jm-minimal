@@ -72,7 +72,9 @@
 规则：
 - **每次都同步升**：PC 装包 / APK / 更新判断都依赖这两个值；只改一处会造成"新版拉不下来"或"显示已最新但下载的其实是旧协议版本"。
 - versionCode 只增不减（应用商店语义），PC 端无此概念。
-- Android 更新器按资产名匹配（modern/compat 子串），与版本号解耦但 Release 描述需一致。
+- Android 更新器按「构建期注入的包类型」匹配资产（`BUILD_VARIANT` → `ui/updateAsset.ts`），不再只看文件名子串：
+  两个 APK **版本号相同、仅文件名不同**，早期版本因为一律按 modern 匹配，会让 compat 用户下到 modern 包（老内核机型白屏）。
+  改名/改命名规则时要同步看 `updateAsset.test.ts` 的用例。
 
 ---
 
@@ -352,6 +354,7 @@ gh auth status && gh release view v1.4.1 --repo gucheng910/jm-minimal --json ass
 | 装完没有「DNS 清洗」卡片 | 装的是旧构建 | 换新 setup（§3.2 产物） |
 | GitHub 下载 asset 失败 | 对象存储间歇被墙 | 稍后重试 / hosts pin / gh api 备用（AGENTS.md） |
 | Android 更新找不到安装包 | Release 缺 modern/compat 命名 APK | §5.3 命名上传 |
+| Android 更新下错包（compat 用户拿到 modern） | 更新器匹配的是构建期注入的 BUILD_VARIANT；若构建时未注入（如手工 vite build 后自己改名）就会退回默认 modern | 用 `tools/release.mjs` 出包；`npm run e2e:compat` 会断言版本行标注「兼容包」 |
 
 ---
 

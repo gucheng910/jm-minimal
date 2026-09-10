@@ -2,7 +2,8 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { useEffect, useRef, useState } from "react";
 import { pushToast } from "./toast";
-import { LOCAL_VERSION } from "../core/constants";
+import { BUILD_VARIANT, LOCAL_VERSION } from "../core/constants";
+import { pickApkAsset } from "./updateAsset";
 const REPO = "gucheng910/jm-minimal";
 const API_URL = "https://api.github.com/repos/" + REPO + "/releases/latest";
 
@@ -62,15 +63,10 @@ export default function UpdateSection() {
         return;
       }
       const assets: Array<{ name: string; browser_download_url: string }> = Array.isArray(rel.assets) ? rel.assets : [];
-      // 只认版本号大小；资产按“构建类型”匹配（构建时注入，与发行说明文字无关）
-      const flavor = String((import.meta.env && import.meta.env.VITE_BUILD_VARIANT) || "modern").toLowerCase();
-      const apks = assets.filter((a) => /\.apk$/i.test(a.name));
-      const hit = apks.find((a) => {
-        const n = a.name.toLowerCase();
-        if (flavor === "compat") return n.includes("compat") || a.name.includes("兼容");
-        return n.includes("modern") || a.name.includes("现代");
-      });
-      const asset = hit || (apks.length === 1 ? apks[0] : null);
+      // 只认版本号大小；资产按「本机装的是哪个包」匹配 —— modern/compat 两个包**同名同版本**，
+      // 只能靠构建期注入的 BUILD_VARIANT 区分（见 core/constants.ts + ui/updateAsset.ts 单测），
+      // 否则 compat 用户会被引导下载 modern 包（老内核机型会白屏）。
+      const asset = pickApkAsset(assets, BUILD_VARIANT);
       if (!asset) { setState("idle"); pushToast("发布版中未找到本机对应安装包（modern/compat）", "err"); return; }
       setDlUrl(asset.browser_download_url);
       setState("available");

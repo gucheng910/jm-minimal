@@ -20,7 +20,7 @@ import DesktopUpdate from "./ui/DesktopUpdate";
 import { isDesktop } from "./core/dnsClean";
 import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
-import { APP_VERSION, LOCAL_VERSION, UI_KEYS } from "./core/constants";
+import { APP_VERSION, BUILD_VARIANT, LOCAL_VERSION, UI_KEYS } from "./core/constants";
 import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
 import TagBlockSetting from "./ui/TagBlockSetting";
@@ -695,7 +695,7 @@ export default function App() {
           </div>
           <div className="menu-section">
             <h4>版本</h4>
-            <p className="muted menu-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}）</p>
+            <p className="muted menu-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}{BUILD_VARIANT === "compat" ? " · 兼容包" : ""}）</p>
             {protoDrift && (
               <p className="err small-err">官方协议已更新到 {onlineProto}，当前客户端按 {APP_VERSION} 通信；若出现异常请留意后续版本</p>
             )}
