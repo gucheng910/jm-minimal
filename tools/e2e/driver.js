@@ -21,7 +21,7 @@
       srCount: (q(".sr-count") || {}).textContent || "",
       srCards: qa(".sr-body .list-item").length,
       linkColor: link ? getComputedStyle(link).color : "",
-      backLabel: (q(".page-push > .card > button.ghost") || {}).textContent || ""
+      backLabel: (q(".page-push .backtxt") || {}).textContent || ""
     });
   };
   const clickLink = (text) => {
@@ -200,6 +200,9 @@
     const p = l.closest("p");
     return p && /登场人物/.test(p.textContent || "");
   });
+  // 极简版把「相关漫画」折进分组行：先展开再读（保持原来的覆盖范围）
+  const relToggle = q(".page-push [data-related-toggle]");
+  if (relToggle) { relToggle.click(); await sleep(500); }
   log.push({
     step: "detail-meta",
     related: qa(".related-block .list-item").length,

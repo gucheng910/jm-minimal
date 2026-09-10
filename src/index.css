@@ -258,7 +258,8 @@ body {
 .app {
   max-width: 860px;
   margin: 0 auto;
-  padding: calc(var(--top-h) + 4px) 12px calc(var(--nav-h) + env(safe-area-inset-bottom) + 14px);
+  /* 左右 20px：极简版的统一页边留白（原 12px 太贴边） */
+  padding: calc(var(--top-h) + 4px) 20px calc(var(--nav-h) + env(safe-area-inset-bottom) + 20px);
   min-height: 100vh;
 }
 
@@ -432,12 +433,13 @@ button:focus:not(:focus-visible),
 }
 
 /* ---------- 卡片与布局 ---------- */
+/* 卡片：极简版不再用阴影，靠"面 + 圆角 + 留白"分层（阴影只留给浮层） */
 .card {
   background: var(--surface);
-  border-radius: var(--r-md);
-  padding: 13px 14px;
-  margin: 9px 0;
-  box-shadow: var(--sh-1);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  margin: 12px 0;
+  box-shadow: none;
 }
 
 .card.err {
@@ -1704,20 +1706,21 @@ html[data-nav="pop"]::view-transition-new(root) { animation-name: jmNavInLeft; }
 /* 详情页被搜索页压到背后的层级动效 */
 .page-push {
   transform-origin: 50% 0;
-  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0.35, 1);
+  transition: transform var(--t-page) var(--ease-emph), opacity var(--t-page) linear;
 }
 .page-push.pushed {
-  transform: translateX(-20%) scale(0.96);
+  transform: translateX(-24%);
+  opacity: 0.55;
   pointer-events: none;
 }
 .page-scrim {
   position: fixed;
   inset: 0;
   z-index: 195;
-  background: rgba(10, 12, 16, 0.22);
+  background: rgba(16, 15, 15, 0.28);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  transition: opacity var(--t-page) linear;
 }
 .page-scrim.on { opacity: 1; }
 /* 搜索页在前台时锁住底层页面滚动 */
@@ -1736,21 +1739,20 @@ body.jm-scroll-lock { overflow: hidden; }
   transform: translateX(100%);
   visibility: hidden;
   pointer-events: none;
-  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0.35, 1), visibility 0s linear 0.3s;
+  transition: transform var(--t-page) var(--ease-emph), visibility 0s linear var(--t-page);
 }
 .sr-layer.open {
   transform: none;
   visibility: visible;
   pointer-events: auto;
-  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0.35, 1), visibility 0s;
+  transition: transform var(--t-page) var(--ease-emph), visibility 0s;
 }
 .sr-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  gap: 10px;
+  padding: calc(env(safe-area-inset-top) + 14px) 20px 14px;
+  background: var(--bg);
 }
 .sr-back {
   display: inline-flex;
@@ -1769,20 +1771,21 @@ body.jm-scroll-lock { overflow: hidden; }
 .sr-title h2 {
   margin: 0;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: -0.005em;
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sr-count { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.4; }
+.sr-count { display: block; font-size: 13px; color: var(--ink-3); line-height: 1.5; margin-top: 2px; }
 .sr-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 12px 12px calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
+  padding: 8px 20px calc(var(--nav-h) + env(safe-area-inset-bottom) + 20px);
 }
 .sr-empty { padding: 40px 4px; text-align: center; display: block; }
 .sr-more { justify-content: center; }
@@ -1803,3 +1806,77 @@ body.jm-scroll-lock { overflow: hidden; }
 .update-progress { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .update-progress-bar { flex: 1; height: 6px; border-radius: 8px; background: var(--line, rgba(128,128,128,.25)); overflow: hidden; }
 .update-progress-fill { height: 100%; border-radius: 8px; background: var(--brand, #1677ff); transition: width .2s ease; }
+/* ============================================================
+   详情页（极简版 v6）：紧凑排版 + 分组行 + 折叠
+   —— 间距整体收到 8–16，内容只占约六成高度，下方刻意留空
+   ============================================================ */
+.detail-card { background: none; padding: 4px 0 28px; margin: 0; border-radius: 0; }
+.backtxt {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 4px 10px 4px 0; margin: 0 0 6px;
+  background: none !important; border: 0; color: var(--ink);
+  font: inherit; font-size: 14px; cursor: pointer; border-radius: var(--r-sm);
+}
+.backtxt:active { opacity: 0.6; }
+.d-title {
+  font-size: 18px; font-weight: 500; letter-spacing: -0.005em;
+  line-height: 1.45; margin: 2px 0 8px; max-width: var(--measure);
+}
+.d-meta {
+  color: var(--ink-2) !important; font-size: 13px !important;
+  line-height: 1.7; margin: 0 0 5px; max-width: var(--measure);
+}
+.d-meta .link { font-weight: 400; }
+.d-copy { margin-left: 10px; }
+.d-desc {
+  font-size: 14px; line-height: 1.7; letter-spacing: 0.01em; color: var(--ink-2);
+  margin: 12px 0 0; max-width: var(--measure);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.d-desc.open { display: block; -webkit-line-clamp: unset; }
+.d-more {
+  display: inline-block; margin-top: 6px; padding: 0;
+  background: none !important; border: 0; color: var(--link);
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+.d-locked { font-size: 13px; margin: 12px 0 0; max-width: var(--measure); }
+.actrow { display: flex; gap: 10px; margin-top: 16px; max-width: var(--measure); }
+.actrow .btn { padding: 14px 18px; }
+.actrow .btn.primary { flex: 1; }
+.actrow .btn.soft.fav { width: 116px; flex: none; }
+
+/* 通用按钮（极简版：黑底白字只给主操作，其余浅灰） */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 0; font: inherit; font-size: 14px; cursor: pointer; border-radius: var(--r-md);
+  transition: transform var(--t-press) var(--ease-out), opacity var(--t-press) linear, background var(--t-press) linear;
+}
+.btn:active { transform: scale(0.985); }
+.btn:disabled { opacity: 0.45; }
+.btn.primary { background: var(--ink); color: var(--surface); font-weight: 500; }
+.btn.soft { background: var(--surface-2); color: var(--ink); }
+.btn.soft.fav.on { background: var(--ink); color: var(--surface); font-weight: 500; }
+
+/* 分组行：浅灰面 + 1px 内分隔，不用边框 */
+.group { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 16px; }
+.d-group { margin-top: 16px; }
+.grow {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 15px 18px; border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  transition: background 0.12s linear;
+}
+.grow + .grow, .grow + .selectrow, .selectrow + .grow { box-shadow: inset 0 1px 0 var(--line); }
+.grow:active { background: var(--surface-2); }
+.grow .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+.grow .chev { flex: none; color: var(--ink-3); font-size: 16px; line-height: 1; transition: transform var(--t-ui) var(--ease-out); }
+.chev-toggle.open { transform: rotate(90deg); }
+.selectrow { cursor: default; }
+.selectrow select {
+  margin-left: auto; max-width: 62%; border: 0; padding: 0; background: none;
+  font: inherit; font-size: 13px; color: var(--ink-2); text-align: right;
+  appearance: none; -webkit-appearance: none;
+}
+.selectrow select:focus { box-shadow: none; }
+.d-tail { font-size: 13px; color: var(--ink-3); margin: 4px 0 0; line-height: 1.7; }
+

@@ -47,6 +47,9 @@
     await waitFor(".page-push .card h2", 20000);
     await sleep(2500);
     const favBtn = qa(".page-push button").find((b) => /收藏/.test(b.textContent || ""));
+    // 极简版评论默认折叠：先点开分组行再判断 .comment-box 是否存在
+    const cmtToggle = qa(".page-push .grow").find((b) => /评论/.test(b.textContent || ""));
+    if (cmtToggle) { cmtToggle.click(); await sleep(450); }
     log.push({ step: "detail-page", hasFavoriteButton: !!favBtn, favoriteLabel: favBtn ? favBtn.textContent.trim() : "", commentBox: !!q(".comment-box") });
   } else {
     log.push({ step: "detail-page", error: "没有列表卡片" });
@@ -73,6 +76,8 @@
       card2.click();
       await waitFor(".page-push .card h2", 20000);
       await sleep(2200);
+      const cmtToggle2 = qa(".page-push .grow").find((b) => /评论/.test(b.textContent || ""));
+      if (cmtToggle2) { cmtToggle2.click(); await sleep(450); }
       log.push({
         step: "detail-after-logout",
         hasFavoriteButton: !!qa(".page-push button").find((b) => /收藏/.test(b.textContent || "")),

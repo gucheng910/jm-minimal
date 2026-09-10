@@ -1,7 +1,11 @@
-// 详情页卡片：作者/标签可点搜索、章节切换、收藏/购买/阅读入口、评论区
-// 纯展示组件——数据与动作全部由 ContentView 提供（状态迁移见后续批次）
+// 详情页：紧凑排版 + 收藏（有状态）+ 折叠的评论/相关漫画
+// 纯展示组件——数据与动作全部由 ContentView 提供。
+// 极简要点：标题 18/500、元信息 13px 行距 5、简介默认 2 行可展开、分组行用浅灰面而不是卡片边框、
+// 页面下半部分刻意留空（不靠摊开间距把屏幕填满）。
+import { useState } from "react";
 import CommentList from "../ui/CommentList";
 import { AlbumGrid } from "../ui/AlbumGrid";
+import { HeartIcon } from "../ui/icons";
 import { albumTags, authorNames, parsePaid } from "../core/albumMeta";
 import { isSeriesWork } from "../core/series";
 import type { AlbumDetail as AlbumDetailData, AlbumSummary, ForumPayload } from "../core/types";
@@ -49,76 +53,142 @@ export default function AlbumDetail({
   onCommentChange,
   onSubmitComment
 }: Props) {
+  const [descOpen, setDescOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [relatedOpen, setRelatedOpen] = useState(false);
+
   const locked = parsePaid(detail);
   const authors = authorNames(detail);
   const tags = albumTags(detail);
   const actors = Array.isArray(detail.actors) ? detail.actors.filter(Boolean).map((x) => String(x)) : [];
   const related = Array.isArray(detail.related_list) ? detail.related_list : [];
+  const series = Array.isArray(detail.series) ? detail.series : [];
+  const desc = String(detail.description || "").trim();
+  const commentCount = comments && Array.isArray(comments.list) ? comments.list.length : 0;
+
   return (
-    <div className="card">
-      <button className="ghost" onClick={onBack}>{backLabel}</button>
-      <h2>{detail.name}</h2>
-      <p className="muted">JM号：{String(detail.id)}
-        <button className="ghost" style={{ marginLeft: 8 }} onClick={onCopyId}>复制</button>
-      </p>
-      <p className="muted">作者：{authors.length > 0
+    <div className="card detail-card">
+      <button className="backtxt" onClick={onBack}>
+        <svg className="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+        {backLabel}
+      </button>
+
+      <h2 className="d-title">{detail.name}</h2>
+
+      <p className="muted d-meta">作者 {authors.length > 0
         ? authors.map((a, i) => (
           <span key={"au" + i}>
             {i > 0 && <span className="meta-sep"> / </span>}
             <button className="link" onClick={() => onOpenAuthor(a)}>{a}</button>
           </span>
         ))
-        : "-"} · {isSeriesWork(detail)
+        : "-"}</p>
+
+      <p className="muted d-meta">
+        {isSeriesWork(detail)
           // 连载的 total_photos 不是本话页数（实测 47 页显示 5905），改显示话数
-          ? "共 " + String(detail.series!.length) + " 话"
-          : "页数：" + String(detail.total_photos ?? "-")}</p>
-      <p className="muted">标签：{tags.length > 0
+          ? "共 " + String(series.length) + " 话"
+          : "页数 " + String(detail.total_photos ?? "-")}
+        {detail.book_name && detail.book_name !== detail.name ? " · " + detail.book_name : ""}
+        {" · JM号 " + String(detail.id)}
+        <button className="link d-copy" onClick={onCopyId}>复制</button>
+      </p>
+
+      <p className="muted d-meta">标签 {tags.length > 0
         ? tags.map((t, i) => (
           <span key={"tg" + i}>
-            {i > 0 && <span className="meta-sep">、</span>}
+            {i > 0 && <span className="meta-sep"> · </span>}
             <button className="link" onClick={() => onOpenTag(t)}>{t}</button>
           </span>
         ))
         : "-"}</p>
+
       {actors.length > 0 && (
-        <p className="muted">登场人物：{actors.map((a, i) => (
+        <p className="muted d-meta">登场人物 {actors.map((a, i) => (
           <span key={"ac" + i}>
-            {i > 0 && <span className="meta-sep">、</span>}
+            {i > 0 && <span className="meta-sep"> · </span>}
             <button className="link" onClick={() => onOpenActor(a)}>{a}</button>
           </span>
         ))}</p>
       )}
-      {Array.isArray(detail.series) && detail.series.length > 1 && (
-        <div className="row">
-          <label>选择话数</label>
-          <select value={String(detail.id)} onChange={(e) => onSwitchChapter(e.target.value)}>
-            {detail.series.map((s) => <option key={String(s.id)} value={String(s.id)}>{"#" + String(s.sort ?? "") + " " + (s.name || "")}</option>)}
-          </select>
+
+      {desc && (
+        <>
+          <p className={"d-desc" + (descOpen ? " open" : "")}>{desc}</p>
+          {desc.length > 60 && (
+            <button className="d-more" onClick={() => setDescOpen((o) => !o)}>{descOpen ? "收起" : "展开"}</button>
+          )}
+        </>
+      )}
+
+      {locked && !logged && <p className="err d-locked">官方付费内容：请先登录，再通过官方会员中心购买（本客户端不做绕过）</p>}
+
+      {locked && logged ? (
+        <div className="actrow">
+          <button className="btn primary" disabled={busy} onClick={onBuy}>使用官方 JCoin 购买</button>
+        </div>
+      ) : (
+        <div className="actrow">
+          <button className="btn primary" disabled={busy} onClick={onRead}>立即阅读</button>
+          {logged && (
+            <button
+              className={"btn soft fav" + (detail.is_favorite ? " on" : "")}
+              disabled={busy || Boolean(detail.is_favorite)}
+              onClick={onToggleFavorite}
+              aria-pressed={Boolean(detail.is_favorite)}
+            >
+              <HeartIcon size={18} filled={Boolean(detail.is_favorite)} />
+              {detail.is_favorite ? "已收藏" : "收藏"}
+            </button>
+          )}
         </div>
       )}
-      <p>{detail.description}</p>
-      {locked && !logged && <p className="err">官方付费内容：请先登录，再通过官方会员中心购买（本客户端不做绕过）</p>}
-      {locked && logged && <div className="row"><button disabled={busy} onClick={onBuy}>使用官方 JCoin 购买</button></div>}
-      {!locked && (
-        <div className="row action-row">
-          {logged && <button className="ghost" disabled={busy || Boolean(detail.is_favorite)} onClick={onToggleFavorite}>{detail.is_favorite ? "已收藏" : "☆ 收藏"}</button>}
-          <button disabled={busy} onClick={onRead}>立即阅读</button>
-        </div>
+
+      <div className="group d-group">
+        {series.length > 1 && (
+          <label className="grow selectrow">
+            <span>选择话数</span>
+            <select value={String(detail.id)} onChange={(e) => onSwitchChapter(e.target.value)} aria-label="选择话数">
+              {series.map((s) => <option key={String(s.id)} value={String(s.id)}>{"#" + String(s.sort ?? "") + " " + (s.name || "")}</option>)}
+            </select>
+            <span className="chev">›</span>
+          </label>
+        )}
+        <button className="grow" onClick={() => setCommentsOpen((o) => !o)} aria-expanded={commentsOpen}>
+          <span>评论</span>
+          <span className="v">{commentCount > 0 ? commentCount : ""}</span>
+          <span className={"chev chev-toggle" + (commentsOpen ? " open" : "")}>›</span>
+        </button>
+        {related.length > 0 && (
+          <button className="grow" onClick={() => setRelatedOpen((o) => !o)} aria-expanded={relatedOpen} data-related-toggle>
+            <span>相关漫画</span>
+            <span className="v">{related.length}</span>
+            <span className={"chev chev-toggle" + (relatedOpen ? " open" : "")}>›</span>
+          </button>
+        )}
+      </div>
+
+      {!commentsOpen && !relatedOpen && (
+        <p className="d-tail">话数、评论与相关漫画都在上面一行里，点开才占用屏幕。</p>
       )}
-      {related.length > 0 && (
+
+      {relatedOpen && (
         <div className="related-block">
           <h3>相关漫画</h3>
           <AlbumGrid items={related} onOpen={onOpenRelated} />
         </div>
       )}
-      <CommentList
-        comments={comments}
-        text={commentText}
-        busy={busy}
-        logged={logged}
-        onTextChange={onCommentChange}
-        onSubmit={onSubmitComment}
-      />
+
+      {commentsOpen && (
+        <CommentList
+          comments={comments}
+          text={commentText}
+          busy={busy}
+          logged={logged}
+          onTextChange={onCommentChange}
+          onSubmit={onSubmitComment}
+        />
+      )}
     </div>
   );
 }
