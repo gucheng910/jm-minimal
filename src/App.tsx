@@ -5,7 +5,9 @@ import { client } from "./core/api";
 import { measureAll } from "./core/speed";
 import type { SpeedSample } from "./core/speed";
 import { sessionStore } from "./core/storage";
-import { BookIcon, CheckInIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon, UserIcon } from "./ui/icons";
+import { BookIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon, UserIcon } from "./ui/icons";
+import SourceSheet from "./ui/SourceSheet";
+import { zh } from "./core/zh";
 import { authService } from "./state/auth";
 import ContentView from "./ContentView";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
@@ -332,8 +334,11 @@ export default function App() {
       patch({ apiBase: client.apiBase });
       await reloadConfig();
       patch({ busy: false, msg: "已切换线路：" + host });
+      // 换源浮层点完就关，反馈必须是 toast（会员页的 msg 卡片这时看不见）
+      pushToast("已切换线路：" + host, "ok");
     } catch (err) {
       patch({ busy: false, error: String(err) });
+      pushToast("切换线路失败：" + String(err).replace(/^Error: /, "").slice(0, 60), "err");
     }
   }
 
@@ -389,8 +394,10 @@ export default function App() {
       client.setImageShunt(key);
       await reloadConfig();
       patch({ busy: false, msg: "已切换图源：" + key });
+      pushToast("已切换图源：" + key, "ok");
     } catch (err) {
       patch({ busy: false, error: String(err) });
+      pushToast("切换图源失败：" + String(err).replace(/^Error: /, "").slice(0, 60), "err");
     }
   }
 
@@ -463,18 +470,37 @@ export default function App() {
   }
 
   function openSourcePanel() {
-    // 立即响应：先弹出抽屉，配置未就绪时后台补齐（页面加载不阻塞顶栏操作）
+    // 立即响应：先弹出浮层，配置未就绪时后台补齐（页面加载不阻塞顶栏操作）
     setMenuOpen(false);
     setShowSource(true);
     if (!state.apiBase || !state.setting) {
-      bootstrap().catch(() => { /* 抽屉内显示配置占位 */ });
+      bootstrap().catch(() => { /* 浮层内显示配置占位 */ });
     }
   }
 
-  function openCheckinFromTop() {
-    setMenuOpen(false);
-    openMember();
-    if (logged) setTimeout(() => { loadDaily(); }, 150);
+  /**
+   * 一键测速并切换（换源浮层里的主动作）。
+   * 复用启动时那套 client.autoSelectBest()：它会给所有线路与图源各发一次小请求，选最快的一组。
+   * 返回一行给浮层显示的文案。
+   */
+  async function autoPickBest(): Promise<string> {
+    patch({ busy: true, error: "", msg: "" });
+    try {
+      const ok = await client.autoSelectBest();
+      await reloadConfig();
+      let host = "";
+      try { host = client.apiBase ? new URL(client.apiBase).host : ""; } catch { host = ""; }
+      const text = ok
+        ? "已测速并切换到最快线路" + (host ? "：" + host : "")
+        : "测速全部失败，已保留当前线路";
+      patch({ busy: false, msg: text, apiBase: client.apiBase || state.apiBase });
+      pushToast(text, ok ? "ok" : "err");
+      return text;
+    } catch (err) {
+      const text = "测速失败：" + String(err).replace(/^Error: /, "").slice(0, 80);
+      patch({ busy: false, error: String(err) });
+      return text;
+    }
   }
 
   async function openMember() {
@@ -512,11 +538,11 @@ export default function App() {
           <button className="menu-btn" aria-label="菜单" onClick={() => setMenuOpen((o) => !o)}><MenuIcon size={20} /></button>
           <div className="top-title">JM极简版</div>
         </div>
+        {/* 顶栏只留三个工具：缓存 / 搜索 / 换源。签到与线路详情都归会员页，避免同一功能两个入口 */}
         <div className="top-actions">
           <button aria-label="缓存" onClick={() => { setMenuOpen(false); setShowCache(true); }}><DownloadIcon size={20} /></button>
-          <button aria-label="签到" onClick={openCheckinFromTop}><CheckInIcon size={20} /></button>
           <button aria-label="搜索" onClick={() => { setMenuOpen(false); navTo("search"); }}><SearchIcon size={20} /></button>
-          <button aria-label="线路测速" title="线路测速" onClick={openSourcePanel}><LightningIcon size={20} /></button>
+          <button aria-label="换源" title="换源：图源 / 线路 / 一键测速" onClick={openSourcePanel}><LightningIcon size={20} /></button>
         </div>
       </header>
       <main className="view-stack">
@@ -603,7 +629,7 @@ export default function App() {
           <div className="row">
             <label>线路
               <select value={currentHost} onChange={(e) => handleLineChange(e.target.value)}>
-                {availableLines.map(([host, name]) => <option key={host} value={host}>{name}（{host}）</option>)}
+                {availableLines.map(([host, name]) => <option key={host} value={host}>{zh(name)}（{host}）</option>)}
               </select>
             </label>
             <label>图源
@@ -703,37 +729,20 @@ export default function App() {
           </div>
         </div>
       </div>
-      {showSource && (
-        <div className="drawer-backdrop" onClick={() => setShowSource(false)}>
-          <div className="source-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="row">
-              <h2>线路 / 图源切换</h2>
-            </div>
-            <div className="row">
-              <label>线路
-                <select value={currentHost} onChange={(e) => { handleLineChange(e.target.value); }}>
-                  {availableLines.map(([host, name]) => <option key={host} value={host}>{name}（{host}）</option>)}
-                </select>
-              </label>
-              <label>图源
-                <select value={client.imageShunt} onChange={(e) => { handleShuntChange(e.target.value); }}>
-                  {Array.isArray(state.setting?.app_shunts) && state.setting!.app_shunts!.length > 0
-                    ? state.setting!.app_shunts!.map((s) => <option key={String(s.key)} value={String(s.key)}>{String(s.title)}</option>)
-                    : <option value="1">图源1</option>}
-                </select>
-              </label>
-            </div>
-            <div className="row">
-              <button disabled={state.busy} onClick={runLineSpeed}>线路测速</button>
-              {speedResult.length > 0 && <ul className="speed-list">{speedResult.map((r) => <li key={r.label} className={r.ok ? "ok" : "fail"}>{r.label} · {r.ok ? r.ms + "ms" : "失败"}</li>)}</ul>}
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <button className="ghost" onClick={() => setShowSource(false)}>关闭</button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <SourceSheet
+        open={showSource}
+        onClose={() => setShowSource(false)}
+        shunts={Array.isArray(state.setting?.app_shunts)
+          ? state.setting!.app_shunts!.map((s) => ({ key: String(s.key), title: String(s.title) }))
+          : []}
+        currentShunt={String(client.imageShunt || "1")}
+        lines={availableLines}
+        currentHost={currentHost}
+        busy={state.busy}
+        onPickShunt={handleShuntChange}
+        onPickLine={handleLineChange}
+        onAutoTest={autoPickBest}
+      />
       {showCache && <CacheCenter onClose={() => setShowCache(false)} />}
       {libPanel && (
         <LibPage

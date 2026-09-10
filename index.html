@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#12141a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F2F0E5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#100F0F" media="(prefers-color-scheme: dark)" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <script>try{var t=localStorage.getItem("jmclient.theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
@@ -14,10 +14,11 @@
     <meta name="color-scheme" content="light dark" />
     <title>JM极简版</title>
     <style>
-      #jm-old-webview { max-width: 560px; margin: 15vh auto 0; padding: 0 20px; font: 15px/1.7 -apple-system, "Segoe UI", Roboto, sans-serif; color: #17181d; }
-      #jm-old-webview h1 { font-size: 18px; margin: 0 0 10px; }
-      #jm-old-webview p { margin: 0 0 8px; color: #5c6570; }
-      @media (prefers-color-scheme: dark) { #jm-old-webview { color: #e6e8ec; } #jm-old-webview p { color: #a3abb8; } }
+      /* 老内核兜底页：与主界面同一套纸墨色与字号刻度（正文 14 / 标题 18） */
+      #jm-old-webview { max-width: 476px; margin: 15vh auto 0; padding: 0 20px; font: 14px/1.75 -apple-system, "Segoe UI", Roboto, sans-serif; color: #100F0F; background: #F2F0E5; }
+      #jm-old-webview h1 { font-size: 18px; font-weight: 500; margin: 0 0 12px; }
+      #jm-old-webview p { margin: 0 0 10px; color: #575653; }
+      @media (prefers-color-scheme: dark) { #jm-old-webview { color: #CECDC3; background: #100F0F; } #jm-old-webview p { color: #9F9D96; } }
     </style>
   </head>
   <body>

@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+// 工作副本保护：发布只能在原仓库 E:\JMClient 执行（副本改动先回同步过去）
+if (!/^[Ee]:[\\/]JMClient$/i.test(process.cwd())) {
+  if (process.argv.slice(2).some((a) => a === "--publish" || a === "--verify-only")) {
+    console.error("工作副本禁止发布（当前目录：" + process.cwd() + "），请在 E:\\JMClient 执行。");
+    process.exit(1);
+  }
+}
 /**
  * tools/release.mjs —— JM极简版发版一条龙
  *
