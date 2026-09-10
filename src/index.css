@@ -457,29 +457,29 @@ button:focus:not(:focus-visible),
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px; }
 .field { display: block; margin: 12px 0; font-size: 13px; color: var(--ink-2); }
 .field input { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; }
+/* 搜索框：浅灰填充、无描边；按钮是浅灰次按钮（主操作留给详情/阅读） */
 .searchbar {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 .searchbar input {
   flex: 1;
   min-width: 120px;
-  border-radius: var(--r-pill);
-  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--r-md);
+  padding: 13px 14px;
   font-size: 14px;
   background: var(--surface-2);
-  border: 1px solid var(--line);
+  color: var(--ink);
 }
 .searchbar input:focus {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(16,15,15,0.10);
+  box-shadow: 0 0 0 2px var(--line-strong);
 }
 .searchbar button {
-  padding: 10px 18px;
-  font-weight: 600;
-  border-radius: var(--r-pill);
-  flex-shrink: 0;
+  flex: none;
+  padding: 13px 18px;
+  border-radius: var(--r-md);
 }
 
 h1 { font-size: 18px; letter-spacing: 0.2px; }
@@ -496,13 +496,14 @@ h3 { font-size: 14px; margin: 4px 0; }
 .err { color: var(--err); white-space: pre-wrap; }
 
 /* ---------- 标签（胶囊） ---------- */
+/* 浅灰胶囊：无边框，靠填充色成形（热词 / 搜索记录 / 更多分类都用它） */
 .chip {
   background: var(--surface-2);
-  color: var(--ink-2);
-  border: 1px solid var(--line);
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--ink);
+  border: 0;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 400;
   border-radius: var(--r-pill);
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
@@ -2049,4 +2050,11 @@ body.jm-scroll-lock { overflow: hidden; }
 .diag-body { padding: 0 18px 18px; }
 .diag-meta { color: var(--ink-3) !important; font-size: 12px !important; line-height: 1.7; }
 .diag-actions { gap: 8px; margin: 12px 0 4px; }
+
+/* ---------- 搜索页（v6）：浅灰胶囊 + 下划线类型 + 工具行 ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.sectitle { margin: 0 0 12px; font-size: 13px; color: var(--ink-3); }
+.hist-head { justify-content: space-between; align-items: baseline; margin-top: 24px; }
+.hist-head .sectitle { margin: 0; }
+.searchbar { margin-bottom: 4px; }
 

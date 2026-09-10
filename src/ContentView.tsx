@@ -540,8 +540,10 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       <SearchFeed
         query={search.query}
         type={search.type}
+        order={search.order}
         items={search.items}
         page={search.page}
+        total={search.total}
         hasMore={search.hasMore}
         busy={search.busy}
         error={search.error}
@@ -554,6 +556,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         onSubmit={search.submit}
         onRunTerm={search.runTerm}
         onTypeChange={search.changeType}
+        onSort={search.changeSort}
         onRetryHot={search.retryHot}
         onClearHistory={search.clearHistory}
         onLoadMore={search.loadMore}

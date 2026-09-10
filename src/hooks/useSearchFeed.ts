@@ -21,8 +21,11 @@ export interface SearchFeedApi {
   query: string;
   setQuery: (v: string) => void;
   type: string;
+  /** 列表排序（列表功能，不是排行榜）："" 最新 / mv 最多点击 / mp 最多图片 / tf 最多爱心 */
+  order: string;
   items: AlbumSummary[];
   page: number;
+  total: number;
   hasMore: boolean;
   busy: boolean;
   error: string;
@@ -38,6 +41,8 @@ export interface SearchFeedApi {
   runTerm: (term: string) => void;
   /** 切换搜索类型；已搜索过则立即按新类型重搜 */
   changeType: (type: string) => void;
+  /** 切换结果排序（立即重搜第 1 页） */
+  changeSort: (order: string) => void;
   retryHot: () => void;
   clearHistory: () => void;
   loadMore: () => void;
@@ -48,6 +53,8 @@ export interface SearchFeedApi {
 export function useSearchFeed(onRedirectAid: (aid: string | number) => void): SearchFeedApi {
   const [query, setQuery] = useState("");
   const [type, setType] = useState("site");
+  const [order, setOrder] = useState("");
+  const [total, setTotal] = useState(0);
   const [items, setItems] = useState<AlbumSummary[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -64,23 +71,24 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void): Se
   const redirectRef = useRef(onRedirectAid);
   redirectRef.current = onRedirectAid;
 
-  const search = useCallback(async (q: string, p: number, replace: boolean, searchType: string) => {
+  const search = useCallback(async (q: string, p: number, replace: boolean, searchType: string, sortOrder: string) => {
     const reqId = ++reqIdRef.current;
     setBusy(true);
     setError("");
     try {
-      const result = await client.search(q, p, 0, searchType);
-      if (reqIdRef.current !== reqId) return; // 换词/换类型后丢弃过期回包
+      const result = await client.search(q, p, 0, searchType, sortOrder);
+      if (reqIdRef.current !== reqId) return; // 换词/换类型/换排序后丢弃过期回包
       if (replace && result.redirect_aid) {
         redirectRef.current(result.redirect_aid);
         return;
       }
-      const total = Number(result.total || 0);
+      const totalNum = Number(result.total || 0);
       const content = result.content || [];
       const next = replace ? content : [...itemsRef.current, ...content];
       setItems(next);
       setPage(p);
-      setHasMore(next.length < total);
+      setTotal(totalNum);
+      setHasMore(next.length < totalNum);
     } catch (err) {
       if (reqIdRef.current === reqId) setError(String(err));
     } finally {
@@ -94,22 +102,28 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void): Se
     rememberSearch(q);
     setHistory(loadSearchHistory());
     setSearched(true);
-    void search(q, 1, true, type);
-  }, [query, type, search]);
+    void search(q, 1, true, type, order);
+  }, [query, type, order, search]);
 
   const runTerm = useCallback((term: string) => {
     setQuery(term);
     rememberSearch(term);
     setHistory(loadSearchHistory());
     setSearched(true);
-    void search(term, 1, true, type);
-  }, [type, search]);
+    void search(term, 1, true, type, order);
+  }, [type, order, search]);
 
   const changeType = useCallback((nextType: string) => {
     setType(nextType);
     const q = query.trim();
-    if (searched && q) void search(q, 1, true, nextType);
-  }, [query, searched, search]);
+    if (searched && q) void search(q, 1, true, nextType, order);
+  }, [query, searched, order, search]);
+
+  const changeSort = useCallback((nextOrder: string) => {
+    setOrder(nextOrder);
+    const q = query.trim();
+    if (searched && q) void search(q, 1, true, type, nextOrder);
+  }, [query, searched, type, search]);
 
   const retryHot = useCallback(() => {
     setHotErr("");
@@ -126,8 +140,8 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void): Se
   const loadMore = useCallback(() => {
     const q = query.trim();
     if (!q || busy || !hasMore) return;
-    void search(q, page + 1, false, type);
-  }, [query, busy, hasMore, page, type, search]);
+    void search(q, page + 1, false, type, order);
+  }, [query, busy, hasMore, page, type, order, search]);
 
   const reset = useCallback(() => {
     reqIdRef.current++;
@@ -158,5 +172,5 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void): Se
     } catch { /* 静默 */ }
   }, []);
 
-  return { query, setQuery, type, items, page, hasMore, busy, error, searched, hotTags, hotErr, history, init, submit, runTerm, changeType, retryHot, clearHistory, loadMore, reset };
+  return { query, setQuery, type, order, items, page, total, hasMore, busy, error, searched, hotTags, hotErr, history, init, submit, runTerm, changeType, changeSort, retryHot, clearHistory, loadMore, reset };
 }

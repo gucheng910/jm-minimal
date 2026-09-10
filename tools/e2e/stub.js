@@ -150,7 +150,7 @@
       const q = u.searchParams.get("search_query") || "";
       const type = u.searchParams.get("search_type") || "";
       const page = Number(u.searchParams.get("page") || 1);
-      window.__reqs.push({ path: p, q, type, page });
+      window.__reqs.push({ path: p, q, type, page, o: u.searchParams.get("o") });
       const prefix = (type === "author" ? "AU" : "TG") + q + "-p" + page + "-";
       return json({ total: 10000, content: mk(prefix, 6, q) });
     }

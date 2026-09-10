@@ -425,12 +425,14 @@ export class JMClient {
     return this.request<AlbumSummary[]>(API_PATHS.latest, {});
   }
 
-  search(query: string, page = 1, mainTag = 0, searchType = "site"): Promise<SearchResult> {
+  /** order：列表排序（o 参数），实测 "" 最新 / mv 最多点击 / mp 最多图片 / tf 最多爱心 均有效 */
+  search(query: string, page = 1, mainTag = 0, searchType = "site", order = ""): Promise<SearchResult> {
     return this.request<SearchResult>(API_PATHS.search, {
       search_query: query,
       page,
       main_tag: mainTag,
-      search_type: searchType
+      search_type: searchType,
+      o: order
     });
   }
 
