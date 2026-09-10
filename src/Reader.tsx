@@ -198,6 +198,9 @@ export default function ReaderPanel({
   });
   const [current, setCurrent] = useState(1);
   const [jumpInput, setJumpInput] = useState("1");
+  // 沉浸阅读：控件默认不显示，点画面中间唤出，3 秒无操作自动淡出
+  const [chromeOn, setChromeOn] = useState(false);
+  const chromeTimer = useRef<number | null>(null);
   const [task, setTask] = useState<CacheTaskMeta | undefined>(() => cacheList().find((t) => t.id === String(albumId)));
   const [testing, setTesting] = useState(false);
   // —— B 方案：右侧页数浮标（阅读进度指示 + 拖动/点按跳页）——
@@ -574,6 +577,50 @@ export default function ReaderPanel({
     onBack();
   }
 
+  /** 唤出控制条并在 3 秒后自动淡出（翻页/滚动/点按钮都会重新计时） */
+  const showChrome = useCallback(() => {
+    setChromeOn(true);
+    if (chromeTimer.current) window.clearTimeout(chromeTimer.current);
+    chromeTimer.current = window.setTimeout(() => setChromeOn(false), 3000);
+  }, []);
+
+  const hideChrome = useCallback(() => {
+    if (chromeTimer.current) window.clearTimeout(chromeTimer.current);
+    setChromeOn(false);
+  }, []);
+
+  useEffect(() => () => { if (chromeTimer.current) window.clearTimeout(chromeTimer.current); }, []);
+
+  /**
+   * 点画面的行为（沉浸阅读）：
+   *   控件已显示 → 收起；控件隐藏时，单页模式点左右 1/3 翻页，点中间唤出控件；
+   *   连续滚动模式点任意位置都唤出控件（滚动手势不受影响）。
+   */
+  /** 翻页或滚动时如果控制条正显示着，重新计时（否则会在用户操作中途消失） */
+  useEffect(() => {
+    if (!chromeOn) return;
+    const onScroll = () => showChrome();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [chromeOn, showChrome]);
+
+  function onReaderTap(e: React.MouseEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement;
+    // 只放过浮层里的真实控件（按钮/输入框）；控制条覆盖全屏，如果整块都吃掉点击，
+    // 用户就没办法"再点一下收起"了，所以空白处要能穿透到收起逻辑
+    if (target.closest(".reader-sheet") || target.closest(".reader-rail")) return;
+    if (target.closest("button, input, a, label")) return;
+    if (chromeOn) { hideChrome(); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+    if (mode === "single" && (ratio < 1 / 3 || ratio > 2 / 3)) {
+      jumpTo(ratio > 2 / 3 ? current + 1 : current - 1);
+      showChrome();
+      return;
+    }
+    showChrome();
+  }
+
   /**
    * 取某话的原始页列表（不含 blob 转换，用于缓存）：
    * 当前话内存 → IndexedDB 记录 → 从 Cache API 反推（IDB 记录丢失时的补救）→ 网络。
@@ -759,42 +806,60 @@ export default function ReaderPanel({
     ? chapters.every((c) => cachedIds.has(String(c.id)))
     : cachedIds.has(String(albumId));
 
+  /**
+   * 控制条（沉浸阅读）：默认不显示，点画面中间唤出、3 秒无操作自动淡出。
+   * 分两行——上面是"我在哪"（返回 / 章节名 / 页码），下面是"我能做什么"（工具 / 翻页）。
+   * 所有原有按钮一个不少，只是不再常驻屏幕。
+   */
+  const pagePct = total > 1 ? Math.min(100, Math.max(0, ((current - 1) / (total - 1)) * 100)) : 0;
   const toolbar = (
-    <div className="reader-toolbar">
-      <button onClick={handleBack}>返回</button>
-      <button onClick={() => jumpTo(current - 1)} disabled={current <= 1}>上</button>
-      <button onClick={() => jumpTo(current + 1)} disabled={current >= total}>下</button>
-      <input className="page-input mono-num" value={jumpInput} onChange={(e) => setJumpInput(e.target.value)} inputMode="numeric" onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }} />
-      <span className="muted mono-num">/{total}</span>
-      <button onClick={() => setMode(mode === "continuous" ? "single" : "continuous")}>{mode === "continuous" ? "切单页" : "切连续"}</button>
-      {!offline && <button disabled={testing} onClick={openSourcePicker} title="测速并选择图源">{testing ? "测速中…" : "更快的源"}</button>}
-      {chapters.length > 1 && (
-        <button onClick={() => { void refreshCached(); setChapOpen(true); }} title="切换话数">
-          {switchBusy ? "切换中…" : (curLabel || "换话")}
-        </button>
-      )}
-      {!offline && (
-        <button
-          className={deseam ? "btn-deseam on" : ""}
-          onClick={toggleDeseam}
-          title="通过简单算法尝试去除部分漫画中的条纹（本地处理，不消耗额外流量）；亮=显示修复后，灭=显示原图"
-        >
-          {deseam ? "去条纹 ✓" : "去条纹"}
-        </button>
-      )}
-      {allCached && !cacheTaskBusy ? (
-        <button className="btn-cached" disabled title="本作品已全部缓存">已缓存</button>
-      ) : (
-        <button
-          disabled={!pages.length || cacheTaskBusy}
-          onClick={openCacheDialog}
-          title={chapters.length > 1 ? "选择要缓存的话数" : "缓存本话"}
-        >
-          {cacheTaskBusy
-            ? <span className="mono-num">{"缓存中 " + (task?.done ?? 0) + "/" + (task?.total ?? 0)}</span>
-            : "缓存"}
-        </button>
-      )}
+    <div className={"reader-toolbar" + (chromeOn ? " show" : "")} aria-hidden={!chromeOn}>
+      <div className="rt-top">
+        <button onClick={handleBack}>返回</button>
+        <span className="rt-title one-line">{title}</span>
+        <span className="rt-page mono-num">{current} / {total}</span>
+      </div>
+      <div className="rt-bottom">
+        <div className="rt-progress" aria-hidden="true"><i style={{ width: pagePct + "%" }} /></div>
+        <div className="rt-tools">
+          {!offline && <button disabled={testing} onClick={openSourcePicker} title="测速并选择图源">{testing ? "测速中…" : "更快的源"}</button>}
+          {chapters.length > 1 && (
+            <button onClick={() => { void refreshCached(); setChapOpen(true); }} title="切换话数">
+              {switchBusy ? "切换中…" : (curLabel || "换话")}
+            </button>
+          )}
+          {allCached && !cacheTaskBusy ? (
+            <button className="btn-cached" disabled title="本作品已全部缓存">已缓存</button>
+          ) : (
+            <button
+              disabled={!pages.length || cacheTaskBusy}
+              onClick={openCacheDialog}
+              title={chapters.length > 1 ? "选择要缓存的话数" : "缓存本话"}
+            >
+              {cacheTaskBusy
+                ? <span className="mono-num">{"缓存中 " + (task?.done ?? 0) + "/" + (task?.total ?? 0)}</span>
+                : "缓存"}
+            </button>
+          )}
+          {!offline && (
+            <button
+              className={deseam ? "btn-deseam on" : ""}
+              onClick={toggleDeseam}
+              title="通过简单算法尝试去除部分漫画中的条纹（本地处理，不消耗额外流量）；亮=显示修复后，灭=显示原图"
+            >
+              {deseam ? "去条纹 ✓" : "去条纹"}
+            </button>
+          )}
+          <button onClick={() => setMode(mode === "continuous" ? "single" : "continuous")}>{mode === "continuous" ? "切单页" : "切连续"}</button>
+        </div>
+        <div className="rt-nav">
+          <button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button>
+          <input className="page-input mono-num" value={jumpInput} onChange={(e) => setJumpInput(e.target.value)} inputMode="numeric" onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }} />
+          <span className="muted mono-num">/{total}</span>
+          <button disabled={current >= total} onClick={() => jumpTo(current + 1)}>下一页</button>
+          {mode === "continuous" && current > 1 && <button onClick={() => jumpTo(1)}>回到开头</button>}
+        </div>
+      </div>
     </div>
   );
 
@@ -924,7 +989,7 @@ export default function ReaderPanel({
   // 初始空 pages（后台 getRead 尚未返回）显示加载态
   if (pageUrls.length === 0) {
     return (
-      <div className="reader-wrap" ref={rootRef}>
+      <div className={"reader-wrap" + (chromeOn ? " chrome-on" : "")} ref={rootRef} onClick={onReaderTap}>
         {toolbar}
         <h2 className="reader-title">{title}</h2>
         <div className="card"><p className="muted">正在加载阅读数据…</p></div>
@@ -936,22 +1001,20 @@ export default function ReaderPanel({
   if (mode === "single") {
     const page = loadedPage;
     return (
-      <div className="reader-wrap" ref={rootRef}>
+      <div className={"reader-wrap" + (chromeOn ? " chrome-on" : "")} ref={rootRef} onClick={onReaderTap}>
         {toolbar}
         <h2 className="reader-title">{title}</h2>
         {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous" onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} onError={onImgError} />}
-        <div className="row"><button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button><button disabled={current >= total} onClick={() => jumpTo(current + 1)}>下一页</button></div>
         {overlays}
       </div>
     );
   }
 
   return (
-    <div className="reader-wrap" ref={rootRef}>
+    <div className={"reader-wrap" + (chromeOn ? " chrome-on" : "")} ref={rootRef} onClick={onReaderTap}>
       {toolbar}
       <h2 className="reader-title">{title}</h2>
       <div className="reader-cont">{pageUrls.map((p) => renderPage(p))}</div>
-      <div className="row"><button onClick={() => jumpTo(1)}>回到开头</button><span className="muted">竖屏连续阅读：滚轮 / 空格翻页，拖动右侧圆点跳页</span></div>
       {total > 1 && (
         <div ref={railRef} role="slider" aria-label="阅读进度" aria-valuemin={1} aria-valuemax={total} aria-valuenow={bubblePage}
           className={"reader-rail" + (railVisible ? " show" : "")}

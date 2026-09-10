@@ -931,33 +931,52 @@ h3 { font-size: 14px; margin: 4px 0; }
 .speed-list .fail { color: var(--err); }
 
 /* ---------- 阅读器（沉浸深色） ---------- */
-.reader-wrap { background: #100F0F; color: #edeef1; min-height: 100vh; padding-bottom: 24px; }
-.reader-title { margin: 0 12px 10px; font-size: 14px; font-weight: 600; color: #c9ced6; }
+/* 常态：纯黑 + 图片，零控件；控件只在点画面时浮出（见下） */
+.reader-wrap { background: #000; color: #edeef1; min-height: 100vh; padding-bottom: 0; }
+/* 标题只在控制条里显示；这里留 sr-only（保留文本，测试与读屏仍可读） */
+.reader-title {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 
+/* 控制条：铺满整屏的浮层（上=我在哪，下=我能做什么），默认透明不可点 */
 .reader-toolbar {
-  position: sticky;
-  top: 0;
+  position: fixed;
+  inset: 0;
   z-index: 40;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  padding: 9px 10px;
-  background: rgba(12, 13, 17, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  flex-direction: column;
+  justify-content: space-between;
+  padding: calc(env(safe-area-inset-top) + 8px) 0 calc(env(safe-area-inset-bottom) + 12px);
+  background: linear-gradient(rgba(0, 0, 0, 0.74), rgba(0, 0, 0, 0.12) 22%, rgba(0, 0, 0, 0.12) 68%, rgba(0, 0, 0, 0.8));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-ui) var(--ease-out);
 }
+.reader-toolbar.show { opacity: 1; pointer-events: auto; }
+.rt-top { display: flex; align-items: center; gap: 10px; padding: 0 14px; transform: translateY(-6px); transition: transform var(--t-enter) var(--ease-out); }
+.rt-bottom { padding: 0 14px; transform: translateY(6px); transition: transform var(--t-enter) var(--ease-out); }
+.reader-toolbar.show .rt-top,
+.reader-toolbar.show .rt-bottom { transform: none; }
+.rt-title { flex: 1; min-width: 0; font-size: 14px; color: #e8e8ea; }
+.rt-page { flex: none; font-size: 13px; color: #c9c9cc; }
+.rt-progress { height: 2px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); margin-bottom: 16px; overflow: hidden; }
+.rt-progress i { display: block; height: 100%; border-radius: 2px; background: #fff; transition: width var(--t-ui) linear; }
+.rt-tools { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+.rt-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; }
+
 .reader-toolbar button {
-  background: rgba(255, 255, 255, 0.09);
-  color: #F2F0E5;
-  padding: 5px 11px;
+  background: transparent;
+  color: #e8e8ea;
+  padding: 9px 11px;
+  font: inherit;
   font-size: 13px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
+  transition: background var(--t-press) linear, opacity var(--t-press) linear;
 }
-.reader-toolbar button:hover { background: rgba(255, 255, 255, 0.16); }
-.reader-toolbar button.btn-deseam.on { background: #100F0F; color: #14161c; font-weight: 600; }
-.reader-toolbar button.btn-deseam.on:hover { background: #CECDC3; }
+.reader-toolbar button:hover { background: rgba(255, 255, 255, 0.14); }
+.reader-toolbar button.btn-deseam.on { background: #F2F0E5; color: #100F0F; font-weight: 600; }
+.reader-toolbar button.btn-deseam.on:hover { background: #fff; }
 .reader-toolbar button:disabled { opacity: 0.35; }
 /* 阅读器内弹窗（更快的源 / 换话 / 选话缓存）：底部抽屉，z-index 高于阅读器工具栏与缓存中心 overlay */
 .reader-sheet-backdrop { z-index: 210; }
@@ -1023,8 +1042,8 @@ h3 { font-size: 14px; margin: 4px 0; }
 /* 相邻页重叠 2px：缩放后的页面渲染高度是小数，Chromium 按设备像素取整绘制时会留下 1 个设备像素的
    未被覆盖行，露出 .jm-page/.jm-figure 的深色背景（即阅读时看到的黑线）。下一张图与上一张重叠并后绘制，
    即可盖住该行。注意 content-visibility 的 paint containment 会裁剪子内容，需 2px 才能完全覆盖。 */
-.jm-figure + .jm-figure { margin-top: -2px; }
-.jm-page { display: block; width: 100%; height: auto; background: #16181f; }
+.jm-figure + .jm-figure { margin-top: 6px; }
+.jm-page { display: block; width: 100%; height: auto; background: #111; }
 .jm-single { display: block; max-width: 100%; max-height: calc(100vh - 160px); width: auto; margin: 10px auto; object-fit: contain; background: #16181f; }
 /* 仅在连续阅读容器内撑满宽度；单页模式让 canvas 走 .jm-single 的等比约束（否则会被压扁） */
 .reader-cont .scramble-canvas { width: 100%; height: auto; display: block; }
