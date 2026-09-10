@@ -1902,6 +1902,8 @@ body.jm-scroll-lock { overflow: hidden; }
 .btn.primary { background: var(--ink); color: var(--surface); font-weight: 500; }
 .btn.soft { background: var(--surface-2); color: var(--ink); }
 .btn.soft.fav.on { background: var(--ink); color: var(--surface); font-weight: 500; }
+/* 已收藏是"已达成的状态"，不该被 disabled 的半透明规则弄灰 */
+.btn.soft.fav.on:disabled { opacity: 1; cursor: default; }
 
 /* 分组行：浅灰面 + 1px 内分隔，不用边框 */
 .group { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 16px; }

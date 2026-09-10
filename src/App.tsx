@@ -534,8 +534,12 @@ export default function App() {
   }, []);
 
   // 会员页「诊断与线路」里点换源 → 复用顶栏同一个换源浮层（一个功能只有一套 UI）
+  // 注意用 ref 转发：effect 只在挂载时注册一次，直接闭包会捕获首次渲染的 state，
+  // 导致每次点都误判"配置未就绪"而重跑 bootstrap()。
+  const openSourceRef = useRef(openSourcePanel);
+  openSourceRef.current = openSourcePanel;
   useEffect(() => {
-    const h = () => openSourcePanel();
+    const h = () => openSourceRef.current();
     return on("jm:openSource", h);
   }, []);
 

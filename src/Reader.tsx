@@ -596,12 +596,23 @@ export default function ReaderPanel({
    *   控件已显示 → 收起；控件隐藏时，单页模式点左右 1/3 翻页，点中间唤出控件；
    *   连续滚动模式点任意位置都唤出控件（滚动手势不受影响）。
    */
-  /** 翻页或滚动时如果控制条正显示着，重新计时（否则会在用户操作中途消失） */
+  /**
+   * 翻页或滚动时如果控制条正显示着，重新计时（否则会在用户操作中途消失）。
+   * 注意两种滚动宿主：在线阅读滚的是 window，缓存中心离线阅读滚的是 .cache-overlay，
+   * 所以除 window 的 scroll 外，还要在阅读器根元素上听 wheel / touchmove。
+   */
   useEffect(() => {
     if (!chromeOn) return;
-    const onScroll = () => showChrome();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const bump = () => showChrome();
+    const el = rootRef.current;
+    window.addEventListener("scroll", bump, { passive: true });
+    el?.addEventListener("wheel", bump, { passive: true });
+    el?.addEventListener("touchmove", bump, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", bump);
+      el?.removeEventListener("wheel", bump);
+      el?.removeEventListener("touchmove", bump);
+    };
   }, [chromeOn, showChrome]);
 
   function onReaderTap(e: React.MouseEvent<HTMLDivElement>) {
@@ -813,7 +824,7 @@ export default function ReaderPanel({
    */
   const pagePct = total > 1 ? Math.min(100, Math.max(0, ((current - 1) / (total - 1)) * 100)) : 0;
   const toolbar = (
-    <div className={"reader-toolbar" + (chromeOn ? " show" : "")} aria-hidden={!chromeOn}>
+    <div className={"reader-toolbar" + (chromeOn ? " show" : "")} aria-hidden={!chromeOn} inert={!chromeOn}>
       <div className="rt-top">
         <button onClick={handleBack}>返回</button>
         <span className="rt-title one-line">{title}</span>

@@ -2,7 +2,7 @@
 // 纯展示组件——数据与动作全部由 ContentView 提供。
 // 极简要点：标题 18/500、元信息 13px 行距 5、简介默认 2 行可展开、分组行用浅灰面而不是卡片边框、
 // 页面下半部分刻意留空（不靠摊开间距把屏幕填满）。
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import CommentList from "../ui/CommentList";
 import { AlbumGrid } from "../ui/AlbumGrid";
 import { HeartIcon } from "../ui/icons";
@@ -54,8 +54,22 @@ export default function AlbumDetail({
   onSubmitComment
 }: Props) {
   const [descOpen, setDescOpen] = useState(false);
+  const [descClamped, setDescClamped] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [relatedOpen, setRelatedOpen] = useState(false);
+  const descRef = useRef<HTMLParagraphElement | null>(null);
+
+  /**
+   * 「展开」只在简介真的被截断时出现。
+   * 不能用字符数猜（44~60 字的简介在窄屏上已经被 clamp 掉，却没有展开入口 = 静默丢内容），
+   * 直接量 scrollHeight / clientHeight。
+   */
+  useLayoutEffect(() => {
+    if (descOpen) return; // 展开状态下不重算，保留「收起」入口
+    const el = descRef.current;
+    if (!el) return;
+    setDescClamped(el.scrollHeight > el.clientHeight + 1);
+  }, [descOpen, detail.id, detail.description]);
 
   const locked = parsePaid(detail);
   const authors = authorNames(detail);
@@ -114,8 +128,8 @@ export default function AlbumDetail({
 
       {desc && (
         <>
-          <p className={"d-desc" + (descOpen ? " open" : "")}>{desc}</p>
-          {desc.length > 60 && (
+          <p ref={descRef} className={"d-desc" + (descOpen ? " open" : "")}>{desc}</p>
+          {(descClamped || descOpen) && (
             <button className="d-more" onClick={() => setDescOpen((o) => !o)}>{descOpen ? "收起" : "展开"}</button>
           )}
         </>

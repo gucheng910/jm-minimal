@@ -42,7 +42,9 @@
       series: SERIES_CHAPTERS, series_id: SERIES_BOOK, price: "", purchased: false
     };
   };
-  const detail = (id) => ({ id, name: "详情" + id, author: ["作者甲", "作者乙"], tags: ["巨乳", "無修正", "中文"], actors: ["登场甲", "登场乙"], related_list: mk("REL", 3, "作者甲"), total_photos: 42, description: "简介文本", series: [], price: "", purchased: false });
+  // 简介故意给长文：窄屏下会被 -webkit-line-clamp:2 截断，用来验证「展开/收起」真的出现且能展开
+  const LONG_DESC = "简介文本" + "这是一段足够长的简介，用来验证详情页在窄屏下会把简介折叠成两行，并且提供展开入口；如果按字符数猜阈值，四十到六十字之间的简介会被静默截断，所以这里用真实溢出检测。".repeat(2);
+  const detail = (id) => ({ id, name: "详情" + id, author: ["作者甲", "作者乙"], tags: ["巨乳", "無修正", "中文"], actors: ["登场甲", "登场乙"], related_list: mk("REL", 3, "作者甲"), total_photos: 42, description: LONG_DESC, series: [], price: "", purchased: false });
   const json = (data) => new Response(JSON.stringify({ code: 200, data }), { status: 200, headers: { "content-type": "application/json" } });
   // 1x1 PNG：缓存中心/阅读器会真实 fetch 图片，桩必须给回可缓存响应（cachePage 要求 resp.ok）
   const PNG = (() => {
