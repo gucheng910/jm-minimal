@@ -11,7 +11,14 @@ npm run e2e                      # 自己起 dev server（5199）→ 导航 + �
 E2E_URL=http://127.0.0.1:5199/ npm run e2e    # 复用已在跑的 server
 E2E_SKIP_PTR=1 npm run e2e       # 跳过下拉刷新
 EDGE_PATH="C:/.../chrome.exe" npm run e2e     # 换浏览器（Edge / Chromium 均可）
+
+npm run build:compat && npm run e2e:compat    # 兼容包（老内核）自检：见下
 ```
+
+> **兼容包自检**（`npm run e2e:compat`）：把 `dist-compat` 复制到临时目录并**改造成"模拟老浏览器"页面**
+> （删掉现代入口 `<script type="module" src=index-*.js>` 与设置 `__vite_is_modern_browser` 的探测脚本），
+> 起静态服务器后用 harness 跑 `driver-legacy.js`，断言应用确实是由 **ES5 legacy 包 + SystemJS** 渲染出来的。
+> 这是"compat 包真的能在老内核跑"的唯一可信验证方式（现代浏览器默认会走现代包，看不出差别）。
 
 产物（gitignore）：`_archive/e2e/last-run.png` 截图、`_archive/e2e/profile-*/` 浏览器 profile。
 
@@ -25,7 +32,9 @@ EDGE_PATH="C:/.../chrome.exe" npm run e2e     # 换浏览器（Edge / Chromium �
 | `driver-cache.js` | 缓存中心/离线详情页：同书多话合并成一行、目录缓存徽标、未缓存话联网读、返回后目录仍在、已缓存话离线读（`?e2ecache=1` 预置 IDB + Cache API 数据）。**空 cache 必须判为「未缓存」**（stub 故意给第3话留了个空 cache，模拟历史版本 `caches.open` 副作用） |
 | `driver-history.js` | 连载详情补全书级作者/简介、足迹按「书」合并成一条、点足迹回到最后阅读的一话 |
 | `driver-reader.js` | 阅读器内弹窗：「更快的源」自动测速且弹窗不关闭、换话（标题/请求/按钮同步）、选话缓存（默认只选当前话 + 全选/反选 + 已缓存徽标 + 确认入队）；整本缓存后工具栏按钮变「已缓存」且 disabled |
-| `harness.mjs` | CDP 外壳：起浏览器、注入桩、执行 driver、打印结构化日志 |
+| `driver-legacy.js` | 兼容包自检：断言 `System` 已加载、`__vite_is_modern_browser` 未置位、React 已挂载、首页列表渲染出来 |
+| `compat.mjs` | `npm run e2e:compat` 的编排：改造 dist-compat → 起静态服务器 → 跑 driver-legacy → 清理 |
+| `harness.mjs` | CDP 外壳：起浏览器、注入桩、执行 driver、打印结构化日志；收尾按本次 profile 路径杀浏览器进程树（防残留） |
 | `ptr.mjs` | 下拉刷新专项：用 CDP 原生触摸（合成 DOM TouchEvent 在无触摸环境下 React 不挂监听） |
 | `run.mjs` | 编排：起 dev server → 跑全部用例 → 关 server |
 

@@ -62,8 +62,8 @@
 
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
-| PC + 前端 | package.json → version | 1.8.1 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 1.8.1 / versionCode 48 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| PC + 前端 | package.json → version | 1.8.2 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
+| Android | android/app/build.gradle → defaultConfig | versionName 1.8.2 / versionCode 49 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
 > ⚠️ 现值 = **1.8.1 / versionCode 48**（线上 Latest = v1.8.1）。
 > `tools/release.mjs` 会一次性同步 **6 处**：package.json、package-lock.json、android/app/build.gradle（versionName + versionCode）、
@@ -146,6 +146,9 @@ node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('rel
   - 两者 **minSdk 都是 24（Android 7.0+）**：实测把 minSdk 降到 21/23 会被 `org.apache.cordova:framework:14.0.1`（Capacitor 8 自带 Cordova 兼容层）挡住，
     报 `uses-sdk:minSdkVersion 21 cannot be smaller than version 24`；要突破只能 `tools:overrideLibrary`（官方警告可能运行时崩）或降级 Capacitor，收益低（那批设备 WebView 普遍跑不动）。
   - `index.html` 内置 ES5 兜底提示：内核连 Promise/fetch 都没有时显示「请更新系统 WebView」，不再白屏。
+- **验证兼容包真的能在老内核跑**：`npm run build:compat && npm run e2e:compat`——它把 dist-compat 改造成
+  "模拟老浏览器"页面（去掉现代入口与 `__vite_is_modern_browser` 探测脚本）再跑导航回归；
+  现代浏览器默认走现代包，直接打开 dist-compat 看不出任何差别。
 
 ### 4.1 命令
 

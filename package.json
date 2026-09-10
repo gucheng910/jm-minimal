@@ -1,6 +1,6 @@
 {
   "name": "jm-client",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "cap:sync": "cap sync android",
     "pc:pack": "vite build && electron-builder --win nsis portable",
-    "build:compat": "tsc --noEmit && vite build --mode compat"
+    "build:compat": "tsc --noEmit && vite build --mode compat",
+    "e2e:compat": "node tools/e2e/compat.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",
