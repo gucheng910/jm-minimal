@@ -35,6 +35,8 @@ export interface AppEvents {
   "jm:gotoDns": undefined;
   /** 登录态变化（登录/登出/自动续期）——各页面据此同步登录相关 UI */
   "jm:authChanged": undefined;
+  /** 请求打开换源浮层（会员页「诊断与线路」复用顶栏那一个浮层） */
+  "jm:openSource": undefined;
 }
 
 type EmitArgs<K extends keyof AppEvents> = AppEvents[K] extends undefined ? [] : [detail: AppEvents[K]];

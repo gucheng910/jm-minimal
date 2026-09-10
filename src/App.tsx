@@ -102,6 +102,8 @@ export default function App() {
     }
   }
   const [showSource, setShowSource] = useState(false);
+  // 会员页的「诊断与线路」默认折叠：线路 / 图源 / 协议版本 / 测速都是排障信息
+  const [diagOpen, setDiagOpen] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [backHint, setBackHint] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -531,6 +533,12 @@ export default function App() {
     return on("jm:gotoDns", h);
   }, []);
 
+  // 会员页「诊断与线路」里点换源 → 复用顶栏同一个换源浮层（一个功能只有一套 UI）
+  useEffect(() => {
+    const h = () => openSourcePanel();
+    return on("jm:openSource", h);
+  }, []);
+
   return (
     <div className={immersive ? "app immersive" : "app"}>
       <header className={"top-bar" + (scrolled ? " scrolled" : "")}>
@@ -547,11 +555,12 @@ export default function App() {
       </header>
       <main className="view-stack">
       <section className={tab === "member" ? "member-page" : "member-page view-hidden"}>
-      <div className="row">
-        <button disabled={state.busy} onClick={bootstrap}>初始化官方配置</button>
-        {logged && <button disabled={state.busy} onClick={handleLogout}>登出</button>}
-        {logged && <button disabled={state.busy} onClick={handleRefresh}>刷新会话</button>}
-      </div>
+      {logged && (
+        <div className="row member-top">
+          <button className="btn soft sm" disabled={state.busy} onClick={handleLogout}>登出</button>
+          <button className="btn soft sm" disabled={state.busy} onClick={handleRefresh}>刷新会话</button>
+        </div>
+      )}
       {state.error && (
         <div className="card err">
           {friendlyError(state.error)}
@@ -622,35 +631,37 @@ export default function App() {
       {/* DNS 加速引导（非登录态也可见，用于解决运营商 DNS 污染） */}
       <DnsGuide />
 
-      {state.apiBase && <div className="card"><h2>当前线路</h2><p className="mono">{state.apiBase}</p></div>}
-      {state.setting && (
-        <div className="card">
-          <h2>官方 setting / 线路与图源</h2>
-          <div className="row">
-            <label>线路
-              <select value={currentHost} onChange={(e) => handleLineChange(e.target.value)}>
-                {availableLines.map(([host, name]) => <option key={host} value={host}>{zh(name)}（{host}）</option>)}
-              </select>
-            </label>
-            <label>图源
-              <select value={client.imageShunt} onChange={(e) => handleShuntChange(e.target.value)}>
-                {Array.isArray(state.setting.app_shunts) && state.setting.app_shunts.length > 0
-                  ? state.setting.app_shunts.map((s) => <option key={String(s.key)} value={String(s.key)}>{String(s.title)}</option>)
-                  : <option value="1">图源1</option>}
-              </select>
-            </label>
-          </div>
-          <div className="row">
-            <button disabled={state.busy} onClick={runLineSpeed}>线路测速</button>
+      {/*
+        诊断与线路：默认折叠。这些是排障信息（当前线路 / 官方协议版本 / 图源域名 / 测速），
+        一年点一次，不该占据会员页首屏；线路与图源的"切换"统一走换源浮层，这里不重复放下拉框。
+      */}
+      <section className="card diag">
+        <button className="diag-head" onClick={() => setDiagOpen((o) => !o)} aria-expanded={diagOpen}>
+          <span>诊断与线路</span>
+          <span className="v">{currentHost ? zh(currentHost) : "未初始化"}</span>
+          <span className={"chev chev-toggle" + (diagOpen ? " open" : "")}>›</span>
+        </button>
+        {diagOpen && (
+          <div className="diag-body">
+            <p className="mono">{state.apiBase || "（尚未初始化官方配置）"}</p>
+            {state.setting && (
+              <p className="mono diag-meta">
+                jm3_version={state.setting.jm3_version} · ipcountry={state.setting.ipcountry} · img_host={String(state.setting.img_host || "")} · ad_cache_version={String(state.setting.ad_cache_version)}
+              </p>
+            )}
+            <div className="row diag-actions">
+              <button className="btn soft sm" onClick={() => { setMenuOpen(false); emit("jm:openSource"); }}>换源（图源 / 线路）</button>
+              <button className="btn soft sm" disabled={state.busy} onClick={runLineSpeed}>线路测速</button>
+              <button className="btn soft sm" disabled={state.busy} onClick={bootstrap}>初始化官方配置</button>
+            </div>
             {speedResult.length > 0 && (
               <ul className="speed-list">
                 {speedResult.map((r) => <li key={r.label} className={r.ok ? "ok" : "fail"}>{r.ok ? "✔" : "✘"} {r.label} · {r.ok ? r.ms + " ms" : "超时/失败"}</li>)}
               </ul>
             )}
           </div>
-          <p className="muted">jm3_version={state.setting.jm3_version} · ipcountry={state.setting.ipcountry} · img_host={String(state.setting.img_host || "")} · ad_cache_version={String(state.setting.ad_cache_version)}</p>
-        </div>
-      )}
+        )}
+      </section>
       {state.payment && (
         <div className="card">
           <h2>官方赞助</h2>

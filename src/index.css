@@ -2035,3 +2035,18 @@ body.jm-scroll-lock { overflow: hidden; }
 .tags button:active { transform: scale(0.95); }
 .app-sheet .sheet-scroll { flex: 1; min-height: 0; }
 
+/* ---------- 会员页「诊断与线路」（默认折叠，工具页风格） ---------- */
+.member-top { margin: 4px 0 12px; }
+.diag { padding: 0; overflow: hidden; }
+.diag-head {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 15px 18px; border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  transition: background var(--t-press) linear;
+}
+.diag-head:active { background: var(--surface-2); }
+.diag-head .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+.diag-body { padding: 0 18px 18px; }
+.diag-meta { color: var(--ink-3) !important; font-size: 12px !important; line-height: 1.7; }
+.diag-actions { gap: 8px; margin: 12px 0 4px; }
+
