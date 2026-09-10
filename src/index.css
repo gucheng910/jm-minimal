@@ -1964,6 +1964,48 @@ body.jm-scroll-lock { overflow: hidden; }
 }
 
 /* 工具行：共 N 部 + 排序胶囊（不套卡片） */
+/* ============================================================
+   宽屏（PC / Electron 默认窗口 1180×860）
+   原则：外壳与网格铺满，文字与控件块锁宽留白
+   · 封面网格 2（手机）→ 4（≥900）→ 6（≥1320）列
+   · 文字/控件块锁 640 居中；长文锁 476（约 34 汉字）
+   · 主按钮不再拉满整行
+   ============================================================ */
+@media (min-width: 900px) {
+  /* 顶栏/底栏/内容外壳：铺满窗口但内容对齐同一条列 */
+  .top-bar, .bottom-nav { max-width: 1080px; }
+  .app { max-width: 1080px; padding-left: 32px; padding-right: 32px; }
+  .sr-layer { max-width: 1080px; }
+
+  /* 封面网格：宽屏铺满 */
+  .list:not(.book-chapters) { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 18px; }
+  /* 话列表是"列表"，不是网格：宽屏也保持单列 */
+  .book-chapters { display: block; }
+
+  /* 文字/控件块：锁 640 居中，剩下的留白 */
+  .card, .tabs, .toolrow, .catrow, .searchbar, .seg { max-width: var(--col); margin-left: auto; margin-right: auto; }
+  .member-page { max-width: var(--col); margin-left: auto; margin-right: auto; }
+
+  /* 长文：再收到 476（约 34 汉字，见 W3C clreq） */
+  .d-title, .d-desc, .d-meta, .actrow, .d-tail, .comment-body, .book-desc { max-width: var(--measure); }
+
+  /* 主按钮不全宽：它只需要一个拇指够得着的尺寸 */
+  .actrow .btn.primary { flex: 0 0 auto; min-width: 200px; }
+
+  /* 缓存中心：外壳铺满、页头与话列表按列居中 */
+  .cache-overlay { padding-left: 32px; padding-right: 32px; }
+  .cache-overlay .cache-header, .cache-overlay .cache-tabs { max-width: var(--col); margin-left: auto; margin-right: auto; }
+  .cache-overlay .cache-list, .cache-overlay .list:not(.book-chapters) { max-width: 1080px; margin-left: auto; margin-right: auto; }
+  .cache-overlay .book-tags, .cache-overlay .book-desc { max-width: var(--measure); margin-left: auto; margin-right: auto; }
+  .cache-overlay .book-chapters { max-width: var(--measure); margin-left: auto; margin-right: auto; }
+}
+
+@media (min-width: 1320px) {
+  .top-bar, .bottom-nav, .app, .sr-layer { max-width: 1320px; }
+  .list:not(.book-chapters) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .cache-overlay .cache-list, .cache-overlay .list:not(.book-chapters) { max-width: 1320px; }
+}
+
 .toolrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 14px; }
 .toolrow .cnt { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .sortbtn {
