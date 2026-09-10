@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("jmUpdate", {
   check: () => ipcRenderer.invoke("jm:update:check"),
   // 主动作：安装版下载完成后退出并安装；便携版打开下载页
   act: () => ipcRenderer.invoke("jm:update:act"),
+  // 在文件夹里定位已下载的安装包（自动安装失败时手动装的兜底入口）
+  reveal: () => ipcRenderer.invoke("jm:update:reveal"),
   // 状态推送订阅，返回取消函数
   onState: (cb) => {
     const listener = (_ev, state) => { try { cb(state); } catch { /* ignore */ } };

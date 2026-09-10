@@ -26,6 +26,8 @@ export interface DesktopUpdateState {
 interface UpdateBridge {
   check(): Promise<DesktopUpdateState>;
   act(): Promise<DesktopUpdateState>;
+  /** 在文件夹里定位已下载的安装包（自动静默安装失败时的兜底） */
+  reveal?: () => Promise<{ ok: boolean; file?: string }>;
   onState(cb: (s: DesktopUpdateState) => void): () => void;
 }
 declare global {
@@ -94,6 +96,16 @@ export default function DesktopUpdate() {
     }
   }
 
+  /** 自动安装失败时的兜底：在资源管理器里选中已下载的安装包 */
+  async function doReveal() {
+    try {
+      const r = await bridge?.reveal?.();
+      if (!r || !r.ok) pushToast("没找到已下载的安装包，请到发布页手动下载", "err");
+    } catch {
+      pushToast("打开文件夹失败，请到发布页手动下载", "err");
+    }
+  }
+
   const label: Record<string, string> = {
     idle: nsis ? "检查更新" : "检查更新（便携版）",
     checking: "检查中…",
@@ -141,7 +153,15 @@ export default function DesktopUpdate() {
         </div>
       )}
       {downloaded && (
-        <p className="muted menu-note">更新已就绪：点击「重启并安装」将关闭当前程序并自动安装（漫画缓存与设置保留）</p>
+        <div className="menu-note">
+          <p className="muted">更新已就绪：点击「重启并安装」将关闭当前程序并自动安装（漫画缓存与设置保留）。</p>
+          <p className="muted">
+            若点击后长时间没有重新启动，多半是旧版本残留导致自动安装失败：
+            可先把本程序完全退出，再运行已下载的安装包（
+            <button className="menu-link" onClick={doReveal}>打开安装包位置</button>），
+            或到<button className="menu-link" onClick={() => openExternal(RELEASES_URL)}>发布页</button>手动下载。
+          </p>
+        </div>
       )}
       {phase === "error" && (
         <div className="menu-note">

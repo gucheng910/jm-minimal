@@ -293,6 +293,21 @@ gh auth status && gh release view v1.4.1 --repo gucheng910/jm-minimal --json ass
 - 机制：electron-builder 安装器升级 = 先静默卸载旧版（uninstallOldVersion，installUtil.nsh）→ 再装；**旧版 App 运行中**则卸载器删不掉文件 → 循环 5 次失败 → 安装器退出码 2（handleUninstallResult）→ 用户看到"错误"。
 - 正解：装前 Get-Process -Name 'JM极简版' | Stop-Process -Force；或交给应用内更新（先 quit 再装）。手动重装同理。
 - 附加：旧卸载器单独跑 exit 0 也可能**留空目录**（%LOCALAPPDATA%\Programs\jm-client），装前 Remove-Item -Recurse -Force 兜底。
+- **2026-09-10 复现记录（"PC 端点了更新没反应"的真凶）**：本机装的是早期调试包（exe/package.json 版本号 1.3.1，但 asar 里已含 updater.cjs）。
+  现象链：应用内检查 ✓ 发现 1.8.3 → 差分下载 sha512 不匹配 → 自动退化为整包下载 ✓ 落盘到
+  `%LOCALAPPDATA%\jm-client-updater\pending\jm-minimal-setup-1.8.3.exe` → 点「重启并安装」→ **安装器退出码 2**（旧版卸载步骤失败）→ App 已退出、版本没变，
+  用户视角就是"点了没反应"。手工执行旧卸载器（`Uninstall JM极简版.exe /S`，exit 0、留空目录）后同一个安装器 **exit 0 装好 1.8.3**。
+- 排查命令（照抄）：
+  ```powershell
+  # 看装的是哪版（exe 元数据可能与实际代码不符，以 asar 内 package.json 为准）
+  Get-ChildItem "$env:LOCALAPPDATA\Programs\jm-client" -Filter *.exe | ForEach-Object { $_.Name + " " + $_.VersionInfo.FileVersion }
+  # 触发一次真实检查（临时调试包带 JM_UPDATE_SMOKE 钩子时）
+  $env:JM_UPDATE_SMOKE="1"; Start-Process "$env:LOCALAPPDATA\Programs\jm-client\JM极简版.exe" -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+  # 手动装（先确保进程退出）
+  Get-Process -Name 'JM极简版' -ErrorAction SilentlyContinue | Stop-Process -Force
+  Start-Process "$env:LOCALAPPDATA\jm-client-updater\pending\jm-minimal-setup-<ver>.exe" -ArgumentList '/S' -Wait -PassThru
+  ```
+- 兜底入口（1.8.4 起）：更新卡在「已就绪」时提供「打开安装包位置」，直接定位已下载的安装包手动安装。
 
 ### 8.2 oneClick 安装器无目录选择
 - NSIS 默认 oneClick=true（固定装 %LOCALAPPDATA%\Programs\jm-client，免管理员、无向导）。要自选位置 → 用 portable 版；不建议改 assisted。
@@ -324,8 +339,11 @@ gh auth status && gh release view v1.4.1 --repo gucheng910/jm-minimal --json ass
 - 临时钩子法：给 main.cjs 加 if (process.env.JM_SMOKE) 诊断块（打印状态/定时 app.exit），打包跑完即删。本次 DNS 清洗与更新链路均用此法验证。
 - 更新事件由主进程推送渲染层；main 侧轮询 getState() 打日志最简单。
 
-### 8.10 asar 列目录的坑
-- npx asar list … | Select-String 里正则反斜杠/管道容易失配（曾出现"搜不到实际存在文件"的假阴性）。输出到文件后用 findstr /C:"…" 或 Select-String -SimpleMatch。
+### 8.10 asar 工具的两个坑
+- `npx asar list … | Select-String` 里正则反斜杠/管道容易失配（曾出现"搜不到实际存在文件"的假阴性）。输出到文件后用 findstr /C:"…" 或 Select-String -SimpleMatch。
+- **`npx asar extract-file <asar> package.json` 会把文件写到「当前工作目录」**——在仓库根执行会当场覆盖本仓库的 package.json
+  （2026-09-10 实际发生：仓库 package.json 被装成安装包里的 1.3.1 精简版，scripts/devDependencies 全丢，`git checkout -- package.json` 恢复）。
+  正确做法：`npx asar extract <asar> <临时目录>` 解到临时目录再看。
 
 ### 8.11 Android "modern/compat" 的历史与现状
 - **1.8.1 及以前**：gradle 无变体，两个 APK **字节完全相同**（`copyFileSync` 复制改名），README 里"compat 供旧系统"属遗留文案——用户实测发现后于 1.8.2 修正。

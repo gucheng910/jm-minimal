@@ -111,6 +111,19 @@ if (!gotLock) {
     });
     ipcMain.handle("jm:update:check", () => desktopUpdater.check());
     ipcMain.handle("jm:update:act", () => desktopUpdater.act());
+    // 兜底：自动安装失败时（旧版残留导致 NSIS 卸载步骤退出码 2），让用户直接拿到已下载的安装包手动装
+    ipcMain.handle("jm:update:reveal", () => {
+      const dir = path.join(process.env.LOCALAPPDATA || app.getPath("userData"), "jm-client-updater", "pending");
+      try {
+        const files = fs.existsSync(dir)
+          ? fs.readdirSync(dir).filter((f) => /\.exe$/i.test(f)).map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+          : [];
+        if (files.length === 0) return { ok: false };
+        files.sort((a, b) => b.t - a.t);
+        shell.showItemInFolder(path.join(dir, files[0].f));
+        return { ok: true, file: path.join(dir, files[0].f) };
+      } catch { return { ok: false }; }
+    });
     global.__jmUpdater = desktopUpdater;
 
     await win.loadURL("http://127.0.0.1:" + port + "/");
