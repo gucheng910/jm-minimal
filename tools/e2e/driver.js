@@ -35,11 +35,30 @@
   await sleep(600);
   snap("home");
 
+  // ---- 首页分段：推荐（random_recommend）/ 最新（/latest）----
+  const latestTab = qa(".tabs .tk").find((b) => (b.textContent || "").trim() === "最新");
+  if (latestTab) {
+    latestTab.click();
+    await sleep(2500);
+    log.push({
+      step: "home-latest",
+      tabs: qa(".tabs .tk").map((t) => (t.textContent || "").trim()),
+      active: (q(".tabs .tk.on") || {}).textContent || "",
+      cards: qa(".list-item").length,
+      reqs: (window.__reqs || []).filter((r) => r.path === "latest").slice(-1),
+      loadMoreBtn: qa("button").some((b) => (b.textContent || "").trim() === "加载更多"),
+      sentinel: !!q(".cat-sentinel")
+    });
+    const recTab = qa(".tabs .tk").find((b) => (b.textContent || "").trim() === "推荐");
+    if (recTab) { recTab.click(); await sleep(1800); }
+  }
+
   // 下拉刷新用 CDP 原生触摸单独验证（见 _archive/ptr-cdp.mjs）：
   // 合成 DOM TouchEvent 在无触摸的桌面环境下 React 不会挂监听，测不出真实行为
 
   // ---- 周榜页（mode === "week"）回归 ----
-  const rankBtn = qa("button").find((b) => (b.textContent || "").trim() === "排行榜");
+  // 首页改版后：周榜入口是「每周必看」分段（原先是「排行榜」按钮）
+  const rankBtn = qa("button").find((b) => (b.textContent || "").trim() === "每周必看");
   if (rankBtn) {
     rankBtn.click();
     await waitFor(".card h2", 15000);
@@ -283,6 +302,11 @@
     });
     // 桩里 jm3_version 比客户端 APP_VERSION 新 → 必须出现漂移提示（否则说明判据失效）
     if (!driftWarning) throw new Error("协议漂移提示未出现（桩 jm3_version=2.1.7，客户端 APP_VERSION 见 constants.ts）");
+    // 抽屉是浮层：返回键应先关抽屉（不跳页、不退 App）
+    back();
+    await sleep(700);
+    log.push({ step: "back-closes-drawer", drawerStillOpen: !!q(".side-drawer.open"), navTab: (q(".nav-item.active") || {}).textContent || "" });
+    if (q(".side-drawer.open")) throw new Error("返回键没有关掉侧边抽屉");
     q(".menu-backdrop")?.click();
     await sleep(600);
   }

@@ -10,6 +10,7 @@ import { useBackHandler } from "./hooks/useBackHandler";
 import { popSheetLock, pushSheetLock } from "./core/uiLocks";
 import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
+import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
 import type { ReadPage } from "./core/types";
 import type { BookMeta } from "./core/offlineMeta";
@@ -183,6 +184,7 @@ export default function ReaderPanel({
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sourceRows, setSourceRows] = useState<Array<{ key: string; title: string; host?: string; ms?: number; ok?: boolean }>>([]);
   const [chapOpen, setChapOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
   const [cacheSel, setCacheSel] = useState<Set<string>>(new Set());
   const [cachedIds, setCachedIds] = useState<Map<string, CachedChapterInfo>>(new Map());
@@ -239,18 +241,20 @@ export default function ReaderPanel({
    * 必须「只注册一次」：jm:back 按注册顺序派发，若依赖弹窗状态重新注册，
    * 监听器会被排到父级之后 → 父级先消费 → 直接退出阅读器（真机反馈的 bug）。
    */
-  const dialogRef = useRef({ sourceOpen: false, chapOpen: false, cacheOpen: false });
-  dialogRef.current = { sourceOpen, chapOpen, cacheOpen };
+  const dialogRef = useRef({ sourceOpen: false, chapOpen: false, cacheOpen: false, settingsOpen: false });
+  dialogRef.current = { sourceOpen, chapOpen, cacheOpen, settingsOpen };
   useBackHandler(() => {
     const d = dialogRef.current;
     if (d.sourceOpen) { closeSourcePicker(); return; }
+    if (d.settingsOpen) { setSettingsOpen(false); return; }
     if (d.chapOpen) { setChapOpen(false); return; }
     if (d.cacheOpen) { setCacheOpen(false); return; }
     return false;
   }, []);
 
   // 有弹窗时给父级一个信号：不要消费返回键（缓存中心的返回监听注册得更早）
-  const anySheetOpen = sourceOpen || chapOpen || cacheOpen;
+  // 注意：新增阅读器弹窗必须同时加进 dialogRef 和这里，否则系统返回键会直接退出阅读器
+  const anySheetOpen = sourceOpen || chapOpen || cacheOpen || settingsOpen;
   useEffect(() => {
     if (!anySheetOpen) return;
     pushSheetLock();
@@ -833,42 +837,38 @@ export default function ReaderPanel({
       <div className="rt-bottom">
         <div className="rt-progress" aria-hidden="true"><i style={{ width: pagePct + "%" }} /></div>
         <div className="rt-tools">
-          {!offline && <button disabled={testing} onClick={openSourcePicker} title="测速并选择图源">{testing ? "测速中…" : "更快的源"}</button>}
+          {!offline && (
+            <button className="rt-tool" disabled={testing} onClick={openSourcePicker} title="测速并选择图源">
+              <LightningIcon size={20} />
+              <span>{testing ? "测速中…" : "更快的源"}</span>
+            </button>
+          )}
           {chapters.length > 1 && (
-            <button onClick={() => { void refreshCached(); setChapOpen(true); }} title="切换话数">
-              {switchBusy ? "切换中…" : (curLabel || "换话")}
+            <button className="rt-tool" onClick={() => { void refreshCached(); setChapOpen(true); }} title="切换话数">
+              <MenuIcon size={20} />
+              <span>{switchBusy ? "切换中…" : (curLabel || "换话")}</span>
             </button>
           )}
           {allCached && !cacheTaskBusy ? (
-            <button className="btn-cached" disabled title="本作品已全部缓存">已缓存</button>
+            <button className="rt-tool btn-cached" disabled title="本作品已全部缓存">
+              <DownloadIcon size={20} />
+              <span>已缓存</span>
+            </button>
           ) : (
             <button
+              className="rt-tool"
               disabled={!pages.length || cacheTaskBusy}
               onClick={openCacheDialog}
               title={chapters.length > 1 ? "选择要缓存的话数" : "缓存本话"}
             >
-              {cacheTaskBusy
-                ? <span className="mono-num">{"缓存中 " + (task?.done ?? 0) + "/" + (task?.total ?? 0)}</span>
-                : "缓存"}
+              <DownloadIcon size={20} />
+              <span>{cacheTaskBusy ? <span className="mono-num">{"缓存中 " + (task?.done ?? 0) + "/" + (task?.total ?? 0)}</span> : "缓存"}</span>
             </button>
           )}
-          {!offline && (
-            <button
-              className={deseam ? "btn-deseam on" : ""}
-              onClick={toggleDeseam}
-              title="通过简单算法尝试去除部分漫画中的条纹（本地处理，不消耗额外流量）；亮=显示修复后，灭=显示原图"
-            >
-              {deseam ? "去条纹 ✓" : "去条纹"}
-            </button>
-          )}
-          <button onClick={() => setMode(mode === "continuous" ? "single" : "continuous")}>{mode === "continuous" ? "切单页" : "切连续"}</button>
-        </div>
-        <div className="rt-nav">
-          <button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button>
-          <input className="page-input mono-num" value={jumpInput} onChange={(e) => setJumpInput(e.target.value)} inputMode="numeric" onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }} />
-          <span className="muted mono-num">/{total}</span>
-          <button disabled={current >= total} onClick={() => jumpTo(current + 1)}>下一页</button>
-          {mode === "continuous" && current > 1 && <button onClick={() => jumpTo(1)}>回到开头</button>}
+          <button className="rt-tool" onClick={() => setSettingsOpen(true)} title="阅读设置：模式 / 去条纹 / 跳页">
+            <SettingsIcon size={20} />
+            <span>设置</span>
+          </button>
         </div>
       </div>
     </div>
@@ -906,6 +906,61 @@ export default function ReaderPanel({
             </div>
             <div className="row sheet-actions">
               <button disabled={testing} onClick={() => { void runSpeedTest(); }}>{testing ? "测速中…" : "重新测速"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 阅读设置：模式 / 去条纹 / 跳页（原来这些都摊在工具栏上，阅读时太吵） */}
+      {settingsOpen && (
+        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => setSettingsOpen(false)}>
+          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-head">
+              <h3>阅读设置</h3>
+              <button className="ghost" onClick={() => setSettingsOpen(false)}>关闭</button>
+            </div>
+            <p className="muted">阅读模式</p>
+            <div className="sheet-list">
+              <button
+                className={"list-item sheet-row" + (mode === "continuous" ? " active" : "")}
+                onClick={() => setMode("continuous")}
+              >
+                <div><div className="title">连续滚动</div><div className="muted">上下滚动，图片铺满整宽</div></div>
+                <span className={"badge" + (mode === "continuous" ? " ok" : "")}>{mode === "continuous" ? "✓" : ""}</span>
+              </button>
+              <button
+                className={"list-item sheet-row" + (mode === "single" ? " active" : "")}
+                onClick={() => setMode("single")}
+              >
+                <div><div className="title">单页</div><div className="muted">点左右两侧翻页</div></div>
+                <span className={"badge" + (mode === "single" ? " ok" : "")}>{mode === "single" ? "✓" : ""}</span>
+              </button>
+            </div>
+            <p className="muted">显示</p>
+            <div className="row sheet-actions settings-actions">
+              {!offline && (
+                <button
+                  className={deseam ? "btn-deseam on" : ""}
+                  onClick={toggleDeseam}
+                  title="通过简单算法尝试去除部分漫画中的条纹（本地处理，不消耗额外流量）；亮=显示修复后，灭=显示原图"
+                >
+                  {deseam ? "去条纹 ✓" : "去条纹"}
+                </button>
+              )}
+            </div>
+            <p className="muted">跳到第几页</p>
+            <div className="row sheet-actions settings-actions">
+              <button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button>
+              <input
+                className="page-input mono-num"
+                value={jumpInput}
+                onChange={(e) => setJumpInput(e.target.value)}
+                inputMode="numeric"
+                onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }}
+              />
+              <span className="muted mono-num">/{total}</span>
+              <button disabled={current >= total} onClick={() => jumpTo(current + 1)}>下一页</button>
+              {current > 1 && <button onClick={() => jumpTo(1)}>回到开头</button>}
             </div>
           </div>
         </div>

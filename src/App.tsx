@@ -5,7 +5,7 @@ import { client } from "./core/api";
 import { measureAll } from "./core/speed";
 import type { SpeedSample } from "./core/speed";
 import { sessionStore } from "./core/storage";
-import { BookIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon, UserIcon } from "./ui/icons";
+import { BookIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, SearchIcon, UserIcon } from "./ui/icons";
 import SourceSheet from "./ui/SourceSheet";
 import { zh } from "./core/zh";
 import { authService } from "./state/auth";
@@ -13,6 +13,7 @@ import ContentView from "./ContentView";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { emit, on } from "./core/bus";
 import { useLoggedIn } from "./hooks/useLoggedIn";
+import { useBackHandler } from "./hooks/useBackHandler";
 import ToastHost, { pushToast } from "./ui/toast";
 import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
@@ -104,6 +105,9 @@ export default function App() {
   const [showSource, setShowSource] = useState(false);
   // 会员页的「诊断与线路」默认折叠：线路 / 图源 / 协议版本 / 测速都是排障信息
   const [diagOpen, setDiagOpen] = useState(false);
+  // 会员页分组行里的展开态：签到（活动信息 + 立即签到）、账号（资料 + 兑换）
+  const [dailyOpen, setDailyOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [backHint, setBackHint] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -115,6 +119,9 @@ export default function App() {
   const [showCache, setShowCache] = useState(false);
   const [libPanel, setLibPanel] = useState<null | "favorite" | "history">(null);
   const lastBackRef = useRef(0);
+  // 侧边抽屉是否打开（返回键优先关抽屉；用 ref 读，避免原生监听随状态反复重注册）
+  const menuOpenRef = useRef(false);
+  menuOpenRef.current = menuOpen;
 
   useEffect(() => {
     return on("jm:immersive", (v) => setImmersive(Boolean(v)));
@@ -211,6 +218,13 @@ export default function App() {
       authService.reloginFromStoredAccount().then((info) => { if (info) setMember(info); }).catch(() => { /* ignore */ });
     };
     return on("jm:coinChanged", handler);
+  }, []);
+
+  // 侧边抽屉是浮层：返回键先关抽屉，不做页面跳转。
+  // App 在挂载时就注册（早于阅读器/缓存中心），因此是链上第一个；抽屉没开时返回 false 放行。
+  useBackHandler(() => {
+    if (!menuOpenRef.current) return false;
+    setMenuOpen(false);
   }, []);
 
   useEffect(() => {
@@ -559,12 +573,6 @@ export default function App() {
       </header>
       <main className="view-stack">
       <section className={tab === "member" ? "member-page" : "member-page view-hidden"}>
-      {logged && (
-        <div className="row member-top">
-          <button className="btn soft sm" disabled={state.busy} onClick={handleLogout}>登出</button>
-          <button className="btn soft sm" disabled={state.busy} onClick={handleRefresh}>刷新会话</button>
-        </div>
-      )}
       {state.error && (
         <div className="card err">
           {friendlyError(state.error)}
@@ -597,35 +605,72 @@ export default function App() {
           <p className="muted">登录/会话/兑换均走官方后端；本地不做任何账务修改。</p>
         </form>
       ) : (
-        <div className="card">
-          <h2>会员中心（官方数据）</h2>
-          <div className="grid2">
-            <span>账号：{fmt(member?.username)}</span>
-            <span>等级：{fmt(member?.level)}</span>
-            <span>UID：{fmt(member?.uid)}</span>
-            <span>JCoin：{fmt(member?.coin)}</span>
-            <span>充能：{fmt(member?.charge)}</span>
-            <span>J罐：{fmt(member?.jar)}</span>
-            <span>经验：{fmt(member?.exp)}</span>
-            <span>无广告：{member?.ad_free ? "是（超级JM人）" : "否"}</span>
-            <span>到期：{fmt(member?.ad_free_before)}</span>
+        <div className="member-body">
+          <h2 className="member-title">会员中心（官方数据）</h2>
+
+          <p className="sectitle">我的</p>
+          <div className="group">
+            <button className="grow" disabled={state.busy} onClick={() => setLibPanel("favorite")}>
+              <span>收藏</span><span className="chev">›</span>
+            </button>
+            <button className="grow" disabled={state.busy} onClick={() => setLibPanel("history")}>
+              <span>足迹</span><span className="chev">›</span>
+            </button>
+            <button className="grow" onClick={() => { setShowCache(true); }}>
+              <span>离线缓存</span><span className="chev">›</span>
+            </button>
           </div>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button className="ghost" disabled={state.busy} onClick={() => setLibPanel("favorite")}><BookIcon size={16} /> 我的收藏</button>
-            <button className="ghost" disabled={state.busy} onClick={() => setLibPanel("history")}><ClockIcon size={16} /> 我的足迹</button>
+
+          <p className="sectitle">账号</p>
+          <div className="group">
+            <button className="grow" disabled={state.busy} onClick={() => setDailyOpen((o) => !o)} aria-expanded={dailyOpen}>
+              <span>每日签到</span>
+              <span className="v" style={signedToday(daily) ? { color: "var(--ok)" } : undefined}>
+                {signedToday(daily) ? "已签到" : "今天还没签"}
+              </span>
+              <span className={"chev chev-toggle" + (dailyOpen ? " open" : "")}>›</span>
+            </button>
+            {dailyOpen && (
+              <div className="grow-body">
+                {daily ? (
+                  <>
+                    <p className="muted grow-note">
+                      活动：{String(daily.event_name || "")} · 3天奖励 {String(daily.three_days_coin ?? "")}币/{String(daily.three_days_exp ?? "")}经验 · 7天奖励 {String(daily.seven_days_coin ?? "")}币/{String(daily.seven_days_exp ?? "")}经验
+                    </p>
+                    <button className="btn soft sm" disabled={state.busy} onClick={doCheckIn}>立即签到</button>
+                  </>
+                ) : (
+                  <button className="btn soft sm" disabled={state.busy} onClick={() => { void loadDaily(); }}>加载签到活动</button>
+                )}
+              </div>
+            )}
+            <button className="grow" onClick={() => setAccountOpen((o) => !o)} aria-expanded={accountOpen}>
+              <span>{fmt(member?.username)}</span>
+              <span className="v">JCoin {fmt(member?.coin)}</span>
+              <span className={"chev chev-toggle" + (accountOpen ? " open" : "")}>›</span>
+            </button>
+            {accountOpen && (
+              <div className="grow-body">
+                <div className="grid2 member-grid">
+                  <span>等级：{fmt(member?.level)}</span>
+                  <span>UID：{fmt(member?.uid)}</span>
+                  <span>充能：{fmt(member?.charge)}</span>
+                  <span>J罐：{fmt(member?.jar)}</span>
+                  <span>经验：{fmt(member?.exp)}</span>
+                  <span>无广告：{member?.ad_free ? "是" : "否"}</span>
+                  <span>到期：{fmt(member?.ad_free_before)}</span>
+                </div>
+                <div className="row grow-actions">
+                  <button className="btn soft sm" disabled={state.busy} onClick={() => officialAction("3充能兑换1天无广告", () => client.redeemAdFree("day"))}>3充能→1天无广告</button>
+                  <button className="btn soft sm" disabled={state.busy} onClick={() => officialAction("1J罐兑换30天无广告", () => client.redeemAdFree("month"))}>1J罐→30天无广告</button>
+                  <button className="btn soft sm" disabled={state.busy} onClick={() => officialAction("10000JCoin换1充能", () => client.buyCharge())}>JCoin→充能</button>
+                  <button className="btn soft sm" disabled={state.busy} onClick={handleRefresh}>刷新会话</button>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="row">
-            <button disabled={state.busy} onClick={() => officialAction("3充能兑换1天无广告", () => client.redeemAdFree("day"))}>3充能→1天无广告</button>
-            <button disabled={state.busy} onClick={() => officialAction("1J罐兑换30天无广告", () => client.redeemAdFree("month"))}>1J罐→30天无广告</button>
-            <button disabled={state.busy} onClick={() => officialAction("10000JCoin换1充能", () => client.buyCharge())}>JCoin→充能</button>
-            <button disabled={state.busy} onClick={loadDaily}>签到活动</button>
-          </div>
-          {daily && (
-            <div style={{ marginTop: 8 }}>
-              <p className="muted">活动：{String(daily.event_name || "")} · 3天奖励 {String(daily.three_days_coin ?? "")}币/{String(daily.three_days_exp ?? "")}经验 · 7天奖励 {String(daily.seven_days_coin ?? "")}币/{String(daily.seven_days_exp ?? "")}经验</p>
-              <button disabled={state.busy} onClick={doCheckIn}>立即签到</button>
-            </div>
-          )}
+
+          <button className="btn soft" style={{ width: "100%" }} disabled={state.busy} onClick={handleLogout}>登出</button>
         </div>
       )}
 
@@ -698,52 +743,46 @@ export default function App() {
       </nav>
 
       <div className={"menu-backdrop" + (menuOpen ? " open" : "")} onClick={() => setMenuOpen(false)} />
-      <div className={"side-drawer" + (menuOpen ? " open" : "")}>
-        <div className="menu-head">
+      <aside className={"side-drawer" + (menuOpen ? " open" : "")}>
+        {/* 头部：图标 + 名称 + 版本（一眼看到装的是哪版、对的是哪版协议） */}
+        <div className="drawer-head">
           <img className="menu-logo" src="./icons/icon-192.png" alt="JM极简版" />
-          <span className="app-name">JM极简版</span>
+          <div className="drawer-id">
+            <div className="drawer-name">JM极简版</div>
+            <div className="drawer-ver">v{LOCAL_VERSION}</div>
+          </div>
         </div>
-        <div className="menu-body">
-          <div className="menu-section">
-            <h4>官方广告位</h4>
+        <div className="drawer-body">
+          <div className="drawer-sec">
+            <h5>官方广告位</h5>
             <AdMenuBanner open={menuOpen} />
           </div>
-          <div className="menu-section">
-            <h4>官方赞助</h4>
-            <button className="menu-plan" onClick={() => openExternal("https://comic18j-bibi.me/payment?link=homepage_icon")}>
-              <span className="plan-name">前往官方赞助页面</span>
-              <span className="plan-price">→</span>
+          <div className="drawer-sec">
+            <h5>支持</h5>
+            <button className="ditem" onClick={() => openExternal("https://comic18j-bibi.me/payment?link=homepage_icon")}>
+              <span>前往官方赞助页面</span><span className="v">↗</span>
             </button>
-            <p className="muted menu-note">赞助支持项目持续更新；支付后权益自动生效</p>
-          </div>
-          <div className="menu-section">
-            <h4>GitHub 仓库</h4>
-            <button className="menu-link" onClick={() => openExternal(REPO_URL)}>
-              github.com/gucheng910/jm-minimal ↗
+            <button className="ditem" onClick={() => openExternal(REPO_URL)}>
+              <span>GitHub 仓库</span><span className="v">↗</span>
             </button>
           </div>
-          <div className="menu-section">
-            <button className="menu-link" onClick={() => setTosOpen(true)}>使用须知</button>
-          </div>
-          <div className="menu-section">
-            <button className="theme-toggle" onClick={() => setDark((d) => !d)}>
-              <span className="theme-toggle-left">
-                {dark ? <MoonIcon size={18} /> : <SunIcon size={18} />}
-                {dark ? "深色模式" : "浅色模式"}
-              </span>
-              <span className={"theme-toggle-switch" + (dark ? " on" : "")} />
+          <div className="drawer-sec">
+            <h5>设置</h5>
+            <button className="ditem" onClick={() => setDark((d) => !d)}>
+              <span>深色模式</span>
+              <span className={"switch" + (dark ? " on" : "")} aria-hidden="true"><i /></span>
             </button>
-          </div>
-          <div className="menu-section">
-            <h4>版本</h4>
-            <p className="muted menu-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}{BUILD_VARIANT === "compat" ? " · 兼容包" : ""}）</p>
+            <button className="ditem" onClick={() => setTosOpen(true)}>
+              <span>使用须知</span><span className="v">›</span>
+            </button>
+            <p className="muted menu-note drawer-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}{BUILD_VARIANT === "compat" ? " · 兼容包" : ""}）</p>
             {protoDrift && (
               <p className="err small-err">官方协议已更新到 {onlineProto}，当前客户端按 {APP_VERSION} 通信；若出现异常请留意后续版本</p>
             )}
             {isDesktop ? <DesktopUpdate /> : <UpdateSection />}
           </div>
         </div>
-      </div>
+      </aside>
       <SourceSheet
         open={showSource}
         onClose={() => setShowSource(false)}

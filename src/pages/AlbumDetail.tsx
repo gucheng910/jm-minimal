@@ -82,12 +82,15 @@ export default function AlbumDetail({
 
   return (
     <div className="card detail-card">
-      <button className="backtxt" onClick={onBack}>
-        <svg className="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
-        {backLabel}
-      </button>
-
-      <h2 className="d-title">{detail.name}</h2>
+      {/* 返回：横排两字「返回」，放在标题"前面"（同一行左侧）而不是标题上方占一整行。
+          完整语义（返回列表 / 返回搜索结果）留给 aria-label，视觉上不占地方。 */}
+      <div className="d-head">
+        <button className="backtxt" onClick={onBack} aria-label={backLabel}>
+          <svg className="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+          返回
+        </button>
+        <h2 className="d-title">{detail.name}</h2>
+      </div>
 
       <p className="muted d-meta">作者 {authors.length > 0
         ? authors.map((a, i) => (

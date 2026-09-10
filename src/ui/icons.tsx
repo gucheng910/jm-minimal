@@ -18,6 +18,9 @@ export function MoonIcon(p: IconProps) { return <Svg {...p}><path d="M21 12.8A9 
 export function SunIcon(p: IconProps) { return <Svg {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>; }
 export function LightningIcon(p: IconProps) { return <Svg {...p}><path d="M13 2L3 14h7l-1 8 10-10h-7l1-8Z" /></Svg>; }
 export function CheckIcon(p: IconProps) { return <Svg {...p}><path d="m5 13 4 4 10-10" /></Svg>; }
+export function SettingsIcon(p: IconProps) {
+  return <Svg {...p}><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2M12 18.5v2M4.9 7.4l1.7 1M17.4 15.6l1.7 1M4.9 16.6l1.7-1M17.4 8.4l1.7-1" /></Svg>;
+}
 export function HeartIcon({ filled, ...p }: IconProps & { filled?: boolean }) {
   return <Svg {...p}><path d="M12 20s-7-4.4-7-9.3A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.7C19 15.6 12 20 12 20z" fill={filled ? "currentColor" : "none"} /></Svg>;
 }

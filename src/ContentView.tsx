@@ -101,6 +101,16 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     return on("jm:setting", h);
   }, []);
 
+  // 首页分段：推荐（随机推荐接口）/ 最新；「每周必看」是跳去周榜页，不占分段位
+  const [homeFeed, setHomeFeed] = useState<"random" | "latest">("random");
+  function pickHomeFeed(key: string) {
+    if (key === "weekly") { gotoPage("ranking"); return; }
+    const next = key === "latest" ? "latest" : "random";
+    setHomeFeed(next);
+    if (next === "latest") void home.loadLatest();
+    else void home.loadRandom();
+  }
+
   // 记录离开列表（进入详情/周榜）前的滚动位置，返回时恢复，避免找漫翻页丢失
   const listScrollRef = useRef(0);
   // 离开详情页的序号：每次 exitDetail/exitWeek 递增，进入详情页时同步递增
@@ -372,7 +382,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     album.setComments(null);
     setMode("home");
     window.scrollTo({ top: 0 });
-    void home.loadRandom();
+    // 按当前分段重载：在「最新」上重试就不该把列表换成随机推荐
+    if (homeFeed === "latest") void home.loadLatest();
+    else void home.loadRandom();
   }
 
   // from="list"：从任意列表进入（重置页面栈）；from="search"：从搜索结果页点进（背后保留搜索页）
@@ -607,8 +619,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         busy={home.busy}
         error={home.error}
         gridKey={"g" + settingTick}
-        onLatest={() => gotoPage("latest")}
-        onRanking={() => gotoPage("ranking")}
+        feed={homeFeed}
+        onPickFeed={pickHomeFeed}
         onRetry={retryHomeFeed}
         onGotoDns={() => emit("jm:gotoDns")}
         onLoadMore={home.loadMore}

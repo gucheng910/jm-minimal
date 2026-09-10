@@ -124,7 +124,7 @@ export default function SearchFeed({
             <span className="cnt">{total > 0 ? "已加载 " + items.length + " / 共 " + total.toLocaleString("zh-CN") + " 部" : ""}</span>
             <button className="sortbtn" type="button" onClick={() => setSortOpen(true)} data-sort-toggle>
               <svg className="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14m0 0l-3-3m3 3l3-3M17 19V5m0 0l-3 3m3-3l3 3" /></svg>
-              {sortLabel}
+              排序：{sortLabel}
             </button>
           </div>
           {error && <div className="card err">{error}</div>}

@@ -389,7 +389,7 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
   /* 触屏设备：关闭悬停态，避免"粘住"的 hover 背景 */
   button.ghost:hover { background: var(--surface); }
   .menu-btn:hover, .top-actions button:hover { background: transparent; color: var(--ink-2); }
-  .list-item:hover { box-shadow: var(--sh-1); transform: none; }
+  .list-item:hover { box-shadow: none; transform: none; }
 }
 
 /* 次级按钮 */
@@ -516,10 +516,11 @@ h3 { font-size: 14px; margin: 4px 0; }
 }
 
 /* ---------- 作品网格（封面在上，标题在下） ---------- */
+/* 作品网格：封面 + 标题 + 作者，没有卡片底、没有阴影（行距 28/26 是设计稿值） */
 .list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 28px 14px;
   padding: 4px 0;
   animation: rise-in 0.24s ease both;
 }
@@ -529,18 +530,19 @@ h3 { font-size: 14px; margin: 4px 0; }
   flex-direction: column;
   align-items: stretch;
   text-align: left;
-  background: var(--surface);
+  background: none;
   border: 0;
   color: inherit;
   padding: 0;
-  border-radius: var(--r-md);
-  overflow: hidden;
-  box-shadow: var(--sh-1);
-  transition: box-shadow 0.18s ease, transform 0.12s ease;
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none;
+  transition: transform 0.12s ease;
 }
 .list-item { content-visibility: auto; contain-intrinsic-size: auto 230px; }
 .list-item:active { transform: scale(0.97); }
 
+/* 封面自己带 12px 圆角（原来靠卡片裁切，现在卡片没了） */
 .list-item > .thumb-box,
 .list-item > .thumb,
 .list-item > .thumb-box > .thumb,
@@ -548,7 +550,7 @@ h3 { font-size: 14px; margin: 4px 0; }
   width: 100%;
   height: auto;
   aspect-ratio: 3 / 4;
-  border-radius: 0;
+  border-radius: var(--r-md);
   flex: none;
 }
 .list-item > .thumb-box > .thumb { object-fit: cover; }
@@ -557,8 +559,8 @@ h3 { font-size: 14px; margin: 4px 0; }
   width: 100%;
 }
 .list-item .title {
-  margin: 0;
-  padding: 8px 9px 2px;
+  margin: 10px 0 0;
+  padding: 0;
   text-align: left;
   font-size: 13px;
   font-weight: 600;
@@ -571,8 +573,9 @@ h3 { font-size: 14px; margin: 4px 0; }
   min-height: 2.8em;
 }
 .list-item .muted {
-  padding: 0 9px 8px;
-  font-size: 11px;
+  padding: 0;
+  margin-top: 4px;
+  font-size: 13px;
   color: var(--ink-3);
   white-space: nowrap;
   overflow: hidden;
@@ -581,7 +584,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 .list-item .muted:empty { display: none; }
 
 @media (max-width: 640px) {
-  .list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
 }
 
 /* ---------- 封面占位 ---------- */
@@ -965,6 +968,24 @@ h3 { font-size: 14px; margin: 4px 0; }
 .rt-progress i { display: block; height: 100%; border-radius: 2px; background: #fff; transition: width var(--t-ui) linear; }
 .rt-tools { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
 .rt-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; }
+/* 工具按钮：图标 + 11px 小字，四个等分（原来 9 个文字按钮挤成两行） */
+.reader-toolbar .rt-tool {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 6px;
+  min-width: 64px; padding: 8px 10px; color: #e8e8ea; font-size: 11px;
+}
+.reader-toolbar .rt-tool svg { width: 20px; height: 20px; stroke-width: 1.6; }
+.reader-toolbar .rt-tool:disabled { opacity: 0.35; }
+/* 阅读设置浮层里的控件：保持浅灰（不要被 .sheet-actions 的"末位=主按钮"规则染黑） */
+.reader-sheet .settings-actions { justify-content: flex-start; flex-wrap: wrap; }
+.reader-sheet .settings-actions button {
+  flex: none; background: var(--surface-2); color: var(--ink); font-weight: 400;
+  padding: 10px 14px; font-size: 13px; box-shadow: none;
+}
+.reader-sheet .settings-actions button.btn-deseam.on { background: var(--ink); color: var(--surface); font-weight: 500; }
+.reader-sheet .settings-actions input.page-input {
+  width: 68px; text-align: center; background: var(--surface-2); color: var(--ink);
+  border: 0; padding: 10px; font-size: 13px;
+}
 
 .reader-toolbar button {
   background: transparent;
@@ -1857,12 +1878,16 @@ body.jm-scroll-lock { overflow: hidden; }
    —— 间距整体收到 8–16，内容只占约六成高度，下方刻意留空
    ============================================================ */
 .detail-card { background: none; padding: 4px 0 28px; margin: 0; border-radius: 0; }
+/* 返回：横排、不换行；与标题同一行（标题在它右边） */
+.d-head { display: flex; align-items: flex-start; gap: 8px; max-width: var(--measure); }
 .backtxt {
-  display: inline-flex; align-items: center; gap: 2px;
-  padding: 4px 10px 4px 0; margin: 0 0 6px;
+  display: inline-flex; align-items: center; gap: 2px; flex: none;
+  padding: 6px 8px 6px 0; margin: 0;
   background: none !important; border: 0; color: var(--ink);
   font: inherit; font-size: 14px; cursor: pointer; border-radius: var(--r-sm);
+  white-space: nowrap;
 }
+.d-head .d-title { flex: 1; min-width: 0; margin-top: 4px; }
 .backtxt:active { opacity: 0.6; }
 .d-title {
   font-size: 18px; font-weight: 500; letter-spacing: -0.005em;
@@ -1932,7 +1957,7 @@ body.jm-scroll-lock { overflow: hidden; }
    分类页（极简版 v6）：下划线标签 + 行尾钉住的「更多」+ 工具行
    ============================================================ */
 /* 分类行：中间是可横向滚动的文字标签，右侧是永不滚走的「更多」 */
-.catrow { display: flex; align-items: flex-end; gap: 10px; padding: 0 0 0 0; }
+.catrow { display: flex; align-items: flex-start; gap: 10px; }
 .catwrap { position: relative; flex: 1; min-width: 0; }
 .catfade {
   position: absolute; right: -2px; top: 0; bottom: 12px; width: 30px;
@@ -1942,7 +1967,8 @@ body.jm-scroll-lock { overflow: hidden; }
 [data-theme="dark"] .catfade { background: linear-gradient(to right, rgba(16, 15, 15, 0), var(--bg)); }
 .morebtn {
   display: inline-flex; align-items: center; gap: 5px; flex: none;
-  margin-bottom: 12px; padding: 7px 12px;
+  /* 与分类文字的中线对齐：tabs 上留 4px、按钮上留 5px，两者文字中心都落在 ~14px */
+  margin: 0; padding: 5px 12px;
   border: 0; border-radius: var(--r-pill);
   background: var(--surface-2); color: var(--ink);
   font: inherit; font-size: 13px; cursor: pointer;
@@ -1953,6 +1979,7 @@ body.jm-scroll-lock { overflow: hidden; }
 
 /* 下划线标签行 */
 .tabs { position: relative; display: flex; gap: 22px; padding: 0 0 12px; overflow-x: auto; scrollbar-width: none; }
+.catwrap .tabs { padding-top: 4px; }
 .tabs::-webkit-scrollbar { display: none; }
 .tk {
   flex: none; border: 0; background: none !important; padding: 0;
@@ -2050,7 +2077,7 @@ body.jm-scroll-lock { overflow: hidden; }
 .diag-head:active { background: var(--surface-2); }
 .diag-head .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
 .diag-body { padding: 0 18px 18px; }
-.diag-meta { color: var(--ink-3) !important; font-size: 12px !important; line-height: 1.7; }
+.diag-meta { color: var(--ink-3) !important; font-size: 13px !important; line-height: 1.7; }
 .diag-actions { gap: 8px; margin: 12px 0 4px; }
 
 /* ---------- 搜索页（v6）：浅灰胶囊 + 下划线类型 + 工具行 ---------- */
@@ -2059,4 +2086,46 @@ body.jm-scroll-lock { overflow: hidden; }
 .hist-head { justify-content: space-between; align-items: baseline; margin-top: 24px; }
 .hist-head .sectitle { margin: 0; }
 .searchbar { margin-bottom: 4px; }
+
+/* ---------- 侧边抽屉（v6）：头部 + 三组浅灰行 ---------- */
+.drawer-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 26px 20px 18px; }
+.drawer-id { min-width: 0; }
+.drawer-name { font-size: 16px; font-weight: 500; letter-spacing: -0.005em; }
+.drawer-ver { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+.drawer-body { flex: 1; overflow-y: auto; padding: 0 20px 32px; }
+.drawer-sec { margin-bottom: 24px; }
+.drawer-sec h5 { margin: 0 0 8px; font-size: 13px; font-weight: 400; color: var(--ink-3); }
+.ditem {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 13px 14px; margin-bottom: 8px;
+  border: 0; border-radius: var(--r-md); background: var(--surface-2); color: var(--ink);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out), opacity var(--t-press) linear;
+}
+.ditem:active { transform: scale(0.98); opacity: 0.85; }
+.ditem .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+.ditem .switch { margin-left: auto; width: 44px; height: 26px; border-radius: var(--r-pill); background: var(--line); position: relative; flex: none; transition: background var(--t-ui) linear; }
+.ditem .switch i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); transition: transform var(--t-ui) var(--ease-out); }
+.ditem .switch.on { background: var(--ink); }
+.ditem .switch.on i { transform: translateX(18px); }
+.drawer-note { margin: 10px 0 0; }
+
+/* ---------- 会员页（v6）：分组卡 + 账号/签到展开 ---------- */
+.member-title { margin: 4px 0 16px; font-size: 16px; font-weight: 500; letter-spacing: -0.005em; }
+.member-page .group { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 16px; }
+.member-page .grow {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 16px 18px; border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  transition: background var(--t-press) linear;
+}
+.member-page .grow + .grow, .member-page .grow + .grow-body { box-shadow: inset 0 1px 0 var(--line); }
+.member-page .grow:active { background: var(--surface-2); }
+.member-page .grow .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+.member-page .grow .chev { flex: none; color: var(--ink-3); font-size: 16px; line-height: 1; transition: transform var(--t-ui) var(--ease-out); }
+.member-page .grow .chev-toggle.open { transform: rotate(90deg); }
+.member-page .grow-body { padding: 14px 18px 18px; }
+.member-page .grow-note { margin: 0 0 12px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.member-page .grow-actions { gap: 8px; margin-top: 12px; }
+.member-page .member-grid { gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
 

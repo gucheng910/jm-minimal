@@ -123,6 +123,8 @@
       return json({ version: "1", test_version: "1", jm3_version: "2.1.7", ipcountry: "CN", ad_cache_version: 1, float_ad: false, is_cn: 1, cn_base_url: "", base_url: "", main_web_host: "", img_host: host, app_shunts: [{ key: "1", title: "图源1" }, { key: "2", title: "图源2" }] });
     }
     if (p === "random_recommend") { window.__reqs.push({ path: p }); return json(mk("A", 8, "作者甲")); }
+    // /latest 返回 AlbumSummary[]（80 条/页），首页「最新」分段 + 无限滚动用
+    if (p === "latest") { const pg = u.searchParams.get("page") || "1"; window.__reqs.push({ path: p, page: pg }); return json(mk("L" + pg + "-", 8, "作者甲")); }
     if (p === "hot_tags") return json(["热词1", "热词2"]);
     if (p === "login") { window.__reqs.push({ path: p }); return json({ jwttoken: "fresh-token", uid: 7, username: "tester", coin: 42, level: 3, exp: 100 }); }
     if (p === "tasks" || p === "daily") { window.__reqs.push({ path: p }); return json({ list: [] }); }
