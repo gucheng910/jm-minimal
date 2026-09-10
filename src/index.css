@@ -1126,98 +1126,124 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
   white-space: nowrap;
 }
 
-/* ---------- 缓存中心 / 书库 overlay ---------- */
+/* ---------- 缓存中心（工具页：三个界面与全部操作保持原样，只换外观） ---------- */
 .cache-overlay {
   position: fixed;
   inset: 0;
   z-index: 190;
   background: var(--bg);
   overflow-y: auto;
-  padding: calc(var(--top-h) + 4px) 12px 28px;
+  padding: calc(var(--top-h) + 8px) 20px 32px;
   animation: fade-in 0.16s ease both;
 }
 .cache-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: 12px;
+  margin-bottom: 12px;
 }
-.cache-header h2 { margin: 0 0 2px; font-size: 16px; }
-.cache-tabs { margin: 4px 0 10px; }
-.cache-empty { padding: 34px 4px; text-align: center; display: block; }
+.cache-header h2 { margin: 0 0 3px; font-size: 16px; font-weight: 500; letter-spacing: -0.005em; }
+.cache-header .muted { font-size: 13px; line-height: 1.6; }
+.cache-header > button {
+  flex: none; width: 38px; height: 38px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: none; color: var(--ink); border-radius: var(--r-md);
+}
+.cache-header > button:active { background: var(--surface-2); }
+.cache-tabs { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 4px 0 16px; }
+.cache-tabs .tabs { padding-bottom: 10px; margin: 0; }
+.cache-clear { flex: none; padding-bottom: 12px; }
+.cache-empty { padding: 48px 4px; text-align: center; display: block; font-size: 13px; }
 /* 离线阅读：保持 fixed 全屏层，覆盖在首页内容之上（与首页同级，不参与文档流拼接） */
 .cache-overlay-reader { padding: 0; background: #100F0F; }
-.cache-item { display: flex; gap: 12px; align-items: center; }
-.cache-item .thumb-box { width: 52px; height: 70px; border-radius: 8px; }
-.cache-item .thumb-box .thumb { width: 52px; height: 70px; }
+
+/* 进行中：小缩略图 + 书名/作者 + 每话进度 + 暂停/继续/重试/删除 */
+.cache-item { display: flex; gap: 14px; align-items: flex-start; }
+.cache-item.book-group { background: var(--surface); border-radius: var(--r-lg); padding: 16px; margin-bottom: 12px; }
+.cache-item .thumb-box { width: 56px; height: 74px; border-radius: var(--r-md); }
+.cache-item .thumb-box .thumb { width: 56px; height: 74px; }
+.cache-item .thumb.empty { width: 56px; height: 74px; }
 .cache-item-main { flex: 1; min-width: 0; }
 .one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: 1; min-height: 0; padding: 0; }
-.cache-item-main .title { padding: 0; margin-bottom: 2px; }
+.cache-item-main .title { padding: 0; margin-bottom: 3px; font-size: 14px; }
 .cache-item-actions { display: flex; flex-direction: column; gap: 6px; }
 .cache-item-actions button { padding: 5px 10px; font-size: 13px; }
-.progress { height: 5px; border-radius: 999px; background: #EAE7DA; overflow: hidden; margin-top: 6px; }
-.progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand), var(--brand-deep)); transition: width 0.3s ease; }
-.small-err { font-size: 11px; margin-top: 2px; }
-.list-ops { display: flex; gap: 10px; padding: 0 9px 8px; font-size: 11px; }
-.op-link { color: var(--ink-2); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-.op-link.danger { color: var(--err); }
-button.ghost.danger { color: var(--err); border-color: #f6cdc9; }
+.progress { height: 3px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 8px; }
+.progress-fill { height: 100%; border-radius: 999px; background: var(--ink); transition: width 0.3s ease; }
+.small-err { font-size: 13px; margin-top: 4px; }
 
-/* 缓存中心：按「书」分组 + 离线详情页目录 */
+/* 文本操作（详情/目录 · 删除本书 · 重下 · 删除 · 清理全部缓存）：13px 文本，不用按钮壳 */
+.list-ops { display: flex; gap: 16px; margin-top: 8px; font-size: 13px; }
+.op-link {
+  color: var(--ink-2); cursor: pointer; font: inherit; font-size: 13px;
+  background: none; border: 0; padding: 0;
+  transition: opacity var(--t-press) linear;
+}
+.op-link:active { opacity: 0.6; }
+.op-link.danger { color: var(--err); }
+button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
+
+/* 离线详情页：书名 + 标签/简介 + 话列表（✓ / … / ☁） */
 .book-group { align-items: flex-start; }
-/* 进行中列表的封面占位（GroupCover 不再写内联尺寸，交给 CSS） */
-.cache-item .thumb.empty { width: 52px; height: 70px; }
-.chapter-progress { margin-top: 8px; }
-.chapter-actions { gap: 6px; margin-top: 4px; }
-.chapter-actions button { padding: 4px 9px; font-size: 13px; }
-.book-tags { margin: 2px 0 6px; }
+.chapter-progress { margin-top: 10px; }
+.chapter-actions { gap: 8px; margin-top: 8px; }
+.book-tags { margin: 2px 0 8px; font-size: 13px; }
 .book-desc {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   color: var(--ink-2);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.7;
   max-height: 8.4em;
   overflow: hidden;
 }
-.book-chapters { padding-bottom: 20px; }
+.book-chapters { padding-bottom: 24px; }
 .chapter-row {
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--r-md);
+  padding: 2px 14px;
+  margin-bottom: 8px;
 }
-.chapter-row:last-child { border-bottom: 0; }
 .chapter-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 2px;
+  padding: 12px 0;
   background: none;
   border: 0;
   text-align: left;
   cursor: pointer;
   color: inherit;
+  font: inherit;
 }
 .chapter-main:active { transform: scale(0.99); }
-.chapter-main .title { padding: 0; font-size: 13px; }
-.chapter-main .muted { margin-top: 2px; }
-.chapter-ops { display: flex; gap: 14px; padding: 0 2px 10px; font-size: 11px; }
+.chapter-main .title { padding: 0; font-size: 14px; }
+.chapter-main .muted { margin-top: 3px; font-size: 13px; }
+.chapter-ops { display: flex; gap: 16px; padding: 0 0 12px; font-size: 13px; }
 .badge {
   flex: none;
-  min-width: 22px;
+  width: 22px;
   height: 22px;
-  padding: 0 6px;
-  border-radius: 999px;
-  border: 1px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
   color: var(--ink-3);
-  font-size: 11px;
-  line-height: 20px;
-  text-align: center;
+  font-size: 13px;
+  line-height: 1;
 }
-.badge.ok { color: var(--brand-deep); border-color: var(--brand); background: var(--brand-soft); }
-.badge.pending { color: var(--ink-2); }
+.badge.ok { background: var(--ok); color: var(--surface); }
+.badge.pending { background: var(--surface-2); color: var(--ink-2); }
+
+/* 小号按钮（缓存里的暂停/继续/重试/删除、离线详情页的返回） */
+.btn.sm { padding: 8px 14px; font-size: 13px; border-radius: var(--r-sm); }
+.btn.sm.danger { color: var(--err); }
 
 /* ---------- 18+ 确认页 ---------- */
 .age-gate {

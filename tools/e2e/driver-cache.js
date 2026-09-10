@@ -22,7 +22,8 @@
   // ---- 缓存列表：同书两话合并成一行 ----
   q('button[aria-label="缓存"]').click();
   await waitFor(".cache-overlay");
-  const doneChip = qa(".cache-tabs .chip").find((c) => txt(c).startsWith("已缓存"));
+  // 极简版：缓存中心的分页也改成下划线标签（结构/操作未变）
+  const doneChip = qa(".cache-tabs .tk").find((c) => txt(c).startsWith("已缓存"));
   if (!doneChip) throw new Error("没有「已缓存」分页");
   doneChip.click();
   await sleep(700);

@@ -19,6 +19,7 @@ import type { ReadPage } from "../core/types";
 import ReaderPanel from "../Reader";
 import { pushToast } from "./toast";
 import { CloseIcon } from "./icons";
+import UnderlineTabs from "./UnderlineTabs";
 
 type View = { kind: "list" } | { kind: "book"; bookId: string };
 
@@ -280,7 +281,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
             <h2>{book?.name || currentGroup?.title || "离线详情"}</h2>
             <p className="muted">{book ? book.author.join(" / ") : (currentGroup?.author || "")}{chapters.length > 1 ? " · 共 " + chapters.length + " 话" : ""}</p>
           </div>
-          <button className="ghost" aria-label="返回缓存列表" onClick={() => setView({ kind: "list" })}>返回</button>
+          <button className="btn soft sm" aria-label="返回缓存列表" onClick={() => setView({ kind: "list" })}>返回</button>
         </div>
         {loadingBook && <p className="muted cache-empty">正在读取本地数据…</p>}
         {!loadingBook && book && book.tags.length > 0 && (
@@ -342,10 +343,17 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
         </div>
         <button className="ghost" aria-label="关闭" onClick={onClose}><CloseIcon size={18} /></button>
       </div>
-      <div className="cache-tabs row">
-        <button className={tab === "active" ? "chip active" : "chip"} onClick={() => setTab("active")}>进行中{activeGroups.length > 0 ? "（" + activeGroups.length + "）" : ""}</button>
-        <button className={tab === "done" ? "chip active" : "chip"} onClick={() => setTab("done")}>已缓存{doneGroups.length > 0 ? "（" + doneGroups.length + "）" : ""}</button>
-        <button className="ghost danger" onClick={async () => {
+      <div className="cache-tabs">
+        {/* 选中态与全站一致：文字 + 下划线（内容与操作不变） */}
+        <UnderlineTabs
+          items={[
+            { key: "active", label: "进行中" + (activeGroups.length > 0 ? "（" + activeGroups.length + "）" : "") },
+            { key: "done", label: "已缓存" + (doneGroups.length > 0 ? "（" + doneGroups.length + "）" : "") }
+          ]}
+          value={tab}
+          onChange={(k) => setTab(k === "done" ? "done" : "active")}
+        />
+        <button className="op-link danger cache-clear" onClick={async () => {
           const n = await clearAllCacheTasks();
           setTasks([]);
           setCachedIds(new Map());
@@ -370,10 +378,10 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
                       {(t.status === "queued" || t.status === "running") && <div className="progress"><div className="progress-fill" style={{ width: pct + "%" }} /></div>}
                       {t.status === "failed" && t.error && <div className="err small-err">{t.error}</div>}
                       <div className="row chapter-actions">
-                        {(t.status === "running" || t.status === "queued") && <button className="ghost" onClick={() => pauseCache(t.id)}>暂停</button>}
-                        {t.status === "paused" && <button className="ghost" onClick={() => resumeCache(t.id)}>继续</button>}
-                        {t.status === "failed" && <button className="ghost" onClick={() => resumeCache(t.id)}>重试</button>}
-                        <button className="ghost danger" onClick={async () => { await removeCache(t.id); setTasks(cacheList()); void refreshCached(); pushToast("已删除该话缓存", "ok"); }}>删除</button>
+                        {(t.status === "running" || t.status === "queued") && <button className="btn soft sm" onClick={() => pauseCache(t.id)}>暂停</button>}
+                        {t.status === "paused" && <button className="btn soft sm" onClick={() => resumeCache(t.id)}>继续</button>}
+                        {t.status === "failed" && <button className="btn soft sm" onClick={() => resumeCache(t.id)}>重试</button>}
+                        <button className="btn soft sm danger" onClick={async () => { await removeCache(t.id); setTasks(cacheList()); void refreshCached(); pushToast("已删除该话缓存", "ok"); }}>删除</button>
                       </div>
                     </div>
                   );
