@@ -259,9 +259,18 @@ export interface CategoryItem {
   sub_categories?: CategorySubItem[];
 }
 
+/**
+ * 官方 /categories 的分组块（实测结构：{ title, content[] }）。
+ * content 里是**分类名文本**（如「剧情向」「御姐」），没有 slug/id——点它等于做一次标签搜索。
+ */
+export interface CategoryBlock {
+  title: string;
+  content: string[];
+}
+
 export interface CategoriesPayload {
   categories: CategoryItem[];
-  blocks?: unknown[];
+  blocks?: CategoryBlock[];
 }
 
 export interface WeekIssue {

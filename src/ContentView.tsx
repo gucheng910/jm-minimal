@@ -429,8 +429,35 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     return bookMetaFromDetail(d, albumCoverUrl({ id: bookId, name: d.book_name || d.name || "", update_at: d.addtime }));
   }, [album.detail]);
 
+  /**
+   * 只读搜索层：详情页的作者/标签/登场人物、分类页「更多分类」里点的词，都走它。
+   * 固定定位（.sr-layer 是 fixed），所以可以盖在任何页面之上——不再只挂在详情页分支里。
+   */
+  const searchLayer = (
+    <>
+      <div className={"page-scrim" + (srOpen ? " on" : "")} aria-hidden="true" />
+      {sr && (
+        <SearchResultPage
+          open={srOpen}
+          kind={sr.kind}
+          text={sr.text}
+          items={sr.items}
+          busy={sr.busy}
+          error={sr.error}
+          hasMore={sr.hasMore}
+          resetKey={sr.kind + ":" + sr.text}
+          coverTick={settingTick}
+          onBack={closeSearch}
+          onOpenAlbum={openAlbumFromSearch}
+          onLoadMore={loadMoreSR}
+        />
+      )}
+    </>
+  );
+
   if (mode === "week" && week.payload) {
     return (
+      <>
       <WeekRank
         payload={week.payload}
         items={week.items}
@@ -445,6 +472,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         onOpenAlbum={openDetail}
         onBack={() => { week.reset(); setMode("home"); }}
       />
+      {searchLayer}
+      </>
     );
   }
 
@@ -475,23 +504,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         onSubmitComment={() => { void album.submitComment(); }}
       />
       </div>
-      <div className={"page-scrim" + (srOpen ? " on" : "")} aria-hidden="true" />
-      {sr && (
-        <SearchResultPage
-          open={srOpen}
-          kind={sr.kind}
-          text={sr.text}
-          items={sr.items}
-          busy={sr.busy}
-          error={sr.error}
-          hasMore={sr.hasMore}
-          resetKey={sr.kind + ":" + sr.text}
-          coverTick={settingTick}
-          onBack={closeSearch}
-          onOpenAlbum={openAlbumFromSearch}
-          onLoadMore={loadMoreSR}
-        />
-      )}
+      {searchLayer}
       </>
     );
   }
@@ -523,6 +536,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   if (pageMode === "search") {
     return (
+      <>
       <SearchFeed
         query={search.query}
         type={search.type}
@@ -545,32 +559,43 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         onLoadMore={search.loadMore}
         onOpenAlbum={openDetail}
       />
+      {searchLayer}
+      </>
     );
   }
 
   if (pageMode === "categories") {
     return (
+      <>
       <CategoryFeed
         categories={cat.categories}
+        blocks={cat.blocks}
         items={cat.items}
         slug={cat.slug}
         sub={cat.sub}
         order={cat.order}
+        rank={cat.rank}
         page={cat.page}
         hasMore={cat.hasMore}
+        total={cat.total}
         busy={cat.busy}
         error={cat.error}
         gridKey={"g" + settingTick}
-        onPickCategory={(s) => { void cat.load(s, "", 1, true, ""); }}
-        onPickSub={(s, subSlug, order) => { void cat.load(s, subSlug, 1, true, order); }}
+        onPickPlace={cat.pickPlace}
+        onPickRank={cat.pickRank}
+        onPickSub={cat.pickSub}
         onSort={cat.changeSort}
         onLoadMore={cat.loadMore}
         onOpenAlbum={openDetail}
+        onPickTerm={(term) => openSpecialSearch("tag", term)}
       />
+      {searchLayer}
+      </>
     );
   }
 
   return (
+    <>
     <PullToRefresh onRefresh={retryHomeFeed}>
       <HomeFeed
         items={home.items}
@@ -587,5 +612,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         onOpenAlbum={openDetail}
       />
     </PullToRefresh>
+    {searchLayer}
+    </>
   );
 }

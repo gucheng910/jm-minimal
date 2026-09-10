@@ -1880,3 +1880,71 @@ body.jm-scroll-lock { overflow: hidden; }
 .selectrow select:focus { box-shadow: none; }
 .d-tail { font-size: 13px; color: var(--ink-3); margin: 4px 0 0; line-height: 1.7; }
 
+/* ============================================================
+   分类页（极简版 v6）：下划线标签 + 行尾钉住的「更多」+ 工具行
+   ============================================================ */
+/* 分类行：中间是可横向滚动的文字标签，右侧是永不滚走的「更多」 */
+.catrow { display: flex; align-items: flex-end; gap: 10px; padding: 0 0 0 0; }
+.catwrap { position: relative; flex: 1; min-width: 0; }
+.catfade {
+  position: absolute; right: -2px; top: 0; bottom: 12px; width: 30px;
+  pointer-events: none;
+  background: linear-gradient(to right, rgba(242, 240, 229, 0), var(--bg));
+}
+[data-theme="dark"] .catfade { background: linear-gradient(to right, rgba(16, 15, 15, 0), var(--bg)); }
+.morebtn {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  margin-bottom: 12px; padding: 7px 12px;
+  border: 0; border-radius: var(--r-pill);
+  background: var(--surface-2); color: var(--ink);
+  font: inherit; font-size: 13px; cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out), background var(--t-press) linear;
+}
+.morebtn:active { transform: scale(0.95); }
+.morebtn .ic { width: 14px; height: 14px; stroke-width: 1.6; }
+
+/* 下划线标签行 */
+.tabs { position: relative; display: flex; gap: 22px; padding: 0 0 12px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tk {
+  flex: none; border: 0; background: none !important; padding: 0;
+  color: var(--ink-3); font: inherit; font-size: 14px; white-space: nowrap; cursor: pointer;
+  transition: color var(--t-ui) var(--ease-out);
+}
+.tk.on { color: var(--ink); }
+.ind {
+  position: absolute; left: 0; bottom: 6px; height: 2px; border-radius: 2px;
+  background: var(--ink);
+  transition: transform var(--t-ui) var(--ease-out), width var(--t-ui) var(--ease-out);
+}
+
+/* 工具行：共 N 部 + 排序胶囊（不套卡片） */
+.toolrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 14px; }
+.toolrow .cnt { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sortbtn {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  border: 0; border-radius: var(--r-pill); padding: 7px 12px;
+  background: var(--surface-2); color: var(--ink);
+  font: inherit; font-size: 13px; cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out);
+}
+.sortbtn:active { transform: scale(0.96); }
+.sortbtn .ic { width: 14px; height: 14px; stroke-width: 1.6; }
+
+.cat-sentinel { height: 1px; }
+.cat-more { text-align: center; font-size: 13px; color: var(--ink-3); padding: 14px 0 4px; margin: 0; }
+
+/* 更多分类浮层里的分组标签 */
+.sheet-tall { max-height: 86vh; }
+.sheet-scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-bottom: 4px; }
+.grpname { margin: 0; padding: 16px 20px 8px; font-size: 13px; color: var(--ink-3); }
+.tags { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px; }
+.tags button {
+  border: 0; border-radius: var(--r-pill); padding: 8px 14px;
+  background: var(--surface-2); color: var(--ink);
+  font: inherit; font-size: 14px; cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out);
+}
+.tags button:active { transform: scale(0.95); }
+.app-sheet .sheet-scroll { flex: 1; min-height: 0; }
+

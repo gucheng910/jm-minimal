@@ -126,7 +126,16 @@
     if (p === "tasks" || p === "daily") { window.__reqs.push({ path: p }); return json({ list: [] }); }
     if (p === "payment") return json({ plans: [{ key: "p1", name: "月卡", price: 1, days: 30 }], pay_methods: [], uid: 1, orders: [], web_host: "", checkout: "" });
     if (p === "ad_content_all") return json({});
-    if (p === "categories") return json({ categories: [{ id: 1, slug: "doujin", name: "同人", sub_categories: [{ id: 11, slug: "cg", name: "CG" }] }, { id: 2, slug: "hanman", name: "韩漫" }] });
+    if (p === "categories") return json({
+      categories: [{ id: 1, slug: "doujin", name: "同人", sub_categories: [{ id: 11, slug: "cg", name: "CG" }] }, { id: 2, slug: "hanman", name: "韩漫" }],
+      // blocks 实测结构：{ title, content: string[] }（简中）
+      blocks: [
+        { title: "主题A漫", content: ["剧情向", "校园", "纯爱", "人妻"] },
+        { title: "角色 / 扮演", content: ["御姐", "熟女", "巨乳"] },
+        { title: "特殊PLAY", content: ["群交", "足交", "SM"] },
+        { title: "其他", content: ["CG集", "重口"] }
+      ]
+    });
     if (p === "categories/filter") { window.__reqs.push({ path: p, c: u.searchParams.get("c"), o: u.searchParams.get("o"), page: u.searchParams.get("page") }); return json({ content: mk("CAT", 5, "作者甲"), total: 5 }); }
     if (p === "week") return json({ categories: [{ id: 11, time: "2026 W36" }, { id: 10, time: "2026 W35" }], type: [{ id: "", title: "全部" }, { id: 1, title: "同人" }] });
     if (p === "week/filter") { window.__reqs.push({ path: p, id: u.searchParams.get("id"), type: u.searchParams.get("type"), page: u.searchParams.get("page") }); return json({ list: mk("WK", 6, "作者甲"), total: 6 }); }

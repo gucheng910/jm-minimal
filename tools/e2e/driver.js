@@ -72,25 +72,60 @@
       await sleep(2500);
       log.push({
         step: "category",
-        chipLabels: qa(".chip-label").map((c) => (c.textContent || "").trim()),
-        chips: qa(".chip").length,
+        tabs: qa(".tabs .tk").map((c) => (c.textContent || "").trim()),
+        morePinned: !!q(".catrow .morebtn"),
+        count: (q(".toolrow .cnt") || {}).textContent || "",
+        sortLabel: (q("[data-sort-toggle]") || {}).textContent || "",
         cards: qa(".list-item").length,
         first: qa(".list-item")[0] ? (qa(".list-item")[0].querySelector(".title") || {}).textContent : "",
         catReqs: (window.__reqs || []).filter((r) => r.path === "categories/filter").slice(-2)
       });
-      const sortChip = qa("button").find((b) => (b.textContent || "").trim() === "最多爱心");
-      if (sortChip) {
-        sortChip.click();
-        await sleep(2000);
-        log.push({ step: "category-sort", catReqs: (window.__reqs || []).filter((r) => r.path === "categories/filter").slice(-1) });
+      // 排序是"列表功能"：先开浮层再选（极简版不再把排序 chip 直接铺在页面上）
+      const sortToggle = q("[data-sort-toggle]");
+      if (sortToggle) {
+        sortToggle.click();
+        await sleep(600);
+        log.push({ step: "sort-sheet", opened: !!q(".app-sheet"), options: qa(".app-sheet .opt-row").map((b) => (b.textContent || "").trim()) });
+        const sortOpt = qa(".app-sheet .opt-row").find((b) => /最多爱心/.test(b.textContent || ""));
+        if (sortOpt) {
+          sortOpt.click();
+          await sleep(2000);
+          log.push({ step: "category-sort", sortLabel: (q("[data-sort-toggle]") || {}).textContent || "", catReqs: (window.__reqs || []).filter((r) => r.path === "categories/filter").slice(-1) });
+        }
       }
-      // 先选主分类，子分类 chip 才会出现
-      const mainChip = qa("button").find((b) => (b.textContent || "").trim() === "同人");
+      // 排行榜是"去处"：点它应出现二级榜，且这一态不显示排序
+      const rankTab = qa(".tabs .tk").find((b) => (b.textContent || "").trim() === "排行榜");
+      if (rankTab) {
+        rankTab.click();
+        await sleep(2000);
+        log.push({
+          step: "category-rank",
+          tabs: qa(".tabs .tk").map((c) => (c.textContent || "").trim()),
+          sortHidden: !q("[data-sort-toggle]"),
+          catReqs: (window.__reqs || []).filter((r) => r.path === "categories/filter").slice(-1)
+        });
+      }
+      // 「更多」是行尾钉住的独立控件 → 更多分类浮层（4 组词）
+      const moreBtn = q(".catrow .morebtn");
+      if (moreBtn) {
+        moreBtn.click();
+        await sleep(700);
+        log.push({
+          step: "more-categories",
+          groups: qa(".app-sheet .grpname").map((g) => (g.textContent || "").trim()),
+          terms: qa(".app-sheet .tags button").length
+        });
+        const backdrop = q(".drawer-backdrop");
+        if (backdrop) backdrop.click();
+        await sleep(400);
+      }
+      // 先选主分类，子分类行才会出现
+      const mainChip = qa(".tabs .tk").find((b) => (b.textContent || "").trim() === "同人");
       if (mainChip) {
         mainChip.click();
         await sleep(2000);
-        log.push({ step: "category-main", catReqs: (window.__reqs || []).filter((r) => r.path === "categories/filter").slice(-1) });
-        const subChip = qa("button").find((b) => (b.textContent || "").trim() === "CG");
+        log.push({ step: "category-main", tabs: qa(".tabs .tk").map((c) => (c.textContent || "").trim()), catReqs: (window.__reqs || []).filter((r) => r.path === "categories/filter").slice(-1) });
+        const subChip = qa(".tabs .tk").find((b) => (b.textContent || "").trim() === "CG");
         if (subChip) {
           subChip.click();
           await sleep(2000);

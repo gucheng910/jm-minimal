@@ -47,10 +47,23 @@ export const STORAGE_KEYS = {
 // ---- UI 共享常量（架构收敛：列表排序 / 榜单 / 本地存储键） ----
 /** 官方接口每页条数（latest / search / week 一致） */
 export const PAGE_SIZE = 80;
-export const SORT_MODES: Array<[string, string]> = [["", "最新"], ["tf", "最多爱心"]];
-export const RANK_MODES: Array<[string, string]> = [
-  ["mv", "人气榜"], ["mv_m", "月榜"], ["mv_w", "周榜"], ["mv_t", "日榜"]
+/**
+ * 列表排序（功能）：改变**当前列表**的先后顺序，作用于分类结果与搜索结果。
+ * 参数就是官方 categories/filter 与 search 的 o（实测：""/mv/mp/tf 均有效）。
+ */
+export const SORT_MODES: Array<[string, string]> = [
+  ["", "最新"], ["mv", "最多点击"], ["mp", "最多图片"], ["tf", "最多爱心"]
 ];
+/**
+ * 排行榜（去处）：与「同人」「单本」并列的一个入口，选中后出现二级榜。
+ * 实测参数：mv 总榜 / mv_m 月榜 / mv_w 周榜（total 693）/ mv_t 日榜（total 121）；
+ * 注意 mp_w 无效（返回与"最新"逐条一致），所以周榜必须用 mv_w。
+ */
+export const RANK_MODES: Array<[string, string]> = [
+  ["mv", "总榜"], ["mv_m", "月榜"], ["mv_w", "周榜"], ["mv_t", "日榜"]
+];
+/** 排行榜在分类行里的伪 slug（服务端没有这个分类，只是 UI 上的一个去处） */
+export const RANK_PLACE = "__rank__";
 export const UI_KEYS = {
   history: "jmclient.history",
   searchHistory: "jmclient.searchHistory",
