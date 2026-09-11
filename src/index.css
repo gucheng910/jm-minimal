@@ -2451,8 +2451,17 @@ html[data-lowfx="1"] * {
   animation-iteration-count: 1 !important;
   transition: none !important;
 }
-/* 按压反馈（:active 缩放）也一并去掉：它每按一次都要重建合成层，老机器上得不偿失 */
-html[data-lowfx="1"] *:active { transform: none !important; }
+/* 按压反馈（:active 缩放）也一并去掉，但**只能逐个点可点元素**：
+   ⚠️ 绝不能写成 `*:active` —— :active 会同时命中祖先，而顶栏/底栏是靠 `left:50% + translateX(-50%)` 居中的，
+   按下底栏按钮时祖先导航栏也命中 :active，居中变换被清掉 → 整条栏右移 180px、手指底下的按钮跟着跑、
+   点什么都点不中（2026-09-11 真机反馈"触碰就向右滑、点不到"，实测底栏 rect.left 0→180，松手弹回）。 */
+html[data-lowfx="1"] button:active,
+html[data-lowfx="1"] .chip:active,
+html[data-lowfx="1"] .list-item:active,
+html[data-lowfx="1"] .chapter-main:active,
+html[data-lowfx="1"] .sheet-row:active,
+html[data-lowfx="1"] .tk:active,
+html[data-lowfx="1"] .ditem:active { transform: none !important; }
 /* 只留"正在加载"的动画（状态反馈，不是装饰）：转圈 + 骨架扫光 */
 html[data-lowfx="1"] .spin,
 html[data-lowfx="1"] .mini-spin { animation-duration: 0.8s !important; animation-iteration-count: infinite !important; }

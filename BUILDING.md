@@ -146,7 +146,8 @@ node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('rel
   | modern | `dist/`（target es2022，含 `?.`/`??` 等语法） | `npm run build` | WebView / Chromium **80+** | ≈3.9 MB |
   | compat | `dist-compat/`（额外产出 nomodule 的 ES5 legacy 包 + core-js polyfills） | `npm run build:compat` | Chromium **61+**（靠 `@vitejs/plugin-legacy` 的现代性探测自动选包） | ≈4.5 MB |
   - 两者 **minSdk 都是 24（Android 7.0+）**：实测把 minSdk 降到 21/23 会被 `org.apache.cordova:framework:14.0.1`（Capacitor 8 自带 Cordova 兼容层）挡住，
-    报 `uses-sdk:minSdkVersion 21 cannot be smaller than version 24`；要突破只能 `tools:overrideLibrary`（官方警告可能运行时崩）或降级 Capacitor，收益低（那批设备 WebView 普遍跑不动）。
+    报 `uses-sdk:minSdkVersion 21 cannot be smaller than version 24`；要突破只能 `tools:overrideLibrary`（官方警告可能运行时崩）或降级 Capacitor。
+    **2026-09 已正式做出 legacy 变体（Android 6 / WebView 57 真机跑通），见 §4.2。**
   - `index.html` 内置 ES5 兜底提示：内核连 Promise/fetch 都没有时显示「请更新系统 WebView」，不再白屏。
 - **验证兼容包真的能在老内核跑**：`npm run build:compat && npm run e2e:compat`——它把 dist-compat 改造成
   "模拟老浏览器"页面（去掉现代入口与 `__vite_is_modern_browser` 探测脚本）再跑导航回归；
@@ -170,6 +171,40 @@ cd android; ..\build-rel.cmd; cd ..
 > `cap copy` 按 `capacitor.config.ts` 的 `webDir` 取值，`JM_WEB_DIR` 环境变量可临时切换（release.mjs 即用此法出双包）。
 > gradle wrapper 已切腾讯镜像（distributionUrl=…gradle-8.14.3-bin.zip），services.gradle.org 被墙不影响。
 > Android 应用内更新（src/ui/UpdateSection.tsx + AppUpdaterPlugin）检查 GitHub Release，按资产名匹配 modern/compat。
+
+### 4.2 老内核构建（legacy：Android 6 / WebView 57）
+
+第三条变体，专门给 Android 6（API 23）这类老机器。与 compat 的差别：minSdk 降到 23，并关掉两个会在老内核崩掉/拖垮的能力。
+
+```powershell
+pwsh -NoProfile -File scripts\build-legacy-apk.ps1 -Version 1.9.9
+# 内部顺序（不能乱）：minSdk 23 + tools:overrideLibrary →（先设 JM_NO_SEAM=1 再）npm run build:compat
+#   → JM_WEB_DIR=dist-compat + JM_WEBVIEW_DEBUG=1 + JM_NO_SW=1 + npx cap copy android
+#   → cd android + build-rel.cmd → release/jm-minimal-legacy-<ver>.apk → finally 还原被改的工程文件
+# 产物：release\jm-minimal-legacy-1.9.9.apk（minSdk=23，versionName/versionCode 与正式包一致）
+```
+
+三个构建期开关（都在脚本内设，modern/compat 包不受影响）：
+
+| 开关 | 作用 | 不设的后果 |
+|---|---|---|
+| `JM_NO_SW=1` | `capacitor.config.ts` 关掉 `resolveServiceWorkerRequests` | `Bridge.loadWebView()` 会调 `android.webkit.ServiceWorkerController`（API 24 才有）→ API 23 启动即 `NoClassDefFoundError` |
+| `JM_NO_SEAM=1` | 注入 `__NO_SEAM__`：去条纹（接缝修复）整块被摇掉，阅读器设置里也没有开关 | 每张正文图都要 canvas 重排，老机器负担不起 |
+| `JM_WEBVIEW_DEBUG=1` | 允许 `adb forward` 到 WebView DevTools | 无法用 CDP 探针诊断（release 默认关） |
+
+> ⚠️ `JM_NO_SEAM` 必须在 `npm run build:compat` **之前**设（`vite.config.ts` 在配置加载时读 `process.env`），设晚了产物里还留着去条纹代码。
+> 验证方式（产物级）：`Select-String -Path dist-compat/assets/*.js -Pattern "去条纹","seam page="` 必须为 **0** 条。
+
+老内核（WebView < 61 这一档）的兼容底线，改 UI 时别踩：
+
+- **CSS**：flex `gap` / grid `gap` 简写 / `inset` / `env()` / `clamp()` / `min()` / `max()` / `aspect-ratio` / `backdrop-filter` 都不支持，
+  而且**一条声明里只要有一个不支持的函数，整条声明都会被丢弃** → 退路声明必须写在增强声明之前；
+  兜底统一收在 `src/index.css` 末尾的 `@supports not (...)` 块里（现代内核一行都不走）。
+- **JS / Web API**：`AbortController`（`src/core/fetchTimeout.ts`）、`Element.prototype.scrollTo`（`src/core/dom.ts`）都要兜底；
+  语法层由 plugin-legacy 的 ES5 包负责 —— **Web API 与 CSS 是 polyfill 覆盖不到的**。
+- **低配模式**：`src/core/lowfx.ts` 判定（flex gap / inset / aspect-ratio 三缺即低配）→ `<html data-lowfx="1">`，
+  关动效与按压反馈、只留加载动画；抽屉里可手动覆盖。
+- 完整踩坑记录（9 个真坑 + 支持矩阵 + 诊断脚本清单 + 移植检查清单）见本机文档 `docs/老内核适配经验.md`（`docs/` 不入库）。
 
 ---
 
