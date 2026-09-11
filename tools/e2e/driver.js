@@ -313,14 +313,13 @@
     menuBtn.click();
     await sleep(900);
     const note = qa(".menu-note").map((n) => (n.textContent || "").trim());
-    const driftWarning = (qa(".small-err").map((e) => (e.textContent || "").trim()).find((t) => /官方协议已更新/.test(t))) || "";
-    log.push({
-      step: "proto-drift",
-      versionLine: note.find((t) => /官方协议/.test(t)) || "",
-      driftWarning
-    });
-    // 桩里 jm3_version 比客户端 APP_VERSION 新 → 必须出现漂移提示（否则说明判据失效）
-    if (!driftWarning) throw new Error("协议漂移提示未出现（桩 jm3_version=2.1.7，客户端 APP_VERSION 见 constants.ts）");
+    const versionLine = note.find((t) => /官方协议/.test(t)) || "";
+    const errLines = qa(".small-err").map((e) => (e.textContent || "").trim());
+    log.push({ step: "proto-drift", versionLine, errLines });
+    // 桩里 jm3_version 比客户端 APP_VERSION 新 → 版本行里必须标出服务端版本（判据不能失效）；
+    // 且不得再用红字报错渲染 —— 2026-09-11 真机反馈：用户把那条红字当成"应用出错"。
+    if (!/服务端已到\s*2\.1\.7/.test(versionLine)) throw new Error("协议漂移说明未出现在版本行：" + JSON.stringify(versionLine));
+    if (errLines.some((t) => /官方协议/.test(t))) throw new Error("协议漂移又变回红字报错了：" + errLines.join(" | "));
     // 抽屉是浮层：返回键应先关抽屉（不跳页、不退 App）
     back();
     await sleep(700);
