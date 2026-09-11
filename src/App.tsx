@@ -847,7 +847,7 @@ export default function App() {
             </button>
             {/* 协议漂移只作为版本行里的一句说明：它是"服务端换版了"的状态，不是本机故障，
                 原来单独用红字报错渲染，用户会当成应用出错（2026-09-11 真机反馈）。 */}
-            <p className="muted menu-note drawer-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}{protoDrift ? "，服务端已到 " + onlineProto : ""}{BUILD_VARIANT === "compat" ? " · 兼容包" : ""}）</p>
+            <p className="muted menu-note drawer-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}{protoDrift ? "，服务端已到 " + onlineProto : ""}{BUILD_VARIANT === "compat" ? " · 兼容包" : BUILD_VARIANT === "legacy" ? " · 老安卓包" : ""}）</p>
             {isDesktop ? <DesktopUpdate /> : <UpdateSection />}
             <button className="ditem repo-link" onClick={() => openExternal(REPO_URL)}>
               <span>GitHub 仓库</span><span className="v">↗</span>

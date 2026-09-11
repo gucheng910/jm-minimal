@@ -17,6 +17,10 @@ if (!/^[Ee]:[\\/]JMClient$/i.test(process.cwd())) {
  *   node tools/release.mjs 1.7.1 --skip-android  # 跳过 Android 打包
  *   node tools/release.mjs 1.7.1 --verify-only  # 只校验已发布的 Release（走 gh API，本机被墙也能用）
  *
+ * 一共产出 3 个 APK：modern（WebView 80+）/ compat（WebView 57+，ES5 兼容产物）/
+ * legacy（Android 6 / API 23，minSdk 23 + 关 SW + 不含去条纹），后者由
+ * tools/build-legacy-apk.ps1 构建（同一套 release/ 命名：jm-minimal-legacy-<ver>.apk）。
+ *
  * 编码进去的坑（都是踩过的）：
  *   1) cap sync 必须在仓库根跑，否则静默用旧 web 资源 → 脚本会比对 dist 与 android 资产的哈希
  *   2) 版本号四处同步：package.json / build.gradle / BUILDING.md 表 / README 下载表
@@ -125,6 +129,7 @@ if (VERIFY_ONLY) {
   const candidates = [
     ["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")],
     ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")],
+    ["jm-minimal-legacy-" + version + ".apk", path.join(ROOT, "release/jm-minimal-legacy-" + version + ".apk")],
     ["jm-minimal-setup-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe")],
     ["jm-minimal-setup-" + version + ".exe.blockmap", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe.blockmap")],
     ["latest.yml", path.join(ROOT, "release-pc/latest.yml")],
@@ -176,7 +181,7 @@ if (DRY) {
   step("dry-run：到此为止");
   log("将要执行：npm run build → npx cap sync android（含资产哈希比对）→ build-rel.cmd");
   if (!SKIP_PC) log("           → npm run pc:pack（nsis + portable）→ 校验 latest.yml 版本与 size");
-  log(PUBLISH ? "           → gh release create(draft) → 上传 6 个资产(重试) → publish → §5.4 校验" : "           → 跳过发布（未加 --publish）");
+  log(PUBLISH ? "           → gh release create(draft) → 上传全部资产(重试) → publish → §5.4 校验" : "           → 跳过发布（未加 --publish）");
   process.exit(0);
 }
 
@@ -245,6 +250,11 @@ if (!SKIP_ANDROID) {
   run(exe("npm"), ["run", "build:compat"]);
   buildAndroidApk("compat", "dist-compat");
 
+  // 老安卓包（Android 6 / API 23）：脚本内部自己完成「打补丁 → build:legacy → cap copy(dist-legacy)
+  // → gradle → 还原工程文件」，产物落在 release/jm-minimal-legacy-<ver>.apk（minSdk=23）。
+  step("构建老安卓包（minSdk 23 + JM_NO_SW + JM_NO_SEAM + BUILD_VARIANT=legacy）");
+  run("pwsh", ["-NoProfile", "-File", path.join(ROOT, "tools/build-legacy-apk.ps1"), "-Version", version]);
+
   step("还原 Android 资产为现代包（工作区不留兼容包资源）");
   syncAndroidAssets("dist");
 }
@@ -281,6 +291,7 @@ if (!SKIP_PC) {
 const assetCandidates = [
   ["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")],
   ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")],
+  ["jm-minimal-legacy-" + version + ".apk", path.join(ROOT, "release/jm-minimal-legacy-" + version + ".apk")],
   ["jm-minimal-setup-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe")],
   ["jm-minimal-setup-" + version + ".exe.blockmap", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe.blockmap")],
   ["latest.yml", path.join(ROOT, "release-pc/latest.yml")],

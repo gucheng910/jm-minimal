@@ -17,10 +17,10 @@ export const LOCAL_VERSION =
   (typeof globalThis !== "undefined" && (globalThis as { __builtinVersion?: string }).__builtinVersion) ||
   (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0");
 /**
- * 构建变体：modern（现代内核）/ compat（老内核兼容包）。
- * 由 vite.config.ts 的 define 注入 __BUILD_VARIANT__（--mode compat 时为 "compat"）。
- * **应用内更新器据此挑选对应的 APK 资产**——两个包同名同 versionName，只能靠构建期注入区分，
- * 否则 compat 用户会被引导下载 modern 包。
+ * 构建变体：modern（现代内核）/ compat（老内核兼容包）/ legacy（Android 6 老安卓包）。
+ * 由 vite.config.ts 的 define 注入 __BUILD_VARIANT__（--mode compat / --mode legacy）。
+ * **应用内更新器据此挑选对应的 APK 资产**——三个包同 versionName，只能靠构建期注入区分，
+ * 否则 compat / legacy 用户会被引导下载装不上或跑不起来的包。
  */
 declare const __BUILD_VARIANT__: string;
 declare const __NO_SEAM__: boolean;
@@ -31,10 +31,10 @@ declare const __NO_SEAM__: boolean;
  */
 export const NO_SEAM: boolean = typeof __NO_SEAM__ !== "undefined" && __NO_SEAM__ === true;
 
-export const BUILD_VARIANT: string =
-  (typeof __BUILD_VARIANT__ !== "undefined" ? String(__BUILD_VARIANT__) : "modern").toLowerCase() === "compat"
-    ? "compat"
-    : "modern";
+export const BUILD_VARIANT: string = (() => {
+  const v = (typeof __BUILD_VARIANT__ !== "undefined" ? String(__BUILD_VARIANT__) : "modern").toLowerCase();
+  return v === "compat" || v === "legacy" ? v : "modern";
+})();
 
 export const HOST_URLS: string[] = [
   "https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt",

@@ -6,17 +6,23 @@ import { readFileSync } from "node:fs";
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8"));
 
 /**
- * 两种构建（产物差异见 BUILDING §4 与 README 下载表）：
+ * 三种构建（产物差异见 BUILDING §4 与 README 下载表）：
  *   npm run build         → 现代包 dist/（es2022）：WebView / Chromium 80+ 使用
  *   npm run build:compat  → 兼容包 dist-compat/：额外产出 nomodule 的 ES5 legacy 包 + polyfills，
  *                           老内核（Chromium 61+）由 @vitejs/plugin-legacy 的现代性探测脚本自动加载
+ *   npm run build:legacy  → 老安卓包 dist-legacy/：同一套 ES5 产物，但 BUILD_VARIANT=legacy，
+ *                           配合 JM_NO_SEAM=1 / JM_NO_SW=1 / minSdk 23（Android 6，见 tools/build-legacy-apk.ps1）
  */
 export default defineConfig(({ mode }) => {
   const compat = mode === "compat";
+  const legacyMode = mode === "legacy";
+  /** 需要 ES5 legacy 产物的两档（老内核） */
+  const oldKernel = compat || legacyMode;
+  const variant = legacyMode ? "legacy" : compat ? "compat" : "modern";
   return {
     plugins: [
       react(),
-      ...(compat
+      ...(oldKernel
         ? [legacy({
             // 老内核下限：Chromium 61（原生支持 <script type="module"> 的起点）
             targets: ["chrome >= 61", "android >= 7", "safari >= 12"],
@@ -34,14 +40,14 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       target: "es2022",
-      outDir: compat ? "dist-compat" : "dist",
+      outDir: variant === "modern" ? "dist" : variant === "compat" ? "dist-compat" : "dist-legacy",
       emptyOutDir: true
     },
     // 构建时从 package.json 读取版本，注入前端常量（构建产物中 LOCAL_VERSION 始终与 package.json 一致）
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
-      // 构建变体：更新器据此挑选对应的 APK 资产（modern / compat 同名同版本，只能构建期区分）
-      __BUILD_VARIANT__: JSON.stringify(compat ? "compat" : "modern"),
+      // 构建变体：更新器据此挑选对应的 APK 资产（三档同名同版本，只能构建期区分）
+      __BUILD_VARIANT__: JSON.stringify(variant),
       // 老安卓专用构建（build-legacy-apk.ps1 里 JM_NO_SEAM=1）：整块去条纹（接缝修复）逻辑被摇掉，
       // 阅读器设置里也不再出现开关 —— 这不是"默认关闭"，是这个包根本不带这个功能。
       __NO_SEAM__: JSON.stringify(process.env.JM_NO_SEAM === "1"),

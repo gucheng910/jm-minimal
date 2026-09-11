@@ -3,6 +3,7 @@ import { pickApkAsset, type UpdateAsset } from "./updateAsset";
 
 const a = (name: string): UpdateAsset => ({ name, browser_download_url: "https://example.com/" + name });
 const BOTH = [a("jm-minimal-modern-1.8.2.apk"), a("jm-minimal-compat-1.8.2.apk")];
+const THREE = [...BOTH, a("jm-minimal-legacy-1.8.2.apk")];
 
 describe("pickApkAsset", () => {
   it("modern 构建必须挑 modern 包（不能挑到 compat）", () => {
@@ -10,6 +11,14 @@ describe("pickApkAsset", () => {
   });
   it("compat 构建必须挑 compat 包（不能挑到 modern）", () => {
     expect(pickApkAsset(BOTH, "compat")?.name).toBe("jm-minimal-compat-1.8.2.apk");
+  });
+  it("legacy 构建必须挑 legacy 包（不能挑到 compat/modern）", () => {
+    expect(pickApkAsset(THREE, "legacy")?.name).toBe("jm-minimal-legacy-1.8.2.apk");
+    expect(pickApkAsset(THREE, "modern")?.name).toBe("jm-minimal-modern-1.8.2.apk");
+    expect(pickApkAsset(THREE, "compat")?.name).toBe("jm-minimal-compat-1.8.2.apk");
+  });
+  it("三包齐发时，缺 legacy 资产的老 Release 对 legacy 构建返回 null（宁可提示，也不推错包）", () => {
+    expect(pickApkAsset(BOTH, "legacy")).toBeNull();
   });
   it("大小写与中文命名都兼容", () => {
     expect(pickApkAsset([a("JM-Minimal-COMPAT-1.8.2.apk")], "compat")?.name).toContain("COMPAT");

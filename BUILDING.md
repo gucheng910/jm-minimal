@@ -140,14 +140,14 @@ node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('rel
 - 单工程 android/，包名 dev.jmclient.app；minSdk 24 / targetSdk 36 / compileSdk 36（见 docs/00 → docs/_archive/16-Android打包.md 历史首包记录）。
 - 签名走 android/keystore.properties（storeFile/storePassword/keyAlias/keyPassword，**不入库**）；缺失时 assembleRelease 会用 debug 签名，无法覆盖安装旧正式版。
 - 正式构建命令：`cd android && ..\build-rel.cmd`（封装 JAVA_HOME → Android Studio JBR）＝ gradlew assembleRelease。
-- **modern / compat 现在是两份真正不同的构建**（1.8.2 起；此前是同一份文件复制改名，见 §8.11）：
+- **modern / compat / legacy 是三份真正不同的构建**（compat 自 1.8.2 起，legacy 自 2.0.0 起；此前是同一份文件复制改名，见 §8.11）：
   | 变体 | web 产物 | 构建命令 | 目标内核 | 体积 |
   |---|---|---|---|---|
   | modern | `dist/`（target es2022，含 `?.`/`??` 等语法） | `npm run build` | WebView / Chromium **80+** | ≈3.9 MB |
   | compat | `dist-compat/`（额外产出 nomodule 的 ES5 legacy 包 + core-js polyfills） | `npm run build:compat` | Chromium **61+**（靠 `@vitejs/plugin-legacy` 的现代性探测自动选包） | ≈4.5 MB |
-  - 两者 **minSdk 都是 24（Android 7.0+）**：实测把 minSdk 降到 21/23 会被 `org.apache.cordova:framework:14.0.1`（Capacitor 8 自带 Cordova 兼容层）挡住，
-    报 `uses-sdk:minSdkVersion 21 cannot be smaller than version 24`；要突破只能 `tools:overrideLibrary`（官方警告可能运行时崩）或降级 Capacitor。
-    **2026-09 已正式做出 legacy 变体（Android 6 / WebView 57 真机跑通），见 §4.2。**
+  | legacy | `dist-legacy/`（同一套 ES5 产物，但 `BUILD_VARIANT=legacy`） | `npm run build:legacy` 或 `pwsh tools/build-legacy-apk.ps1` | Android **6.0（API 23）**+ / Chromium 57+ | ≈4.2 MB |
+  - modern / compat **minSdk 24（Android 7.0+）**：把 minSdk 再往下降会被 `org.apache.cordova:framework:14.0.1`（Capacitor 8 自带 Cordova 兼容层）挡住，
+    报 `uses-sdk:minSdkVersion 23 cannot be smaller than version 24`；legacy 变体用合并器官方的 `tools:overrideLibrary` 放行，minSdk 23（Android 6）真机跑通，见 §4.2。
   - `index.html` 内置 ES5 兜底提示：内核连 Promise/fetch 都没有时显示「请更新系统 WebView」，不再白屏。
 - **验证兼容包真的能在老内核跑**：`npm run build:compat && npm run e2e:compat`——它把 dist-compat 改造成
   "模拟老浏览器"页面（去掉现代入口与 `__vite_is_modern_browser` 探测脚本）再跑导航回归；
@@ -246,6 +246,7 @@ gh release upload v1.4.1 release-pc/latest.yml release-pc/jm-minimal-setup-1.4.1
 |---|---|---|
 | Android | jm-minimal-modern-<ver>.apk | 更新器匹配子串 "modern"；现代内核构建（WebView 80+） |
 | Android | jm-minimal-compat-<ver>.apk | 更新器匹配子串 "compat"；**老内核构建**（含 ES5 legacy 包，Chromium 61+），与 modern 不是同一份文件 |
+| Android | jm-minimal-legacy-<ver>.apk | 更新器匹配子串 "legacy"；**老安卓包**（minSdk 23 / Android 6，关 ServiceWorker、不含去条纹）。三个 APK 同 versionName，靠构建期 `BUILD_VARIANT` 区分 |
 | PC 安装 | jm-minimal-setup-<ver>.exe | electron-updater 严格按 latest.yml 找它 |
 | PC 便携 | jm-minimal-portable-<ver>.exe | README 链接 |
 

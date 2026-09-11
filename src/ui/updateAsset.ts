@@ -10,18 +10,19 @@ export interface UpdateAsset {
 /**
  * 从 Release 资产中挑出与当前构建变体匹配的 APK。
  * @param assets Release 的 assets 列表（可能字段缺失）
- * @param flavor 当前构建变体："modern" | "compat"（来自 core/constants 的 BUILD_VARIANT）
+ * @param flavor 当前构建变体："modern" | "compat" | "legacy"（来自 core/constants 的 BUILD_VARIANT）
  * @returns 命中的资产；只有唯一一个 APK 时兜底返回它；多包且都匹配不上时返回 null
  */
 export function pickApkAsset(assets: UpdateAsset[] | undefined | null, flavor: string): UpdateAsset | null {
   const list = Array.isArray(assets) ? assets : [];
   const apks = list.filter((a) => a && typeof a.name === "string" && /\.apk$/i.test(a.name));
   if (apks.length === 0) return null;
-  const wantCompat = String(flavor || "modern").toLowerCase() === "compat";
+  const want = String(flavor || "modern").toLowerCase();
   const hit = apks.find((a) => {
     const n = a.name.toLowerCase();
-    // 兼容两种命名：英文 modern/compat 与中文 现代/兼容
-    if (wantCompat) return n.includes("compat") || a.name.includes("兼容");
+    // 兼容中英命名：modern/现代、compat/兼容、legacy/老安卓
+    if (want === "compat") return n.includes("compat") || a.name.includes("兼容");
+    if (want === "legacy") return n.includes("legacy") || a.name.includes("老安卓");
     return n.includes("modern") || a.name.includes("现代");
   });
   if (hit) return hit;

@@ -2,6 +2,7 @@
 node_modules/
 dist/
 dist-compat/
+dist-legacy/
 release-pc/
 android/app/build/
 android/build/
