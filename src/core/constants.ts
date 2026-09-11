@@ -75,3 +75,11 @@ export const UI_KEYS = {
 
 /** 最优线路/图源记忆有效期：期间冷启动直连上次最优，跳过启动测速 */
 export const AUTO_SELECT_TTL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * 官方图源 key 兜底表。
+ * 图源清单来自 setting.app_shunts，可老设备冷启动时 setting 往往还没就绪（或超时），
+ * 那时启动测速就只剩 express 一个候选源可测，测不出结果就一直停在死图床上（封面全白）。
+ * 这份常量让"配置未就绪"也能测速换源，与 setting 返回的清单取并集使用。
+ */
+export const FALLBACK_SHUNT_KEYS = ["1", "2", "3", "4", "5"] as const;

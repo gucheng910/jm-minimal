@@ -291,7 +291,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       if (action === "ranking") { openWeek(); }
       if (action === "search") {
         setMode("home");
-        window.scrollTo({ top: 0 });
+        window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
         setTimeout(() => document.querySelector<HTMLInputElement>(".searchbar input")?.focus(), 120);
       }
     };
@@ -307,7 +307,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       clearSearchLayer();
       album.setComments(null);
       setMode("home");
-      window.scrollTo({ top: 0 });
+      window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
       void home.loadRandom();
     };
     return on("jm:refreshHome", handler);
@@ -341,11 +341,19 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         const aid = new URLSearchParams(window.location.search).get("aid");
         if (pageMode === "home" && !aid) {
           // 每次冷启动都自动测速并应用最快线路/图源（18+ 确认页期间后台完成）
+          // 启动顺序（老设备实测结论）：先恢复 6h 内的最优记忆——它是一次本地读 + 一次探测，
+          // 远快于完整测速，能避免"冷启动十几秒白封面"；随后完整测速在后台跑一遍做纠正/自愈。
+          // 记忆不可用（过期 / 图床已死 / 无记忆）才阻塞等测速结果。
           let speedOk = false;
-          try { speedOk = await client.autoSelectBest(); } catch { speedOk = false; }
+          try { speedOk = await client.restoreBestSelection(); } catch { speedOk = false; }
           if (!speedOk) {
-            // 测速全部失败：回退上次记忆值兜底（保证能进主界面 / 看离线缓存）
-            await client.restoreBestSelection().catch(() => false);
+            try { speedOk = await client.autoSelectBest(); } catch { speedOk = false; }
+            // 老设备/弱网冷启动第一次常常全超时：10 秒后再试一次（成功后 getSetting 会发 jm:setting，
+            // 列表按新图床重新出封面）。
+            if (!speedOk) window.setTimeout(() => { void client.autoSelectBest().catch(() => false); }, 10000);
+          } else {
+            // 记忆可用：后台刷新一次，换到更快的线路/图源（同样由 jm:setting 驱动封面刷新）
+            window.setTimeout(() => { void client.autoSelectBest().catch(() => false); }, 1500);
           }
           // 兜底：setting 未就绪时补一次（封面图床域名）
           if (!client.setting) {
@@ -399,7 +407,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     clearSearchLayer();
     album.setComments(null);
     setMode("home");
-    window.scrollTo({ top: 0 });
+    window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     // 按当前分段重载：在「最新」上重试就不该把列表换成随机推荐
     if (homeFeed === "latest") void home.loadLatest();
     else void home.loadRandom();

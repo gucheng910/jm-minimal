@@ -1,13 +1,14 @@
-import { APP_VERSION, AUTO_SELECT_TTL_MS, CONTENT_SECRET, TOKEN_SECRET, UI_KEYS } from "./constants";
+import { APP_VERSION, AUTO_SELECT_TTL_MS, CONTENT_SECRET, FALLBACK_SHUNT_KEYS, TOKEN_SECRET, UI_KEYS } from "./constants";
 import { aesEcbDecrypt, md5Hex } from "./crypto";
 import { API_PATHS } from "./endpoints";
-import { measureAll } from "./speed";
+import { measureAll, measureImages } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
 import { getMemCache, makeKey, setMemCache } from "./requestCache";
 import { bookIdOf, mergeBookMeta, rememberSeries } from "./series";
 import { emit } from "./bus";
 import { sessionStore } from "./storage";
 import { registerDnsHosts } from "./dnsClean";
+import { fetchWithTimeout } from "./fetchTimeout";
 import type {
   AlbumDetail,
   AlbumSummary,
@@ -49,6 +50,21 @@ export interface RequestOptions {
 }
 
 const AD_PATHS = ["ad_content_all", "advertise_all"];
+
+/**
+ * 校验一个图床域名是否真能出图。
+ * 用 <img> 真实解码而不是 fetch（no-cors 的 fetch 对 403/404 也会 resolve，会把"连得上但不给图"误判为可用）。
+ * 用途：setting 里给的 express 图床在部分网络下是死的，光信它就会一直"线路通、封面全白"。
+ */
+async function imageHostOk(host: string, timeoutMs: number): Promise<boolean> {
+  const h = String(host || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (!h) return false;
+  const samples = await measureImages(
+    [{ label: "check", url: "https://" + h + "/media/logo/new_logo.png?t=" + Date.now() }],
+    timeoutMs
+  );
+  return samples.some((s) => s.ok);
+}
 
 export class JMClient {
   apiBase = "";
@@ -115,9 +131,12 @@ export class JMClient {
     try {
       const raw = localStorage.getItem(UI_KEYS.autoSelectCache);
       if (!raw) return false;
-      const saved = JSON.parse(raw) as { host?: string; shunt?: string; ts?: number };
+      const saved = JSON.parse(raw) as { host?: string; shunt?: string; imgHost?: string; ts?: number };
       if (!saved.host || !saved.shunt || !saved.ts) return false;
       if (Date.now() - saved.ts > AUTO_SELECT_TTL_MS) return false;
+      // 记忆里的图床可能已经失效（官方换源 / 代理挂掉）：先验一张图，坏了就走完整测速。
+      // 不验的话恢复出来的正是"线路能通、封面全白"那种状态（老设备冷启动白封面十几秒的根因）
+      if (saved.imgHost && !(await imageHostOk(saved.imgHost, 4000))) return false;
       this.selectLine(saved.host);
       this.setImageShunt(saved.shunt);
       await this.getSetting();
@@ -132,6 +151,7 @@ export class JMClient {
       localStorage.setItem(UI_KEYS.autoSelectCache, JSON.stringify({
         host: this.apiBase.replace(/^https?:\/\//, "").replace(/\/$/, ""),
         shunt: this.imageShunt,
+        imgHost: String(this.setting?.img_host || ""),
         ts: Date.now()
       }));
     } catch { /* ignore */ }
@@ -140,7 +160,14 @@ export class JMClient {
   /** 启动自动选优：并发测速官方线路 + 各图源图床，应用最快线路与图源（每次会话只执行一次）。返回是否有可用线路/图源 */
   autoSelectBest(): Promise<boolean> {
     if (!this.selecting) {
-      this.selecting = this.runAutoSelect().catch(() => false);
+      this.selecting = this.runAutoSelect()
+        .catch(() => false)
+        .then((ok) => {
+          // 全失败时不缓存，允许稍后重试（老设备/弱网冷启动第一次很容易全超时：
+          // 修之前失败结果会被永久缓存，整个会话只能一直用默认图源 1 —— 封面全部加载不出来的根因之一）
+          if (!ok) this.selecting = null;
+          return ok;
+        });
     }
     return this.selecting;
   }
@@ -148,6 +175,8 @@ export class JMClient {
   private async runAutoSelect(): Promise<boolean> {
     const servers = this.hostConfig?.jm3_Server || [];
     if (servers.length === 0) return false;
+    // 图源清单来自 setting：没就绪时只有 express 一个候选源，测不出东西就只能停在死图床
+    if (!this.setting) { try { await this.getSetting(); } catch { /* 尽力而为 */ } }
     const stamp = String(Date.now());
     // 1) 线路测速
     const lineItems = servers.map(([host]) => ({ label: host, url: "https://" + host + "/static/jmapp3apk/version.json?t=" + stamp }));
@@ -165,6 +194,8 @@ export class JMClient {
       const k = String(s.key ?? "");
       if (k && !keys.includes(k)) keys.push(k);
     }
+    // setting 缺失/为空时也要能换源（与官方清单取并集，去重后顺序不变）
+    for (const k of FALLBACK_SHUNT_KEYS) { if (!keys.includes(k)) keys.push(k); }
     const hostByKey = await Promise.all(keys.map(async (key) => {
       let host = "";
       try { host = await this.probeImageHost(key); } catch { host = ""; }
@@ -172,11 +203,15 @@ export class JMClient {
       if (!host && key === "0") host = "cn-ms.jmapiproxy2.cc";
       return { key, host };
     }));
+    // 用真实封面图（<img> 解码）而不是 no-cors 的 logo 探测：
+    // 后者对 403/404 也会 resolve，会把"连得上但不给图"的图床误判为可用（老设备封面全白就是这么来的）
     const imgItems = hostByKey
       .filter((p) => p.host)
-      .map((p) => ({ label: p.key, url: "https://" + p.host + "/media/logo/new_logo.png?t=" + stamp, noCors: true }));
+      .map((p) => ({ label: p.key, url: "https://" + p.host + "/media/logo/new_logo.png?t=" + stamp }));
+    const okHosts = new Set<string>();
     if (imgItems.length > 0) {
-      const samples = await measureAll(imgItems, imgItems.length);
+      const samples = await measureImages(imgItems, 6000);
+      for (const s of samples) { if (s.ok) okHosts.add(s.url.replace(/^https?:\/\//, "").split("/")[0]); }
       const bestImg = samples.find((s) => s.ok);
       if (bestImg) {
         const bestHost = bestImg.url.replace(/^https?:\/\//, "").split("/")[0];
@@ -186,7 +221,20 @@ export class JMClient {
     }
     // 3) 用选定线路 + 图源刷新配置（图床随之更新），并记住本次最优选择
     await this.getSetting().catch(() => { /* ignore */ });
-    this.saveBestSelection();
+    // 3.5) express（快速通道）图床兜底：setting 给出的 img_host 在部分网络下是死的，
+    //      光信它就会一直"线路通、封面全白"。测速已经验过的源里换一个真能出图的。
+    const applied = String(this.setting?.img_host || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (applied && !okHosts.has(applied) && !(await imageHostOk(applied, 4000))) {
+      const alt = hostByKey.find((p) => p.host && p.host !== applied && okHosts.has(p.host));
+      if (alt) {
+        this.setImageShunt(alt.key);
+        await this.getSetting().catch(() => { /* ignore */ });
+        anyOk = true;
+      }
+    }
+    // 只有真正选到可用线路/图源才写缓存：否则会把"全失败时的默认值"当成最优存下来，
+    // 之后 restoreBestSelection 会把死图源直接恢复回来（2026-09-11 老设备封面全白的另一半原因）
+    if (anyOk) this.saveBestSelection();
     return anyOk;
   }
   /** 探测指定图源 key 的图床地址（只读，不改变当前图源） */
@@ -326,19 +374,17 @@ export class JMClient {
         body = form;
       }
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         // credentials 始终 include：登录响应也可能 Set-Cookie（如 PHPSESSID），
         // 登录/重登的 noAuth 不再 omit，避免丢失服务端会话 Cookie。
-        const resp = await fetch(url.toString(), {
+        // 超时走 fetchWithTimeout：老内核没有 AbortController 时自动退化为 Promise.race。
+        const resp = await fetchWithTimeout(url.toString(), {
           method,
           headers,
           body,
           credentials: "include",
-          referrerPolicy: "no-referrer",
-          signal: controller.signal
-        });
+          referrerPolicy: "no-referrer"
+        }, timeoutMs);
         const text = await resp.text();
         let env: ApiEnvelope;
         try {
@@ -383,8 +429,6 @@ export class JMClient {
           const delay = Math.min(500 * Math.pow(2, attempt), 5000) + Math.random() * 200;
           await new Promise((r) => setTimeout(r, delay));
         }
-      } finally {
-        clearTimeout(timer);
       }
     }
     // 线路级 fallback：当前线路节点异常时依次尝试其它官方线路

@@ -23,7 +23,7 @@ import DesktopUpdate from "./ui/DesktopUpdate";
 import { isDesktop } from "./core/dnsClean";
 import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
-import { APP_VERSION, BUILD_VARIANT, LOCAL_VERSION, UI_KEYS } from "./core/constants";
+import { APP_VERSION, BUILD_VARIANT, FALLBACK_SHUNT_KEYS, LOCAL_VERSION, UI_KEYS } from "./core/constants";
 import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
 import TagBlockSetting from "./ui/TagBlockSetting";
@@ -250,7 +250,7 @@ export default function App() {
       if (back.consumed) return;
       if (tab !== "home") {
         setTab("home");
-        window.scrollTo({ top: 0 });
+        window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
         return;
       }
       const now = Date.now();
@@ -509,7 +509,7 @@ export default function App() {
 
   function navTo(action: string) {
     setTab(action);
-    window.scrollTo({ top: 0 });
+    window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     setTimeout(() => emit("jm:nav", action), 80);
   }
 
@@ -519,7 +519,7 @@ export default function App() {
       return;
     }
     // 已在首页：回到顶部并通知首页实例刷新推荐内容
-    window.scrollTo({ top: 0 });
+    window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     emit("jm:refreshHome");
   }
 
@@ -559,7 +559,7 @@ export default function App() {
 
   async function openMember() {
     setTab("member");
-    window.scrollTo({ top: 0 });
+    window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     // 同步 client 侧已就绪的配置快照（不重复 getSetting，避免覆盖已选好的图床域名）
     setState((s) => ({
       ...s,
@@ -851,9 +851,10 @@ export default function App() {
       <SourceSheet
         open={showSource}
         onClose={() => setShowSource(false)}
-        shunts={Array.isArray(state.setting?.app_shunts)
+        // 配置未就绪时也要能手动换源：用官方图源 key 兜底（标题先占位，setting 到位后换成官方名）
+        shunts={Array.isArray(state.setting?.app_shunts) && state.setting!.app_shunts!.length
           ? state.setting!.app_shunts!.map((s) => ({ key: String(s.key), title: String(s.title) }))
-          : []}
+          : FALLBACK_SHUNT_KEYS.map((k) => ({ key: k, title: "图源 " + k }))}
         currentShunt={String(client.imageShunt || "1")}
         lines={availableLines}
         currentHost={currentHost}
@@ -872,7 +873,7 @@ export default function App() {
           onOpenAlbum={(aid) => {
             setLibPanel(null);
             setTab("home");
-            window.scrollTo({ top: 0 });
+            window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
             setTimeout(() => emit("jm:openAid", String(aid)), 120);
           }}
         />
