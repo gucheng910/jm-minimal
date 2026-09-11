@@ -1,5 +1,6 @@
 import { md5Hex } from "./crypto";
 import { emit } from "./bus";
+import { isLowFx } from "./lowfx";
 
 export function scrambleSliceCount(albumId: number | string, pageName: string): number {
   const idStr = String(albumId);
@@ -179,20 +180,32 @@ export function measureSeamScore(canvas: HTMLCanvasElement, parts: number): numb
 // ---------------- 开关 ----------------
 
 const LS_ENABLED = "jmclient.deseam.v1";
+/** 低配机上"已按新默认值处理过"的标记：只强关一次，之后用户手动打开就不再覆盖 */
+const LS_LOWFX_DEFAULTED = "jmclient.deseam.lowfx.v1";
 
 function readEnabled(): boolean {
   try {
+    if (isLowFx()) {
+      // 旧版本去条纹默认是开的，老机器上那个 "1" 不是用户的选择（每张正文图都要 canvas 重排，
+      // 这台机器吃不住）。本版首次运行强制关一次并打标记，之后用户想开就开。
+      if (localStorage.getItem(LS_LOWFX_DEFAULTED) !== "1") {
+        localStorage.setItem(LS_LOWFX_DEFAULTED, "1");
+        localStorage.setItem(LS_ENABLED, "0");
+        return false;
+      }
+      return localStorage.getItem(LS_ENABLED) === "1";
+    }
     const v = localStorage.getItem(LS_ENABLED);
-    return v === null ? true : v === "1"; // 默认开启
+    return v === null ? true : v === "1";
   } catch {
-    return true;
+    return !isLowFx();
   }
 }
 
 /** 模块级缓存：applyScramble 每张图都会问一次，避免反复读 localStorage */
 let seamEnabled = readEnabled();
 
-/** 「去条纹」是否开启（持久化，全局生效，默认开启） */
+/** 「去条纹」是否开启（持久化，全局生效；高配默认开、低配默认关） */
 export function deseaOn(): boolean {
   return seamEnabled;
 }

@@ -24,6 +24,7 @@ import { isDesktop } from "./core/dnsClean";
 import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
 import { APP_VERSION, BUILD_VARIANT, FALLBACK_SHUNT_KEYS, LOCAL_VERSION, UI_KEYS } from "./core/constants";
+import { isLowFx, setLowFxManual } from "./core/lowfx";
 import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
 import TagBlockSetting from "./ui/TagBlockSetting";
@@ -86,6 +87,8 @@ export default function App() {
   const [dark, setDark] = useState<boolean>(() => {
     try { return localStorage.getItem(UI_KEYS.theme) === "dark"; } catch { return false; }
   });
+  // 低配模式（老内核自动开）：抽屉里可手动覆盖，切换后立即改 <html data-lowfx> 生效
+  const [lowFx, setLowFx] = useState<boolean>(() => isLowFx());
   // 顶栏滚动态：内容滚动出一定距离后加阴影/底边，分离层级
   const [scrolled, setScrolled] = useState(false);
 
@@ -833,6 +836,11 @@ export default function App() {
             <button className="ditem" onClick={() => setDark((d) => !d)}>
               <span>深色模式</span>
               <span className={"switch" + (dark ? " on" : "")} aria-hidden="true"><i /></span>
+            </button>
+            {/* 低配模式：老内核（WebView 57 一档）自动开启；手动切换后写死用户选择 */}
+            <button className="ditem" onClick={() => { const next = !lowFx; setLowFx(next); setLowFxManual(next); }}>
+              <span>低配模式（关动效）</span>
+              <span className={"switch" + (lowFx ? " on" : "")} aria-hidden="true"><i /></span>
             </button>
             <button className="ditem" onClick={() => setTosOpen(true)}>
               <span>使用须知</span><span className="v">›</span>

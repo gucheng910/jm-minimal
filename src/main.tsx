@@ -3,16 +3,19 @@ import App from "./App";
 import "./index.css";
 import { registerPwa } from "./pwa";
 import { initDnsClean } from "./core/dnsClean";
+import { applyLowFx, isLowFx } from "./core/lowfx";
 import { LOCAL_VERSION } from "./core/constants";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 
+// 低配模式（老内核）必须在首帧前判定：动效/阴影/磨砂在这里整体降级
+applyLowFx();
 // 禁止浏览器自动滚动恢复（SPA 内部手动管理）
 try { history.scrollRestoration = "manual"; } catch { /* ignore */ }
 registerPwa();
 // 桌面端：按偏好启用内置 DNS 清洗（Web/Android 无桥自动跳过）
 initDnsClean();
 // 诊断日志（logcat: adb logcat -s Capacitor/Console | findstr jmd）
-console.log("[jmd] app start version=" + LOCAL_VERSION + " ua=" + navigator.userAgent.slice(0, 70));
+console.log("[jmd] app start version=" + LOCAL_VERSION + " lowfx=" + (isLowFx() ? 1 : 0) + " ua=" + navigator.userAgent.slice(0, 70));
 
 /**
  * 全局错误兜底（不依赖 React）：脚本异常/未捕获 Promise 直接贴在屏幕底部，

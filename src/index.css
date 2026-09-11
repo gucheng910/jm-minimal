@@ -267,7 +267,8 @@ body {
   max-width: 860px;
   margin: 0 auto;
   /* 左右 20px：极简版的统一页边留白（原 12px 太贴边） */
-  padding: calc(var(--top-h) + 4px) 20px calc(var(--nav-h) + env(safe-area-inset-bottom) + 20px);
+  padding: calc(var(--top-h) + 4px) 20px calc(var(--nav-h) + 20px);
+  padding-bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
   min-height: 100vh;
 }
 
@@ -354,7 +355,8 @@ body {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-top: 1px solid var(--line);
-  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  padding: 6px 4px 6px;
+  padding-bottom: calc(6px + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
@@ -463,7 +465,7 @@ button:focus:not(:focus-visible),
 }
 
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px; grid-gap: 6px 18px; }
 .field { display: block; margin: 12px 0; font-size: 13px; color: var(--ink-2); }
 .field input { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; }
 /* 搜索框：浅灰填充、无描边；按钮是浅灰次按钮（主操作留给详情/阅读） */
@@ -530,6 +532,7 @@ h3 { font-size: 14px; margin: 4px 0; }
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 28px 14px;
+  grid-gap: 28px 14px;
   padding: 4px 0;
   animation: rise-in 0.24s ease both;
 }
@@ -593,7 +596,8 @@ h3 { font-size: 14px; margin: 4px 0; }
 .list-item .muted:empty { display: none; }
 
 @media (max-width: 640px) {
-  .list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
+  .list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px;
+  grid-gap: 26px 14px; }
 }
 
 /* ---------- 封面占位 ---------- */
@@ -729,10 +733,11 @@ h3 { font-size: 14px; margin: 4px 0; }
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+  grid-gap: 12px;
   padding: 4px 0;
 }
 @media (max-width: 640px) {
-  .skeleton-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .skeleton-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; grid-gap: 10px; }
 }
 .skeleton-item {
   display: flex;
@@ -805,6 +810,7 @@ h3 { font-size: 14px; margin: 4px 0; }
   top: 0;
   left: 0;
   bottom: 0;
+  width: 52vw;
   width: min(52vw, 460px);
   max-width: 460px;
   background: var(--surface);
@@ -895,7 +901,8 @@ h3 { font-size: 14px; margin: 4px 0; }
   max-width: 860px;
   background: var(--surface);
   border-radius: 20px 20px 0 0;
-  padding: 10px 16px calc(18px + env(safe-area-inset-bottom));
+  padding: 10px 16px 18px;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom));
   box-sizing: border-box;
   max-height: 82vh;
   overflow: auto;
@@ -918,7 +925,8 @@ h3 { font-size: 14px; margin: 4px 0; }
 .drawer-backdrop button, .drawer-backdrop select { font-size: 13px; }
 
 /* ---------- 换源浮层（顶栏闪电）：结构为 .drawer-backdrop + .source-drawer，外观走极简版 ---------- */
-.app-sheet { padding: 10px 0 calc(16px + env(safe-area-inset-bottom)); max-height: 78vh; }
+.app-sheet { padding: 10px 0 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom)); max-height: 78vh; }
 .app-sheet .sheet-head { padding: 0 20px; margin-bottom: 6px; }
 .app-sheet .sheet-head h3 { font-size: 16px; font-weight: 500; letter-spacing: -0.005em; }
 .app-sheet .sheet-sec { margin: 0; padding: 12px 20px 6px; font-size: 13px; color: var(--ink-3); }
@@ -1002,6 +1010,7 @@ h3 { font-size: 14px; margin: 4px 0; }
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  padding: 8px 0 12px;
   padding: calc(env(safe-area-inset-top) + 8px) 0 calc(env(safe-area-inset-bottom) + 12px);
   background: linear-gradient(rgba(0, 0, 0, 0.74), rgba(0, 0, 0, 0.12) 22%, rgba(0, 0, 0, 0.12) 68%, rgba(0, 0, 0, 0.8));
   opacity: 0;
@@ -1228,7 +1237,8 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
 /* ---------- 返回提示 ---------- */
 .back-hint {
   position: fixed;
-  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 26px);
+  bottom: calc(var(--nav-h) + 26px);
+  bottom: calc(var(--nav-h) + 26px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 120;
@@ -1380,6 +1390,7 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   padding: 24px;
 }
 .age-card {
+  width: 92vw;
   width: min(92vw, 360px);
   background: var(--surface);
   border-radius: 20px;
@@ -1444,6 +1455,7 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
 .tos-backdrop[data-entering] { opacity: 0; transition: none; }
 .tos-backdrop[data-closed] { opacity: 0; pointer-events: none; }
 .tos-card {
+  width: 92vw;
   width: min(92vw, 420px);
   max-height: 84vh;
   background: var(--surface);
@@ -1471,7 +1483,8 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 20px);
+  bottom: calc(var(--nav-h) + 20px);
+  bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1935,6 +1948,7 @@ body.jm-scroll-lock { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 14px 20px 14px;
   padding: calc(env(safe-area-inset-top) + 14px) 20px 14px;
   background: var(--bg);
 }
@@ -1969,7 +1983,8 @@ body.jm-scroll-lock { overflow: hidden; }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 8px 20px calc(var(--nav-h) + env(safe-area-inset-bottom) + 20px);
+  padding: 8px 20px calc(var(--nav-h) + 20px);
+  padding-bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
 }
 .sr-empty { padding: 40px 4px; text-align: center; display: block; }
 .sr-more { justify-content: center; }
@@ -2135,7 +2150,8 @@ body.jm-scroll-lock { overflow: hidden; }
   .sr-layer { max-width: 1080px; }
 
   /* 封面网格：宽屏铺满 */
-  .list:not(.book-chapters) { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 18px; }
+  .list:not(.book-chapters) { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 18px;
+  grid-gap: 28px 18px; }
   /* 话列表是"列表"，不是网格：宽屏也保持单列 */
   .book-chapters { display: block; }
 
@@ -2325,3 +2341,121 @@ body.jm-scroll-lock { overflow: hidden; }
     height: 100%;
   }
 }
+
+/* ============================================================
+ * 老内核兜底：flex gap（Chrome 84+ 才支持；WebView 57 上 gap 整条被丢弃）
+ * 实测（小米 4W / WebView 57）：liveFlexGap=10（两个 10px 盒子完全贴在一起）→ 所有
+ * display:flex; gap:* 的间距全部为 0，界面要么挤成一团、要么靠 padding 硬撑。
+ * 这里用边距把 65 处非换行 flex 间距补回来；换行的 5 处用「容器负半距 + 子项半距」。
+ * 只加一个轴（左/上），不动其它方向的既有 margin；grid 容器走 grid-gap（本文件已改）。
+ * 清单由 scripts/css-gap-scan.mjs 生成后人工核对：改上面的 gap 值时同步这里。
+ * ============================================================ */
+@supports not (gap: 1px) {
+  .theme-toggle-left > * + * { margin-left: 8px; }
+  .top-title > * + * { margin-left: 9px; }
+  .top-left > * + * { margin-left: 4px; }
+  .top-actions > * + * { margin-left: 2px; }
+  .nav-item > * + * { margin-top: 3px; }
+  .searchbar > * + * { margin-left: 10px; }
+  .loading-box > * + * { margin-top: 10px; }
+  .ptr-indicator > * + * { margin-top: 4px; }
+  .menu-head > * + * { margin-left: 10px; }
+  .app-sheet .opt-row > * + * { margin-left: 12px; }
+  .app-sheet .sheet-actions > * + * { margin-left: 10px; }
+  .member-page form.card .form-actions > * + * { margin-left: 10px; }
+  .gender-row > * + * { margin-left: 24px; }
+  .gender-row label > * + * { margin-left: 6px; }
+  .rt-top > * + * { margin-left: 10px; }
+  .rt-nav > * + * { margin-left: 10px; }
+  .reader-toolbar .rt-tool > * + * { margin-top: 6px; }
+  .sheet-head > * + * { margin-left: 10px; }
+  .sheet-list > * + * { margin-top: 6px; }
+  .sheet-row > * + * { margin-left: 10px; }
+  .sheet-actions > * + * { margin-left: 8px; }
+  .reader-wrap .row > * + * { margin-left: 10px; }
+  .reader-thumb > * + * { margin-left: 6px; }
+  .cache-header > * + * { margin-left: 12px; }
+  .cache-tabs > * + * { margin-left: 12px; }
+  .cache-item > * + * { margin-left: 14px; }
+  .cache-item-actions > * + * { margin-top: 6px; }
+  .chapter-actions > * + * { margin-left: 8px; }
+  .chapter-main > * + * { margin-left: 12px; }
+  .chapter-ops > * + * { margin-left: 16px; }
+  .age-confirm > * + * { margin-left: 8px; }
+  .action-row > * + * { margin-left: 12px; }
+  .toast-host > * + * { margin-top: 8px; }
+  .dns-body > * + * { margin-top: 12px; }
+  .dns-results > * + * { margin-top: 4px; }
+  .dns-servers > * + * { margin-top: 8px; }
+  .dns-server-item > * + * { margin-left: 8px; }
+  .tag-block-item > * + * { margin-left: 8px; }
+  .tag-block-locked-msg > * + * { margin-left: 6px; }
+  .tag-block-meta > * + * { margin-top: 4px; }
+  .update-desktop > * + * { margin-top: 6px; }
+  .sr-head > * + * { margin-left: 10px; }
+  .update-progress > * + * { margin-left: 8px; }
+  .d-head > * + * { margin-left: 8px; }
+  .backtxt > * + * { margin-left: 2px; }
+  .actrow > * + * { margin-left: 10px; }
+  .btn > * + * { margin-left: 6px; }
+  .grow > * + * { margin-left: 12px; }
+  .catrow > * + * { margin-left: 10px; }
+  .morebtn > * + * { margin-left: 5px; }
+  .tabs > * + * { margin-left: 22px; }
+  .toolrow > * + * { margin-left: 12px; }
+  .sortbtn > * + * { margin-left: 5px; }
+  .diag-head > * + * { margin-left: 12px; }
+  .diag-actions > * + * { margin-left: 8px; }
+  .drawer-head > * + * { margin-left: 12px; }
+  .ditem > * + * { margin-left: 12px; }
+  .member-page .grow > * + * { margin-left: 12px; }
+  .member-page .grow-actions > * + * { margin-left: 8px; }
+  .member-page .member-grid > * + * { margin-left: 18px; }
+
+  /* ---- 换行 flex：容器右侧/底部负半距，子项补半距（等价于 gap，且首项不缩进）---- */
+  .row { margin-right: -4px; margin-bottom: -4px; }
+  .row > * { margin-right: 4px; margin-bottom: 4px; }
+  .rt-tools { margin-right: -3px; margin-bottom: -3px; }
+  .rt-tools > * { margin-right: 3px; margin-bottom: 3px; }
+  .tag-block-list { margin-right: -4px; margin-bottom: -4px; }
+  .tag-block-list > * { margin-right: 4px; margin-bottom: 4px; }
+  .tags { margin-right: -4px; margin-bottom: -4px; }
+  .tags > * { margin-right: 4px; margin-bottom: 4px; }
+  .chips { margin-right: -4px; margin-bottom: -4px; }
+  .chips > * { margin-right: 4px; margin-bottom: 4px; }
+}
+
+/* 老内核没有 inset 简写：这 10 个铺满层会塌成 0×0（弹层遮罩、返回提示、纯占位图兜底文字都靠它） */
+@supports not (inset: 0) {
+  .thumb-fallback, .skeleton-meta::after, .menu-backdrop, .drawer-backdrop, .reader-toolbar,
+  .cache-overlay, .age-gate, .tos-backdrop, .page-scrim, .sr-layer {
+    top: 0; right: 0; bottom: 0; left: 0;
+  }
+}
+
+/* 老内核没有 backdrop-filter：磨砂玻璃退化成半透明，文字对比度会掉，直接给不透明底色 */
+@supports not (backdrop-filter: blur(1px)) {
+  .top-bar { background: var(--bg); }
+  .bottom-nav { background: var(--bg); }
+}
+/* ============================================================
+ * 低配模式：html[data-lowfx="1"]（判定见 src/core/lowfx.ts）
+ * 小米 4W（WebView 57 / 四核 A7 / 2GB）实测：动效不是"锦上添花"，而是掉帧来源 ——
+ * 30 张封面的淡入 + 骨架扫光 + 各处 transition 会把主线程堵住，观感还不如直接出现。
+ * 这里默认压掉动效；去条纹（接缝修复）由 scramble.ts 在低配模式下默认关闭。
+ * ============================================================ */
+html[data-lowfx="1"] * {
+  animation-duration: 0.001ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+}
+/* 磨砂玻璃不支持时半透明底会让文字发灰：低配模式直接给不透明底色 */
+html[data-lowfx="1"] .top-bar,
+html[data-lowfx="1"] .bottom-nav,
+html[data-lowfx="1"] .toast { background: var(--surface); }
+/* 阴影同样吃合成层，低配模式去掉大阴影，只保留分隔线 */
+html[data-lowfx="1"] .side-drawer,
+html[data-lowfx="1"] .app-sheet,
+html[data-lowfx="1"] .cache-overlay .cache-body { box-shadow: none; }
