@@ -5,6 +5,7 @@
 //   - 翻页用无限滚动（IntersectionObserver + 自身滚动容器）。
 import { memo, useEffect, useRef, useState } from "react";
 import { AlbumGrid } from "./AlbumGrid";
+import { scrollToTop } from "../core/dom";
 import { SkeletonGrid } from "./SkeletonGrid";
 import type { AlbumSummary } from "../core/types";
 
@@ -66,8 +67,8 @@ export const SearchResultPage = memo(function SearchResultPage({
   }, [open]);
 
   // 换搜索词：回到顶部（同一个组件实例复用，不会重新挂载）
-  // 用两参数形式：老内核（WebView < 61）不支持 scrollTo(options) 字典签名
-  useEffect(() => { bodyRef.current?.scrollTo(0, 0); }, [resetKey]);
+  // 走 scrollToTop：老内核（WebView < 61）连 Element.scrollTo 方法都没有，直接调会抛错冒到错误边界
+  useEffect(() => { scrollToTop(bodyRef.current); }, [resetKey]);
 
   // 无限滚动：哨兵进入滚动容器（含 320px 预读区）且还有下一页时加载
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { md5Hex } from "./crypto";
 import { emit } from "./bus";
 import { isLowFx } from "./lowfx";
+import { NO_SEAM } from "./constants";
 
 export function scrambleSliceCount(albumId: number | string, pageName: string): number {
   const idStr = String(albumId);
@@ -159,6 +160,7 @@ export function measureSeamBands(canvas: HTMLCanvasElement, parts: number, half 
 }
 
 export function measureSeamDetail(canvas: HTMLCanvasElement, parts: number): SeamDetail {
+  if (NO_SEAM) return { lum: 0, chroma: 0, score: 0 }; // 老安卓包不带这个功能
   const bands = measureSeamBands(canvas, parts);
   let lum = 0;
   let chroma = 0;
@@ -207,10 +209,12 @@ let seamEnabled = readEnabled();
 
 /** 「去条纹」是否开启（持久化，全局生效；高配默认开、低配默认关） */
 export function deseaOn(): boolean {
+  if (NO_SEAM) return false;
   return seamEnabled;
 }
 
 export function setDeseam(on: boolean): void {
+  if (NO_SEAM) return;
   seamEnabled = on;
   try { localStorage.setItem(LS_ENABLED, on ? "1" : "0"); } catch { /* ignore */ }
   if (typeof window !== "undefined") {
@@ -338,6 +342,7 @@ function blurBoundary(ctx: CanvasRenderingContext2D, w: number, h: number, b: nu
  * 返回处理的边界条数；达标的边界不动。
  */
 export function smoothSeams(canvas: HTMLCanvasElement, parts: number, threshold = 1.0): number {
+  if (NO_SEAM) return 0; // 老安卓包不带这个功能
   const ctx = canvas.getContext("2d");
   if (!ctx || parts < 2) return 0;
   const w = canvas.width;

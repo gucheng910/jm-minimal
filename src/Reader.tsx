@@ -13,6 +13,7 @@ import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
+import { NO_SEAM } from "./core/constants";
 import type { ReadPage } from "./core/types";
 import type { BookMeta } from "./core/offlineMeta";
 import { on } from "./core/bus";
@@ -163,13 +164,14 @@ function applyScramble(img: HTMLImageElement, albumId: number | string, scramble
   img.parentElement?.insertBefore(canvas, img.nextSibling);
   img.style.display = "none";
   // 重排已完成（上面 9ms 的 drawUnscrambled）→ 去条纹排队，等进入视口 + 主线程空闲再做
-  if (scrambleId && on) {
+  // NO_SEAM 构建里 !NO_SEAM 是编译期常量 false → 整块（含 observer/队列）会被摇掉
+  if (scrambleId && on && !NO_SEAM) {
     const pageName = pageNameOf(img);
     seamTasks.set(canvas, { pageName, parts: scrambleSliceCount(albumId, pageName) });
     const obs = ensureSeamObserver();
     if (obs) obs.observe(canvas); else enqueueSeam(canvas);
   } else if (scrambleId) {
-    jlog("unscramble page=" + pageNameOf(img) + " 原图（去条纹关闭）");
+    jlog("unscramble page=" + pageNameOf(img) + (NO_SEAM ? "" : "（去条纹关闭）"));
   }
 }
 
@@ -878,7 +880,7 @@ export default function ReaderPanel({
               <span>{cacheTaskBusy ? <span className="mono-num">{"缓存中 " + (task?.done ?? 0) + "/" + (task?.total ?? 0)}</span> : "缓存"}</span>
             </button>
           )}
-          <button className="rt-tool" onClick={() => setSettingsOpen(true)} title="阅读设置：模式 / 去条纹 / 跳页">
+          <button className="rt-tool" onClick={() => setSettingsOpen(true)} title={NO_SEAM ? "阅读设置：模式 / 跳页" : "阅读设置：模式 / 去条纹 / 跳页"}>
             <SettingsIcon size={20} />
             <span>设置</span>
           </button>
@@ -949,9 +951,9 @@ export default function ReaderPanel({
                 <span className={"badge" + (mode === "single" ? " ok" : "")}>{mode === "single" ? "✓" : ""}</span>
               </button>
             </div>
-            <p className="muted">显示</p>
+            {!NO_SEAM && <p className="muted">显示</p>}
             <div className="row sheet-actions settings-actions">
-              {!offline && (
+              {!offline && !NO_SEAM && (
                 <button
                   className={deseam ? "btn-deseam on" : ""}
                   onClick={toggleDeseam}

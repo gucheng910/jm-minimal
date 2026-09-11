@@ -42,6 +42,9 @@ export default defineConfig(({ mode }) => {
       __APP_VERSION__: JSON.stringify(pkg.version),
       // 构建变体：更新器据此挑选对应的 APK 资产（modern / compat 同名同版本，只能构建期区分）
       __BUILD_VARIANT__: JSON.stringify(compat ? "compat" : "modern"),
+      // 老安卓专用构建（build-legacy-apk.ps1 里 JM_NO_SEAM=1）：整块去条纹（接缝修复）逻辑被摇掉，
+      // 阅读器设置里也不再出现开关 —— 这不是"默认关闭"，是这个包根本不带这个功能。
+      __NO_SEAM__: JSON.stringify(process.env.JM_NO_SEAM === "1"),
     }
   };
 });

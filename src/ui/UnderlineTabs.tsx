@@ -1,6 +1,8 @@
 // 下划线标签行（分类行 / 二级行 / 搜索类型都用它）
 // 选中态 = 深色文字 + 2px 圆角下划线（滑过去，220ms），没有色块、没有加粗
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { scrollToLeft } from "../core/dom";
+import { isLowFx } from "../core/lowfx";
 
 export interface UnderlineTab {
   key: string;
@@ -16,19 +18,25 @@ interface Props {
   className?: string;
 }
 
-/** scrollTo(options) 字典签名在 WebView < 61 上不存在（会抛异常）；探测一次后缓存结果 */
-let scrollOptionsOk: boolean | null = null;
-
 export default function UnderlineTabs({ items, value, onChange, scroll, className }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [ind, setInd] = useState({ left: 0, width: 0 });
 
+  /**
+   * 量测当前选中项相对标签行的位置。
+   * 用 getBoundingClientRect 而不是 offsetLeft/offsetWidth：老内核上标签之间是 margin 补的间距
+   * （gap 不支持），rect 才包含 margin；另外它不依赖 offsetParent，滚动容器里也算得准。
+   */
   const measure = () => {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const el = wrap.querySelector<HTMLElement>('[data-on="1"]');
     if (!el) { setInd({ left: 0, width: 0 }); return; }
-    setInd({ left: el.offsetLeft, width: el.offsetWidth });
+    const wr = wrap.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    const left = er.left - wr.left + wrap.scrollLeft;
+    if (!isFinite(left) || !isFinite(er.width)) return;
+    setInd({ left: Math.round(left * 100) / 100, width: Math.round(er.width * 100) / 100 });
   };
 
   useLayoutEffect(measure, [value, items]);
@@ -36,7 +44,14 @@ export default function UnderlineTabs({ items, value, onChange, scroll, classNam
   useEffect(() => {
     const onResize = () => measure();
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    // 老设备首帧字体/布局可能还没落定，补两次量测，避免下划线停在前一个位置上
+    const t1 = window.setTimeout(measure, 150);
+    const t2 = window.setTimeout(measure, 700);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -57,13 +72,8 @@ export default function UnderlineTabs({ items, value, onChange, scroll, classNam
       wrap.scrollWidth - wrap.clientWidth
     ));
     if (Math.abs(target - wrap.scrollLeft) < 1) return;
-    // 老内核（WebView < 61）没有 scrollTo(options) 字典签名，调用会直接抛错 —— 先探测一次并缓存结果
-    if (scrollOptionsOk === null) {
-      try { wrap.scrollTo({ left: wrap.scrollLeft }); scrollOptionsOk = true; }
-      catch { scrollOptionsOk = false; }
-    }
-    if (scrollOptionsOk) wrap.scrollTo({ left: target, behavior: "smooth" });
-    else wrap.scrollLeft = target;
+    // 低配模式不做平滑滚动（动效全关）；老内核连 Element.scrollTo 都没有，由 scrollToLeft 兜底赋值
+    scrollToLeft(wrap, target, !isLowFx());
   }, [value, scroll]);
 
   return (

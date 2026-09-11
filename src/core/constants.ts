@@ -23,6 +23,14 @@ export const LOCAL_VERSION =
  * 否则 compat 用户会被引导下载 modern 包。
  */
 declare const __BUILD_VARIANT__: string;
+declare const __NO_SEAM__: boolean;
+/**
+ * 本构建是否移除了「去条纹」（接缝修复）逻辑。
+ * 老安卓专用包置 true：阅读器不再排队做 canvas 重排，设置里也没有开关。
+ * 写成构建期常量是为了让整块代码能被摇掉（不是运行期判空）。
+ */
+export const NO_SEAM: boolean = typeof __NO_SEAM__ !== "undefined" && __NO_SEAM__ === true;
+
 export const BUILD_VARIANT: string =
   (typeof __BUILD_VARIANT__ !== "undefined" ? String(__BUILD_VARIANT__) : "modern").toLowerCase() === "compat"
     ? "compat"

@@ -2401,7 +2401,8 @@ body.jm-scroll-lock { overflow: hidden; }
   .grow > * + * { margin-left: 12px; }
   .catrow > * + * { margin-left: 10px; }
   .morebtn > * + * { margin-left: 5px; }
-  .tabs > * + * { margin-left: 22px; }
+  /* 只补标签之间的间距：.ind 是绝对定位的下划线指示条，给它加 margin 会让下划线整体偏移 */
+  .tabs > .tk + .tk { margin-left: 22px; }
   .toolrow > * + * { margin-left: 12px; }
   .sortbtn > * + * { margin-left: 5px; }
   .diag-head > * + * { margin-left: 12px; }
@@ -2448,9 +2449,16 @@ html[data-lowfx="1"] * {
   animation-duration: 0.001ms !important;
   animation-delay: 0ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.001ms !important;
-  transition-delay: 0ms !important;
+  transition: none !important;
 }
+/* 按压反馈（:active 缩放）也一并去掉：它每按一次都要重建合成层，老机器上得不偿失 */
+html[data-lowfx="1"] *:active { transform: none !important; }
+/* 只留"正在加载"的动画（状态反馈，不是装饰）：转圈 + 骨架扫光 */
+html[data-lowfx="1"] .spin,
+html[data-lowfx="1"] .mini-spin { animation-duration: 0.8s !important; animation-iteration-count: infinite !important; }
+html[data-lowfx="1"] .skeleton-thumb::after,
+html[data-lowfx="1"] .skeleton-title::after,
+html[data-lowfx="1"] .skeleton-meta::after { animation-duration: 1.5s !important; animation-iteration-count: infinite !important; }
 /* 磨砂玻璃不支持时半透明底会让文字发灰：低配模式直接给不透明底色 */
 html[data-lowfx="1"] .top-bar,
 html[data-lowfx="1"] .bottom-nav,
