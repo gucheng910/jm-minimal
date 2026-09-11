@@ -115,17 +115,19 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     setError("");
   }, []);
 
+  /**
+   * 收藏 / 取消收藏：官方 POST /favorite {aid} 本身就是切换，服务端用 type=add|remove 回话。
+   * 原实现在 is_favorite 时直接 return（按钮又 disabled），导致收藏后再也取消不掉。
+   */
   const toggleFavorite = useCallback(async () => {
     const cur = detailRef.current;
     if (!cur) return;
-    if (cur.is_favorite) { pushToast("已在收藏中", "info"); return; }
-    const ok = await run(() => client.addFavorite(cur.id));
-    if (ok) {
-      applyDetail({ ...cur, is_favorite: true });
-      pushToast("已加入官方收藏", "ok");
-    } else {
-      pushToast("收藏失败，请重试", "err");
-    }
+    const r = await run(() => client.toggleFavorite(cur.id));
+    if (!r) { pushToast("收藏操作失败，请重试", "err"); return; }
+    if (r.status !== "ok") { pushToast(String(r.msg || "收藏操作失败，请重试"), "err"); return; }
+    const removed = r.type === "remove";
+    applyDetail({ ...cur, is_favorite: !removed });
+    pushToast(removed ? "已取消收藏" : "已加入官方收藏", "ok");
   }, [run, applyDetail]);
 
   const buy = useCallback(async () => {

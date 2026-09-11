@@ -164,9 +164,11 @@ export default function AlbumDetail({
           {logged && (
             <button
               className={"btn soft fav" + (detail.is_favorite ? " on" : "")}
-              disabled={busy || Boolean(detail.is_favorite)}
+              /* 只有请求在飞时禁用：已收藏也要能点（点一下 = 取消收藏） */
+              disabled={busy}
               onClick={onToggleFavorite}
               aria-pressed={Boolean(detail.is_favorite)}
+              title={detail.is_favorite ? "点一下取消收藏" : "加入官方收藏"}
             >
               <HeartIcon size={18} filled={Boolean(detail.is_favorite)} />
               {detail.is_favorite ? "已收藏" : "收藏"}

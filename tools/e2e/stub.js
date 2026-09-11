@@ -160,10 +160,23 @@
     if (p === "categories/filter") { window.__reqs.push({ path: p, c: u.searchParams.get("c"), o: u.searchParams.get("o"), page: u.searchParams.get("page") }); return json({ content: mk("CAT", 5, "作者甲"), total: 5 }); }
     if (p === "week") return json({ categories: [{ id: 11, time: "2026 W36" }, { id: 10, time: "2026 W35" }], type: [{ id: "", title: "全部" }, { id: 1, title: "同人" }] });
     if (p === "week/filter") { window.__reqs.push({ path: p, id: u.searchParams.get("id"), type: u.searchParams.get("type"), page: u.searchParams.get("page") }); return json({ list: mk("WK", 6, "作者甲"), total: 6 }); }
+    // 收藏：官方 POST /favorite {aid} 是切换，服务端用 type=add|remove 回话（官方前端即如此）
+    if (p === "favorite" && method === "POST") {
+      const fav = (window.__fav = window.__fav || new Set());
+      const aid = String(fields.aid || "");
+      const had = fav.has(aid);
+      if (had) fav.delete(aid); else fav.add(aid);
+      window.__reqs.push({ path: p, method, aid, type: had ? "remove" : "add" });
+      return json({ status: "ok", type: had ? "remove" : "add", msg: had ? "已取消收藏" : "收藏成功" });
+    }
+    if (p === "favorite") return json({ list: [], folder_list: [], total: 0, count: 0 });
     if (p === "album") {
       const id = u.searchParams.get("id");
       window.__reqs.push({ path: p, id });
-      return json(isSeriesId(id) ? seriesDetail(id) : detail(id));
+      const d = isSeriesId(id) ? seriesDetail(id) : detail(id);
+      // 收藏态由 /favorite 的开关驱动，便于 e2e 验证「收藏 → 取消收藏」往返
+      d.is_favorite = Boolean(window.__fav && window.__fav.has(String(id)));
+      return json(d);
     }
     if (p === "comic_read") { window.__reqs.push({ path: p, id: u.searchParams.get("id") }); return json({ id: u.searchParams.get("id"), name: "读取测试", scramble_id: 0, images: [{ page: 1, image: "https://mock.jm.local/1.jpg", name: "001" }, { page: 2, image: "https://mock.jm.local/2.jpg", name: "002" }] }); }
     if (p === "forum") { window.__reqs.push({ path: p, aid: u.searchParams.get("aid") }); return json({ list: [] }); }

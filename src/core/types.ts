@@ -90,6 +90,18 @@ export interface LoginResult extends MemberInfo {
 }
 
 /**
+ * 官方收藏开关的响应（POST /favorite {aid}）。
+ * 官方前端只有这一个调用，而且它**本身就是切换**：已收藏时服务端直接取消，
+ * 再用返回的 type 告诉调用方发生了什么（add / remove / edit / move），status="ok" 表示成功。
+ */
+export interface FavoriteToggleResult {
+  status?: string;
+  type?: string;
+  msg?: string;
+  [k: string]: unknown;
+}
+
+/**
  * 官方注册响应（POST register）。
  * 官方前端只读 data.status / data.msg：status === "ok" 视为成功，msg 直接当提示文案。
  */

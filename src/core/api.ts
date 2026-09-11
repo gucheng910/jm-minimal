@@ -15,6 +15,7 @@ import type {
   CategoriesPayload,
   DailyPayload,
   FavoritePayload,
+  FavoriteToggleResult,
   ForumPayload,
   HostConfig,
   MemberInfo,
@@ -480,8 +481,13 @@ export class JMClient {
     return this.postForm(API_PATHS.coinBuyCharge, {});
   }
 
-  addFavorite(id: number | string): Promise<unknown> {
-    return this.postForm(API_PATHS.favorite, { aid: id });
+  /**
+   * 收藏开关：官方前端就这一个 POST（入参只有 aid），**服务端自己判断是加还是删**，
+   * 响应里用 type 说明结果（add / remove / edit / move）、status="ok" 表示成功。
+   * 所以「取消收藏」不需要另一个接口，也不要在本地早退（原实现收藏后再也取消不掉）。
+   */
+  toggleFavorite(id: number | string): Promise<FavoriteToggleResult> {
+    return this.postForm<FavoriteToggleResult>(API_PATHS.favorite, { aid: id });
   }
 
   getFavorites(): Promise<FavoritePayload> {

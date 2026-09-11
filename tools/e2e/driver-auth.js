@@ -6,6 +6,7 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const q = (s) => document.querySelector(s);
   const qa = (s) => Array.from(document.querySelectorAll(s));
+  const toastText = () => (qa(".toast").map((t) => t.textContent || "").join(" ") || "").trim();
   const waitFor = async (sel, t = 20000) => {
     const t0 = Date.now();
     while (Date.now() - t0 < t) { const el = q(sel); if (el) return el; await sleep(100); }
@@ -55,6 +56,29 @@
     log.push({ step: "detail-page", error: "没有列表卡片" });
   }
 
+  // ---- 收藏往返：官方 POST /favorite {aid} 本身就是「切换」，收藏完必须还能取消 ----
+  {
+    const favBtn = () => qa(".page-push .btn.fav")[0];
+    const favReqs = () => (window.__reqs || []).filter((r) => r.path === "favorite" && r.method === "POST");
+    if (favBtn()) {
+      const before = { label: favBtn().textContent.trim(), disabled: favBtn().disabled };
+      favBtn().click();
+      await sleep(1600);
+      const added = { label: favBtn().textContent.trim(), disabled: favBtn().disabled, type: (favReqs().slice(-1)[0] || {}).type, toast: toastText() };
+      favBtn().click();
+      await sleep(1600);
+      const removed = { label: favBtn().textContent.trim(), disabled: favBtn().disabled, type: (favReqs().slice(-1)[0] || {}).type, toast: toastText() };
+      log.push({ step: "favorite-toggle", before, added, removed });
+      if (added.label !== "已收藏") throw new Error("点收藏后按钮没变成已收藏：" + JSON.stringify(added));
+      if (added.type !== "add") throw new Error("收藏请求没发出去：" + JSON.stringify(added));
+      if (added.disabled) throw new Error("已收藏状态下按钮不该被禁用（否则无法取消收藏）");
+      if (removed.label !== "收藏") throw new Error("取消收藏失败（按钮仍是已收藏）：" + JSON.stringify(removed));
+      if (removed.type !== "remove") throw new Error("取消收藏请求没发出去：" + JSON.stringify(removed));
+    } else {
+      log.push({ step: "favorite-toggle", error: "详情页没有收藏按钮" });
+    }
+  }
+
   // 登出后：会员页应回到登录表单，详情页应不再显示收藏按钮（两侧同步）
   const memberNav2 = qa(".nav-item").find((b) => /会员/.test(b.textContent || ""));
   memberNav2?.click();
@@ -93,7 +117,6 @@
     el.dispatchEvent(new Event("input", { bubbles: true }));
   };
   const regReqs = () => (window.__reqs || []).filter((r) => r.path === "register");
-  const toastText = () => (qa(".toast").map((t) => t.textContent || "").join(" ") || "").trim();
   const backToMember = async () => {
     const n = qa(".nav-item").find((b) => /会员/.test(b.textContent || ""));
     n?.click();
