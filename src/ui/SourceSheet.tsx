@@ -2,6 +2,7 @@
 // 极简约束：一个入口只做一件事——这里只管"换源"，线路与图源都在同一个浮层里选完即走；
 // 测速复用启动时那套 client.autoSelectBest()，不新增探测逻辑。
 import { useState } from "react";
+import { useSheetTransition } from "../hooks/useSheetTransition";
 import { CheckIcon } from "./icons";
 import { zh } from "../core/zh";
 
@@ -26,8 +27,9 @@ export default function SourceSheet({
 }: Props) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState("");
+  const { mounted, entering, closing } = useSheetTransition(open);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   async function runTest() {
     if (testing) return;
@@ -41,8 +43,8 @@ export default function SourceSheet({
   }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <div className="source-drawer app-sheet" onClick={(e) => e.stopPropagation()}>
+    <div className="drawer-backdrop" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={onClose}>
+      <div className="source-drawer app-sheet" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="sheet-head">
           <h3>换源</h3>
           <button type="button" className="sheet-close" aria-label="关闭" onClick={onClose}>×</button>

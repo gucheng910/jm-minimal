@@ -371,9 +371,9 @@ body {
   padding: 6px 16px !important;
   min-height: 48px;
   border-radius: 12px !important;
-  transition: color 0.18s ease, transform 0.12s ease;
+  transition: color var(--t-ui) var(--ease-out), transform var(--t-press) var(--ease-out);
 }
-.nav-item svg { transition: transform 0.18s ease; }
+.nav-item svg { transition: transform var(--t-ui) var(--ease-out); }
 .nav-item:active { transform: scale(0.92); }
 .nav-item.active { color: var(--brand-deep); font-weight: 700; }
 .nav-item.active svg { transform: translateY(-1px); filter: drop-shadow(0 2px 4px rgba(16,15,15,0.18)); }
@@ -387,7 +387,8 @@ button {
   background: var(--black);
   color: #fff;
   cursor: pointer;
-  transition: transform 0.1s ease, opacity 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition: transform var(--t-press) var(--ease-out), opacity var(--t-press) linear,
+    background var(--t-press) linear, box-shadow var(--t-ui) var(--ease-out);
   user-select: none;
   touch-action: manipulation;
 }
@@ -861,8 +862,11 @@ h3 { font-size: 14px; margin: 4px 0; }
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  animation: fade-in 0.18s ease both;
+  /* 出入场对称：进场淡入，出场同一条路径淡出（时长由 useSheetTransition 保证节点留到过渡结束） */
+  transition: opacity 180ms var(--ease-out);
 }
+.drawer-backdrop[data-entering] { opacity: 0; transition: none; }
+.drawer-backdrop[data-closed] { opacity: 0; pointer-events: none; }
 .source-drawer {
   position: relative;
   width: 100%;
@@ -874,8 +878,12 @@ h3 { font-size: 14px; margin: 4px 0; }
   max-height: 82vh;
   overflow: auto;
   box-shadow: 0 -12px 40px rgba(16,15,15,0.16);
-  animation: sheet-up 0.24s cubic-bezier(0.32, 0.72, 0.35, 1) both;
+  /* 从下沿进、从下沿出；入场 280ms，出场 220ms（出口更快，非对称） */
+  transform: translateY(0);
+  transition: transform var(--t-enter) var(--ease-emph);
 }
+.source-drawer[data-entering] { transform: translateY(101%); transition: none; }
+.source-drawer[data-closed] { transform: translateY(101%); transition-duration: var(--t-ui); }
 .source-drawer::before {
   content: "";
   display: block;
@@ -1398,8 +1406,10 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   align-items: center;
   justify-content: center;
   padding: 20px;
-  animation: fade-in 0.18s ease both;
+  transition: opacity 180ms var(--ease-out);
 }
+.tos-backdrop[data-entering] { opacity: 0; transition: none; }
+.tos-backdrop[data-closed] { opacity: 0; pointer-events: none; }
 .tos-card {
   width: min(92vw, 420px);
   max-height: 84vh;
@@ -1409,7 +1419,13 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   display: flex;
   flex-direction: column;
   box-shadow: var(--sh-2);
-  animation: rise-in 0.22s ease both;
+  /* 居中弹窗：不做位移动画，只做透明度 + 极轻微缩放（技能规则：弹窗保持 center origin） */
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity var(--t-ui) var(--ease-out), transform var(--t-ui) var(--ease-out);
+}
+.tos-backdrop[data-entering] .tos-card { opacity: 0; transform: scale(0.97); transition: none; }
+.tos-backdrop[data-closed] .tos-card { opacity: 0; transform: scale(0.98); transition-duration: 160ms;
 }
 .tos-card h2 { margin: 0 0 10px; font-size: 18px; text-align: center; }
 .tos-scroll { overflow-y: auto; flex: 1; padding-right: 2px; }
@@ -1441,15 +1457,15 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   box-shadow: var(--sh-2);
   max-width: 86%;
   text-align: center;
-  animation: toast-in 0.22s cubic-bezier(0.3, 0.9, 0.4, 1.1) both;
   backdrop-filter: blur(6px);
+  /* 入场用过渡而不是 keyframes：连发时可以被重定向，不会从零重播 */
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
 }
 .toast.ok { background: rgba(63,107,42,0.95); }
 .toast.err { background: rgba(175,48,41,0.95); }
-@keyframes toast-in {
-  from { opacity: 0; transform: translateY(10px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
+.toast[data-entering] { opacity: 0; transform: translateY(10px) scale(0.95); transition: none; }
+/* 从哪进从哪出：同样从下沿退场，出口更快 */
+.toast[data-leaving] { opacity: 0; transform: translateY(12px) scale(0.98); transition-duration: 180ms; }
 
 /* ---------- 动效 ---------- */
 @keyframes rise-in {
@@ -1460,10 +1476,11 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   from { opacity: 0; }
   to { opacity: 1; }
 }
-@keyframes sheet-up {
-  from { transform: translateY(60px); opacity: 0.4; }
-  to { transform: translateY(0); opacity: 1; }
+/* 封面就绪后的淡入（只动 opacity，零位移） */
+@keyframes jm-img-in {
+  from { opacity: 0; }
 }
+.thumb.in { animation: jm-img-in 140ms var(--ease-out) both; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1962,8 +1979,12 @@ body.jm-scroll-lock { overflow: hidden; }
   font-size: 14px; line-height: 1.7; letter-spacing: 0.01em; color: var(--ink-2);
   margin: 12px 0 0; max-width: var(--measure);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  /* 折叠态 = 2 行高；展开时由行内 style 给完整高度（JS 量，不动画到 auto） */
+  max-height: 3.4em;
+  transition: max-height 220ms var(--ease-out);
 }
-.d-desc.open { display: block; -webkit-line-clamp: unset; }
+/* 展开中与收起动画期间都解除 clamp，否则文字会先跳回 2 行再收框 */
+.d-desc.open { -webkit-line-clamp: unset; }
 .d-more {
   display: inline-block; margin-top: 6px; padding: 0;
   background: none !important; border: 0; color: var(--link);
@@ -2042,8 +2063,9 @@ body.jm-scroll-lock { overflow: hidden; }
 .tk {
   flex: none; border: 0; background: none !important; padding: 0;
   color: var(--ink-3); font: inherit; font-size: 14px; white-space: nowrap; cursor: pointer;
-  transition: color var(--t-ui) var(--ease-out);
+  transition: color var(--t-ui) var(--ease-out), transform var(--t-press) var(--ease-out);
 }
+.tk:active { transform: scale(0.96); }
 .tk.on { color: var(--ink); }
 .ind {
   position: absolute; left: 0; bottom: 6px; height: 2px; border-radius: 2px;
@@ -2185,6 +2207,16 @@ body.jm-scroll-lock { overflow: hidden; }
 .member-page .grow .chev { flex: none; color: var(--ink-3); font-size: 16px; line-height: 1; transition: transform var(--t-ui) var(--ease-out); }
 .member-page .grow .chev-toggle.open { transform: rotate(90deg); }
 .member-page .grow-body { padding: 14px 18px 18px; }
+/* 折叠面板（Collapse.tsx）：高度由 JS 给（0 ↔ 内容高度），这里只管过渡与裁切 */
+.collapse {
+  overflow: hidden;
+  height: 0;
+  opacity: 0;
+  transition: height 200ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+.collapse[data-open] { opacity: 1; }
+/* 折叠行之间的分隔线：原来靠 .grow + .grow-body 相邻选择器，现在中间多了 .collapse 这一层 */
+.member-page .grow + .collapse { box-shadow: inset 0 1px 0 var(--line); }
 .member-page .grow-note { margin: 0 0 12px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
 .member-page .grow-actions { gap: 8px; margin-top: 12px; }
 .member-page .member-grid { gap: 6px 18px; font-size: 13px; color: var(--ink-2); }

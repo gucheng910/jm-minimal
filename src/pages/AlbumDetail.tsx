@@ -3,6 +3,8 @@
 // 极简要点：标题 18/500、元信息 13px 行距 5、简介默认 2 行可展开、分组行用浅灰面而不是卡片边框、
 // 页面下半部分刻意留空（不靠摊开间距把屏幕填满）。
 import { useLayoutEffect, useRef, useState } from "react";
+import Collapse from "../ui/Collapse";
+import { useSheetTransition } from "../hooks/useSheetTransition";
 import CommentList from "../ui/CommentList";
 import { AlbumGrid } from "../ui/AlbumGrid";
 import { HeartIcon } from "../ui/icons";
@@ -55,6 +57,10 @@ export default function AlbumDetail({
 }: Props) {
   const [descOpen, setDescOpen] = useState(false);
   const [descClamped, setDescClamped] = useState(false);
+  /** 展开时量到的完整高度（折叠态是 2 行 max-height，展开过渡到这个值） */
+  const [descH, setDescH] = useState(0);
+  /** 收起动画播完前保持 line-clamp 解除，否则文字会先跳回 2 行再收框 */
+  const descAnim = useSheetTransition(descOpen, 240);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [relatedOpen, setRelatedOpen] = useState(false);
   const descRef = useRef<HTMLParagraphElement | null>(null);
@@ -70,6 +76,13 @@ export default function AlbumDetail({
     if (!el) return;
     setDescClamped(el.scrollHeight > el.clientHeight + 1);
   }, [descOpen, detail.id, detail.description]);
+
+  /** 展开/收起简介：展开前先量出完整高度，交给 max-height 过渡 */
+  function toggleDesc() {
+    const el = descRef.current;
+    if (!descOpen && el) setDescH(el.scrollHeight);
+    setDescOpen((o) => !o);
+  }
 
   const locked = parsePaid(detail);
   const authors = authorNames(detail);
@@ -131,9 +144,10 @@ export default function AlbumDetail({
 
       {desc && (
         <>
-          <p ref={descRef} className={"d-desc" + (descOpen ? " open" : "")}>{desc}</p>
+          <p ref={descRef} className={"d-desc" + (descAnim.mounted ? " open" : "")}
+            style={descOpen && descH > 0 ? { maxHeight: descH } : undefined}>{desc}</p>
           {(descClamped || descOpen) && (
-            <button className="d-more" onClick={() => setDescOpen((o) => !o)}>{descOpen ? "收起" : "展开"}</button>
+            <button className="d-more" onClick={toggleDesc}>{descOpen ? "收起" : "展开"}</button>
           )}
         </>
       )}
@@ -185,14 +199,14 @@ export default function AlbumDetail({
         )}
       </div>
 
-      {relatedOpen && (
+      <Collapse open={relatedOpen}>
         <div className="related-block">
           <h3>相关漫画</h3>
           <AlbumGrid items={related} onOpen={onOpenRelated} />
         </div>
-      )}
+      </Collapse>
 
-      {commentsOpen && (
+      <Collapse open={commentsOpen}>
         <CommentList
           comments={comments}
           text={commentText}
@@ -201,7 +215,7 @@ export default function AlbumDetail({
           onTextChange={onCommentChange}
           onSubmit={onSubmitComment}
         />
-      )}
+      </Collapse>
     </div>
   );
 }

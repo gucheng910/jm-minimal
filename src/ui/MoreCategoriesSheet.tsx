@@ -1,6 +1,7 @@
 // 更多分类浮层：官方 /categories 的 blocks（实测结构 { title, content: string[] }）
 // 4 组共约 47 个词，点任意词 = 一次标签搜索（search_type=tag），复用只读搜索结果页
 import type { CategoryBlock } from "../core/types";
+import { useSheetTransition } from "../hooks/useSheetTransition";
 
 interface Props {
   open: boolean;
@@ -10,10 +11,11 @@ interface Props {
 }
 
 export default function MoreCategoriesSheet({ open, onClose, blocks, onPick }: Props) {
-  if (!open) return null;
+  const { mounted, entering, closing } = useSheetTransition(open);
+  if (!mounted) return null;
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <div className="source-drawer app-sheet sheet-tall" onClick={(e) => e.stopPropagation()}>
+    <div className="drawer-backdrop" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={onClose}>
+      <div className="source-drawer app-sheet sheet-tall" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="sheet-head"><h3>更多分类</h3></div>
         <div className="sheet-scroll">
           {blocks.map((b) => (

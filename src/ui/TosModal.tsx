@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { TOS_PARAGRAPHS } from "../core/tos";
 import { openExternal } from "../core/openExternal";
+import { useSheetTransition } from "../hooks/useSheetTransition";
 
 export default function TosModal({
   open,
@@ -19,11 +20,12 @@ export default function TosModal({
     const iv = window.setInterval(() => setLeft((l) => Math.max(0, l - 1)), 1000);
     return () => window.clearInterval(iv);
   }, [open, requireWait]);
-  if (!open) return null;
+  const { mounted, entering, closing } = useSheetTransition(open, 180);
+  if (!mounted) return null;
   const ready = !requireWait || left === 0;
   return (
-    <div className="tos-backdrop">
-      <div className="tos-card">
+    <div className="tos-backdrop" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined}>
+      <div className="tos-card" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined}>
         <h2>使用须知</h2>
         <div className="tos-scroll">
           {TOS_PARAGRAPHS.map((p, i) => (

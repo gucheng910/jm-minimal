@@ -17,6 +17,8 @@ export function albumCoverUrl(a: AlbumSummary): string {
 
 function Cover({ url, alt }: { url?: string; alt: string }) {
   const [tries, setTries] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const timer = useRef<number | null>(null);
   const full = url || "";
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
@@ -25,6 +27,16 @@ function Cover({ url, alt }: { url?: string; alt: string }) {
   const dead = tries >= 6; // 超过恢复上限才永久占位（重挂载/刷新会重新开始）
   // 失败自动重试：快速退避 0.8s/1.6s/3.2s，之后每 45s 尝试恢复一次，避免一次失败就永远空白
   const src = tries > 0 ? full + (full.includes("?") ? "&" : "?") + "retry=" + tries : full;
+  /**
+   * 淡入只做 opacity（140ms，零位移）：弱网下列表里的封面是逐张"蹦"出来的。
+   * 用动画而不是 transition 是因为要「在图片就绪之后」才开始淡入；
+   * 命中浏览器缓存时 onLoad 可能在 React 挂上监听之前就触发，所以补一次 complete 检查。
+   */
+  useEffect(() => {
+    setLoaded(false);
+    const el = imgRef.current;
+    if (el && el.complete && el.naturalWidth > 0) setLoaded(true);
+  }, [src]);
   const scheduleNext = () => {
     if (timer.current) window.clearTimeout(timer.current);
     const delay = tries < 3 ? [800, 1600, 3200][tries] : 45000;
@@ -32,9 +44,9 @@ function Cover({ url, alt }: { url?: string; alt: string }) {
   };
   return (
     <span className="thumb-box">
-      <img className="thumb" key={src} src={src} alt={alt} loading="lazy" decoding="async"
+      <img ref={imgRef} className={"thumb" + (loaded ? " in" : "")} key={src} src={src} alt={alt} loading="lazy" decoding="async"
         style={dead ? { opacity: 0 } : undefined}
-        onLoad={() => { if (timer.current) { window.clearTimeout(timer.current); timer.current = null; } }}
+        onLoad={() => { setLoaded(true); if (timer.current) { window.clearTimeout(timer.current); timer.current = null; } }}
         onError={() => { if (!dead) scheduleNext(); }} />
       <span className="thumb-fallback"><span>{alt}</span></span>
     </span>

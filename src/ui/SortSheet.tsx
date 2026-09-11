@@ -2,6 +2,7 @@
 // 选中项用「对勾 + 深色文字」，没有反色块；点一项即生效并收起
 import { CheckIcon } from "./icons";
 import { SORT_MODES } from "../core/constants";
+import { useSheetTransition } from "../hooks/useSheetTransition";
 
 const HINT: Record<string, string> = {
   "": "先新后旧",
@@ -18,10 +19,11 @@ interface Props {
 }
 
 export default function SortSheet({ open, onClose, value, onChange }: Props) {
-  if (!open) return null;
+  const { mounted, entering, closing } = useSheetTransition(open);
+  if (!mounted) return null;
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <div className="source-drawer app-sheet" onClick={(e) => e.stopPropagation()}>
+    <div className="drawer-backdrop" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={onClose}>
+      <div className="source-drawer app-sheet" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="sheet-head"><h3>排序</h3></div>
         <div className="sheet-list">
           {SORT_MODES.map(([key, label]) => {

@@ -576,7 +576,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         hotTags={search.hotTags}
         hotErr={search.hotErr}
         history={search.history}
-        gridKey={"g" + settingTick}
+        // key 带上「查询词 + 类型 + 排序 + 图床 tick」：换筛选时列表重挂载，
+        // 复用 .list 的 rise-in 作为内容替换的桥接（否则内容是原地瞬间换掉）
+        gridKey={"g" + settingTick + "-" + search.query + "-" + search.type + "-" + search.order}
         onQueryChange={search.setQuery}
         onSubmit={search.submit}
         onRunTerm={search.runTerm}
@@ -608,7 +610,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         total={cat.total}
         busy={cat.busy}
         error={cat.error}
-        gridKey={"g" + settingTick}
+        // 同上：分类 / 榜位 / 子分类 / 排序任一变化都算一次内容替换
+        gridKey={"g" + settingTick + "-" + cat.slug + "-" + cat.rank + "-" + cat.sub + "-" + cat.order}
         onPickPlace={cat.pickPlace}
         onPickRank={cat.pickRank}
         onPickSub={cat.pickSub}
@@ -631,7 +634,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         hasMore={home.hasMore}
         busy={home.busy}
         error={home.error}
-        gridKey={"g" + settingTick}
+        // 推荐 / 最新 是两套内容，切换时也走同一条进场
+        gridKey={"g" + settingTick + "-" + homeFeed}
         feed={homeFeed}
         onPickFeed={pickHomeFeed}
         onRetry={retryHomeFeed}

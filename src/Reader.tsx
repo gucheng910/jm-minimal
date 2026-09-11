@@ -8,6 +8,7 @@ import { chapterLabel, getChapter, listChapters, type BookChapter, type ChapterM
 import { saveHistory } from "./core/history";
 import { useBackHandler } from "./hooks/useBackHandler";
 import { popSheetLock, pushSheetLock } from "./core/uiLocks";
+import { useSheetTransition } from "./hooks/useSheetTransition";
 import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
@@ -186,6 +187,11 @@ export default function ReaderPanel({
   const [chapOpen, setChapOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
+  // 四个浮层的出入场（逻辑状态仍然是上面的 boolean：返回键/锁屏判定不受动画影响）
+  const sourceAnim = useSheetTransition(sourceOpen);
+  const settingsAnim = useSheetTransition(settingsOpen);
+  const chapAnim = useSheetTransition(chapOpen);
+  const cacheAnim = useSheetTransition(cacheOpen);
   const [cacheSel, setCacheSel] = useState<Set<string>>(new Set());
   const [cachedIds, setCachedIds] = useState<Map<string, CachedChapterInfo>>(new Map());
   const [chapterMetas, setChapterMetas] = useState<ChapterMeta[]>([]);
@@ -882,9 +888,9 @@ export default function ReaderPanel({
    */
   const overlays = createPortal((
     <>
-      {sourceOpen && (
-        <div className="drawer-backdrop reader-sheet-backdrop" onClick={closeSourcePicker}>
-          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+      {sourceAnim.mounted && (
+        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={sourceAnim.entering ? "" : undefined} data-closed={sourceAnim.closing ? "" : undefined} onClick={closeSourcePicker}>
+          <div className="source-drawer reader-sheet" data-entering={sourceAnim.entering ? "" : undefined} data-closed={sourceAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>更快的源</h3>
               <button className="sheet-close" aria-label="关闭" onClick={closeSourcePicker}>×</button>
@@ -912,9 +918,9 @@ export default function ReaderPanel({
       )}
 
       {/* 阅读设置：模式 / 去条纹 / 跳页（原来这些都摊在工具栏上，阅读时太吵） */}
-      {settingsOpen && (
-        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+      {settingsAnim.mounted && (
+        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={settingsAnim.entering ? "" : undefined} data-closed={settingsAnim.closing ? "" : undefined} onClick={() => setSettingsOpen(false)}>
+          <div className="source-drawer reader-sheet" data-entering={settingsAnim.entering ? "" : undefined} data-closed={settingsAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>阅读设置</h3>
               <button className="sheet-close" aria-label="关闭" onClick={() => setSettingsOpen(false)}>×</button>
@@ -966,9 +972,9 @@ export default function ReaderPanel({
         </div>
       )}
 
-      {chapOpen && (
-        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => setChapOpen(false)}>
-          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+      {chapAnim.mounted && (
+        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={chapAnim.entering ? "" : undefined} data-closed={chapAnim.closing ? "" : undefined} onClick={() => setChapOpen(false)}>
+          <div className="source-drawer reader-sheet" data-entering={chapAnim.entering ? "" : undefined} data-closed={chapAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>{"切换话数" + (bookMeta?.name ? "：" + bookMeta.name : "")}</h3>
               <button className="sheet-close" aria-label="关闭" onClick={() => setChapOpen(false)}>×</button>
@@ -1002,9 +1008,9 @@ export default function ReaderPanel({
         </div>
       )}
 
-      {cacheOpen && (
-        <div className="drawer-backdrop reader-sheet-backdrop" onClick={() => { if (!cacheBusy) setCacheOpen(false); }}>
-          <div className="source-drawer reader-sheet" onClick={(e) => e.stopPropagation()}>
+      {cacheAnim.mounted && (
+        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={cacheAnim.entering ? "" : undefined} data-closed={cacheAnim.closing ? "" : undefined} onClick={() => { if (!cacheBusy) setCacheOpen(false); }}>
+          <div className="source-drawer reader-sheet" data-entering={cacheAnim.entering ? "" : undefined} data-closed={cacheAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
               <h3>选择要缓存的话数</h3>
               <button className="sheet-close" aria-label="关闭" disabled={cacheBusy} onClick={() => setCacheOpen(false)}>×</button>

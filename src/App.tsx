@@ -12,6 +12,7 @@ import { emit, on } from "./core/bus";
 import { useLoggedIn } from "./hooks/useLoggedIn";
 import { useBackHandler } from "./hooks/useBackHandler";
 import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
+import Collapse from "./ui/Collapse";
 import ToastHost, { pushToast } from "./ui/toast";
 import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
@@ -573,9 +574,15 @@ export default function App() {
     openMember();
   }
 
-  // 全局响应「去 DNS 配置」点击
+  // 全局响应「去 DNS 配置」点击：DNS 行默认收起，先展开再滚动（展开 200ms，等它落地再滚）
   useEffect(() => {
-    const h = () => openMemberAndDns();
+    const h = () => {
+      setDnsOpen(true);
+      openMemberAndDns();
+      window.setTimeout(() => {
+        document.getElementById("dns-guide-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 340);
+    };
     return on("jm:gotoDns", h);
   }, []);
 
@@ -694,7 +701,7 @@ export default function App() {
               </span>
               <span className={"chev chev-toggle" + (dailyOpen ? " open" : "")}>›</span>
             </button>
-            {dailyOpen && (
+            <Collapse open={dailyOpen}>
               <div className="grow-body">
                 {daily ? (
                   <>
@@ -707,13 +714,13 @@ export default function App() {
                   <button className="btn soft sm" disabled={state.busy} onClick={() => { void loadDaily(); }}>加载签到活动</button>
                 )}
               </div>
-            )}
+            </Collapse>
             <button className="grow" onClick={() => setAccountOpen((o) => !o)} aria-expanded={accountOpen}>
               <span>{fmt(member?.username)}</span>
               <span className="v">JCoin {fmt(member?.coin)}</span>
               <span className={"chev chev-toggle" + (accountOpen ? " open" : "")}>›</span>
             </button>
-            {accountOpen && (
+            <Collapse open={accountOpen}>
               <div className="grow-body">
                 <div className="grid2 member-grid">
                   <span>等级：{fmt(member?.level)}</span>
@@ -731,7 +738,7 @@ export default function App() {
                   <button className="btn soft sm" disabled={state.busy} onClick={handleRefresh}>刷新会话</button>
                 </div>
               </div>
-            )}
+            </Collapse>
           </div>
 
           <button className="btn soft" style={{ width: "100%" }} disabled={state.busy} onClick={handleLogout}>登出</button>
@@ -745,22 +752,22 @@ export default function App() {
           <span>DNS 加速</span>
           <span className={"chev chev-toggle" + (dnsOpen ? " open" : "")}>›</span>
         </button>
-        {dnsOpen && (
+        <Collapse open={dnsOpen}>
           <div className="grow-body">
             <DnsGuide />
           </div>
-        )}
+        </Collapse>
         {logged && (
           <>
             <button className="grow" onClick={() => setTagOpen((o) => !o)} aria-expanded={tagOpen}>
               <span>标签屏蔽</span>
               <span className={"chev chev-toggle" + (tagOpen ? " open" : "")}>›</span>
             </button>
-            {tagOpen && (
+            <Collapse open={tagOpen}>
               <div className="grow-body">
                 <TagBlockSetting />
               </div>
-            )}
+            </Collapse>
           </>
         )}
       </div>
