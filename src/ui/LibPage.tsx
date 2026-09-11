@@ -26,11 +26,16 @@ function historyToCards(list: HistoryEntry[]): AlbumSummary[] {
 export default function LibPage({
   kind,
   onOpenAlbum,
-  onClose
+  onClose,
+  entering,
+  closing
 }: {
   kind: "favorite" | "history";
   onOpenAlbum: (aid: number | string) => void;
   onClose: () => void;
+  /** 出场过渡中的状态（由 App 的 useSheetTransition 给） */
+  entering?: boolean;
+  closing?: boolean;
 }) {
   const [items, setItems] = useState<AlbumSummary[] | null>(null);
   const [error, setError] = useState("");
@@ -67,7 +72,7 @@ export default function LibPage({
   }, [kind]);
 
   return (
-    <div className="cache-overlay">
+    <div className="cache-overlay" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined}>
       <div className="cache-header">
         <h2>{title}</h2>
         <button className="ghost" aria-label="关闭" onClick={onClose}><CloseIcon size={18} /></button>

@@ -1250,8 +1250,11 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
   background: var(--bg);
   overflow-y: auto;
   padding: calc(var(--top-h) + 8px) 20px 32px;
-  animation: fade-in 0.16s ease both;
+  /* 整屏浮层：淡入淡出对称（原来只有入场 keyframes，关闭时硬切） */
+  transition: opacity 180ms var(--ease-out);
 }
+.cache-overlay[data-entering] { opacity: 0; transition: none; }
+.cache-overlay[data-closed] { opacity: 0; pointer-events: none; }
 .cache-header {
   display: flex;
   align-items: flex-start;

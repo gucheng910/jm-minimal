@@ -98,7 +98,7 @@ function GroupCover({ group }: { group: BookGroup }) {
   );
 }
 
-export default function CacheCenter({ onClose }: { onClose: () => void }) {
+export default function CacheCenter({ onClose, entering, closing }: { onClose: () => void; entering?: boolean; closing?: boolean }) {
   const [tasks, setTasks] = useState<CacheTaskMeta[]>(cacheList);
   const [tab, setTab] = useState<"active" | "done">("active");
   const [view, setView] = useState<View>({ kind: "list" });
@@ -252,7 +252,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
 
   if (reading) {
     return (
-      <div className="cache-overlay cache-overlay-reader">
+      <div className="cache-overlay cache-overlay-reader" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined}>
         <ReaderPanel
           albumId={reading.id}
           pages={reading.pages}
@@ -275,7 +275,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
       ? book.chapters
       : bookChapters.map((c) => ({ id: c.chapterId, name: c.name || "", sort: Number(c.sort) || 0 }));
     return (
-      <div className="cache-overlay">
+      <div className="cache-overlay" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined}>
         <div className="cache-header">
           <div>
             <h2>{book?.name || currentGroup?.title || "离线详情"}</h2>
@@ -335,7 +335,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
 
   // ---- 缓存列表（按书分组）----
   return (
-    <div className="cache-overlay">
+    <div className="cache-overlay" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined}>
       <div className="cache-header">
         <div>
           <h2>缓存管理</h2>

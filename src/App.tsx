@@ -12,6 +12,7 @@ import { emit, on } from "./core/bus";
 import { useLoggedIn } from "./hooks/useLoggedIn";
 import { useBackHandler } from "./hooks/useBackHandler";
 import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
+import { useSheetTransition } from "./hooks/useSheetTransition";
 import Collapse from "./ui/Collapse";
 import ToastHost, { pushToast } from "./ui/toast";
 import { openGate, startupReady } from "./core/startup";
@@ -229,6 +230,10 @@ export default function App() {
 
   // 整屏浮层（侧边抽屉 / 缓存中心 / 收藏足迹 / 换源抽屉）打开时锁住底层页面滚动
   useBodyScrollLock(menuOpen || showCache || libPanel !== null || showSource);
+
+  // 缓存中心 / 收藏足迹：整屏浮层也给个出场淡出（原来只淡入，关掉时硬切）
+  const cacheAnim = useSheetTransition(showCache, 200);
+  const libAnim = useSheetTransition(libPanel !== null, 200);
 
   // 侧边抽屉是浮层：返回键先关抽屉，不做页面跳转。
   // App 在挂载时就注册（早于阅读器/缓存中心），因此是链上第一个；抽屉没开时返回 false 放行。
@@ -857,10 +862,12 @@ export default function App() {
         onPickLine={handleLineChange}
         onAutoTest={autoPickBest}
       />
-      {showCache && <CacheCenter onClose={() => setShowCache(false)} />}
-      {libPanel && (
+      {cacheAnim.mounted && <CacheCenter onClose={() => setShowCache(false)} entering={cacheAnim.entering} closing={cacheAnim.closing} />}
+      {libAnim.mounted && libPanel && (
         <LibPage
           kind={libPanel}
+          entering={libAnim.entering}
+          closing={libAnim.closing}
           onClose={() => setLibPanel(null)}
           onOpenAlbum={(aid) => {
             setLibPanel(null);
