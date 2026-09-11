@@ -1,5 +1,6 @@
 import { HOST_KEY_SECRET, HOST_URLS, UI_KEYS } from "./constants";
 import { aesEcbDecrypt, md5Hex } from "./crypto";
+import { fetchWithTimeout } from "./fetchTimeout";
 import type { HostConfig } from "./types";
 
 const HOST_TTL_MS = 12 * 60 * 60 * 1000; // 线路表 12 小时本地缓存
@@ -33,10 +34,7 @@ export async function loadHostConfig(): Promise<HostConfig> {
   const errors: string[] = [];
   for (const url of HOST_URLS) {
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 6000);
-      const resp = await fetch(url, { cache: "no-store", signal: ctrl.signal });
-      clearTimeout(timer);
+      const resp = await fetchWithTimeout(url, { cache: "no-store" }, 6000);
       if (!resp.ok) throw new Error("http " + resp.status);
       const cfg = parseHostText(await resp.text());
       writeHostCache(cfg);

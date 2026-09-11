@@ -66,7 +66,8 @@ export const SearchResultPage = memo(function SearchResultPage({
   }, [open]);
 
   // 换搜索词：回到顶部（同一个组件实例复用，不会重新挂载）
-  useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [resetKey]);
+  // 用两参数形式：老内核（WebView < 61）不支持 scrollTo(options) 字典签名
+  useEffect(() => { bodyRef.current?.scrollTo(0, 0); }, [resetKey]);
 
   // 无限滚动：哨兵进入滚动容器（含 320px 预读区）且还有下一页时加载
   useEffect(() => {

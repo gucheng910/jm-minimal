@@ -4,6 +4,7 @@ import { pushToast } from "./toast";
 import { client } from "../core/api";
 import { isDesktop, jmDns, dnsCleanPrefEnabled, setDnsCleanPref, type DnsCleanState } from "../core/dnsClean";
 import { on } from "../core/bus";
+import { fetchWithTimeout } from "../core/fetchTimeout";
 
 const DOH_SERVERS = [
   { name: "阿里", dot: "dot.alidns.com" },
@@ -15,14 +16,10 @@ const TIMEOUT_MS = 5000;
 
 async function probeApi(path: string) {
   const t0 = performance.now();
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const resp = await fetch(path, { method: "GET", credentials: "omit", cache: "no-store", signal: ctrl.signal });
-    clearTimeout(timer);
+    const resp = await fetchWithTimeout(path, { method: "GET", credentials: "omit", cache: "no-store" }, TIMEOUT_MS);
     return { ok: resp.ok, ms: Math.round(performance.now() - t0) };
   } catch {
-    clearTimeout(timer);
     return { ok: false, ms: Math.round(performance.now() - t0) };
   }
 }

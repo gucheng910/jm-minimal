@@ -16,6 +16,9 @@ interface Props {
   className?: string;
 }
 
+/** scrollTo(options) 字典签名在 WebView < 61 上不存在（会抛异常）；探测一次后缓存结果 */
+let scrollOptionsOk: boolean | null = null;
+
 export default function UnderlineTabs({ items, value, onChange, scroll, className }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [ind, setInd] = useState({ left: 0, width: 0 });
@@ -54,8 +57,13 @@ export default function UnderlineTabs({ items, value, onChange, scroll, classNam
       wrap.scrollWidth - wrap.clientWidth
     ));
     if (Math.abs(target - wrap.scrollLeft) < 1) return;
-    try { wrap.scrollTo({ left: target, behavior: "smooth" }); }
-    catch { wrap.scrollLeft = target; }
+    // 老内核（WebView < 61）没有 scrollTo(options) 字典签名，调用会直接抛错 —— 先探测一次并缓存结果
+    if (scrollOptionsOk === null) {
+      try { wrap.scrollTo({ left: wrap.scrollLeft }); scrollOptionsOk = true; }
+      catch { scrollOptionsOk = false; }
+    }
+    if (scrollOptionsOk) wrap.scrollTo({ left: target, behavior: "smooth" });
+    else wrap.scrollLeft = target;
   }, [value, scroll]);
 
   return (
