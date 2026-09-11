@@ -2268,3 +2268,60 @@ body.jm-scroll-lock { overflow: hidden; }
 .member-page .grow-actions { gap: 8px; margin-top: 12px; }
 .member-page .member-grid { gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
 
+/* ============================================================
+ * 老内核兜底：WebView < 88 没有 aspect-ratio
+ * 更要命的是老 Chromium 的 flex 布局：.thumb-box 是 inline-flex，替换元素（img）作为
+ * flex item 且 align-items:stretch 时，交叉轴尺寸按「固有高度」解析，于是 width:100% +
+ * height:auto 并不缩放 —— 实测小米 4W（WebView 57）封面按原图 533px 高渲染（盒宽只有
+ * 180px），一屏只放得下两张。用最古老的 padding-top 比例盒复刻 3:4，任何引擎结果一致。
+ * 支持 aspect-ratio 的现代内核不走这段，渲染与之前完全相同。
+ * ============================================================ */
+@supports not (aspect-ratio: 3 / 4) {
+  .list-item > .thumb-box {
+    position: relative;
+    display: block;
+    height: 0;
+    padding-top: 133.3333%;
+    overflow: hidden;
+  }
+  .list-item > .thumb-box > .thumb {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  /* 无图占位（显示完整书名）同样要撑成 3:4，否则盒高塌成 0 */
+  .list-item > .thumb.empty {
+    position: relative;
+    display: block;
+    height: 0;
+    padding-top: 133.3333%;
+  }
+  .list-item > .thumb.empty > span {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 10px;
+  }
+  /* 骨架屏同款问题：比例盒塌成 0，只剩标题/信息的灰条 */
+  .skeleton-thumb-wrapper {
+    position: relative;
+    height: 0;
+    padding-top: 133.3333%;
+  }
+  .skeleton-thumb {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+  }
+}

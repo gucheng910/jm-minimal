@@ -61,8 +61,15 @@ const loggedSrc = new Set<string>();
 
 // 带 CORS 加载失败（个别图床不发 CORS 头）时，回退为普通加载——此时 canvas 会被污染，
 // 评分/平滑会自动跳过（见 measureSeamScore 的 try/catch），不影响阅读
+let expressHintShown = false;
 function onImgError(e: React.SyntheticEvent<HTMLImageElement>) {
   const im = e.currentTarget;
+  // express（图源 0 / 快速通道）实测只给 logo 不给正文图（photos 被 CDN 重置）：
+  // 用户手动选到它时给一次明确提示，而不是对着一片黑猜哪里坏了（每次会话只提示一次）
+  if (!expressHintShown && String(client.imageShunt) === "0" && /jm-page|jm-single/.test(im.className)) {
+    expressHintShown = true;
+    pushToast("快速通道（图源 0）拉不到正文图，请到「换源」换回普通图源", "err");
+  }
   if (im.dataset.corsFallback) return;
   im.dataset.corsFallback = "1";
   im.removeAttribute("crossorigin");

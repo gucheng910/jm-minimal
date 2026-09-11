@@ -137,6 +137,9 @@ export class JMClient {
       // 记忆里的图床可能已经失效（官方换源 / 代理挂掉）：先验一张图，坏了就走完整测速。
       // 不验的话恢复出来的正是"线路能通、封面全白"那种状态（老设备冷启动白封面十几秒的根因）
       if (saved.imgHost && !(await imageHostOk(saved.imgHost, 4000))) return false;
+      // express(0) 不再作为自动选优结果（正文图被 CDN 重置，见 runAutoSelect 注释）：
+      // 旧缓存里还是 0 就判无效，重新测速挑一个官方源，避免"封面能出、正文全黑"。
+      if (String(saved.shunt) === "0") return false;
       this.selectLine(saved.host);
       this.setImageShunt(saved.shunt);
       await this.getSetting();
@@ -212,7 +215,12 @@ export class JMClient {
     if (imgItems.length > 0) {
       const samples = await measureImages(imgItems, 6000);
       for (const s of samples) { if (s.ok) okHosts.add(s.url.replace(/^https?:\/\//, "").split("/")[0]); }
-      const bestImg = samples.find((s) => s.ok);
+      // 官方正常图源优先于 express（0）。实测（小米 4W / 2026-09-11）：express 图床（cn-ms.*）
+      // 对 /media/logo/new_logo.png 返回 200，对正文 /media/photos/*.webp 直接 ERR_CONNECTION_RESET。
+      // 只按"能不能出图 + 快不快"挑，express 必然胜出 → 封面正常、整本正文全黑。
+      // 所以：官方源里有任何一个可用就不用 express，express 只在官方源全挂时兜底。
+      const okSamples = samples.filter((s) => s.ok);
+      const bestImg = okSamples.find((s) => s.label !== "0") || okSamples[0];
       if (bestImg) {
         const bestHost = bestImg.url.replace(/^https?:\/\//, "").split("/")[0];
         const pick = hostByKey.find((p) => p.host === bestHost);
@@ -225,7 +233,8 @@ export class JMClient {
     //      光信它就会一直"线路通、封面全白"。测速已经验过的源里换一个真能出图的。
     const applied = String(this.setting?.img_host || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
     if (applied && !okHosts.has(applied) && !(await imageHostOk(applied, 4000))) {
-      const alt = hostByKey.find((p) => p.host && p.host !== applied && okHosts.has(p.host));
+      const alt = hostByKey.find((p) => p.host && p.host !== applied && p.key !== "0" && okHosts.has(p.host))
+        || hostByKey.find((p) => p.host && p.host !== applied && okHosts.has(p.host));
       if (alt) {
         this.setImageShunt(alt.key);
         await this.getSetting().catch(() => { /* ignore */ });
