@@ -684,8 +684,19 @@ h3 { font-size: 14px; margin: 4px 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- 下拉刷新 ---------- */
-.ptr-indicator {
+.ptr-wrap {
   position: relative;
+  /* 手势期间由 JS 设 translateY(px)，松手/刷新结束走这条过渡 */
+  transform: translateY(0);
+}
+.ptr-wrap[data-dragging] { transition: none; }
+.ptr-indicator {
+  /* 放在内容上方 60px：容器往下平移多少，指示器就露出多少；不再逐帧改 height（布局属性） */
+  position: absolute;
+  top: -60px;
+  left: 0;
+  right: 0;
+  height: 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -694,12 +705,13 @@ h3 { font-size: 14px; margin: 4px 0; }
   overflow: hidden;
   color: var(--ink-3);
   font-size: 13px;
-  will-change: height, opacity;
+  opacity: 0;
+  will-change: transform, opacity;
 }
 .ptr-arrow {
   font-size: 18px;
   color: var(--ink-2);
-  transition: transform 0.12s ease, color 0.12s ease;
+  transition: transform var(--t-press) var(--ease-out), color var(--t-press) linear;
   line-height: 1;
 }
 .ptr-spinner {
@@ -734,12 +746,23 @@ h3 { font-size: 14px; margin: 4px 0; }
   aspect-ratio: 3 / 4;
   height: auto;
 }
+/* 扫光只用 transform（原来动 background-position：不可合成，每帧重绘） */
 .skeleton-thumb,
 .skeleton-title,
 .skeleton-meta {
-  animation: pulse 1.5s ease-in-out infinite;
-  background: linear-gradient(90deg, var(--line), var(--line-strong), var(--line));
-  background-size: 200% 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--line);
+}
+.skeleton-thumb::after,
+.skeleton-title::after,
+.skeleton-meta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 1.5s linear infinite;
 }
 .skeleton-thumb { width: 100%; height: 100%; }
 .skeleton-title {
@@ -753,9 +776,8 @@ h3 { font-size: 14px; margin: 4px 0; }
   width: 60%;
   border-radius: 8px;
 }
-@keyframes pulse {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+@keyframes shimmer {
+  to { transform: translateX(100%); }
 }
 
 /* ---------- 详情 / 评论区 ---------- */
@@ -994,7 +1016,11 @@ h3 { font-size: 14px; margin: 4px 0; }
 .rt-title { flex: 1; min-width: 0; font-size: 14px; color: #e8e8ea; }
 .rt-page { flex: none; font-size: 13px; color: #c9c9cc; }
 .rt-progress { height: 2px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); margin-bottom: 16px; overflow: hidden; }
-.rt-progress i { display: block; height: 100%; border-radius: 2px; background: #fff; transition: width var(--t-ui) linear; }
+.rt-progress i {
+  display: block; height: 100%; width: 100%; background: #fff;
+  transform-origin: left center;
+  transition: transform var(--t-ui) linear;
+}
 .rt-tools { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
 .rt-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; }
 /* 工具按钮：图标 + 11px 小字，四个等分（原来 9 个文字按钮挤成两行） */
@@ -1260,7 +1286,11 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
 .cache-item-actions { display: flex; flex-direction: column; gap: 6px; }
 .cache-item-actions button { padding: 5px 10px; font-size: 13px; }
 .progress { height: 3px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 8px; }
-.progress-fill { height: 100%; border-radius: 999px; background: var(--ink); transition: width 0.3s ease; }
+.progress-fill {
+  height: 100%; width: 100%; border-radius: 999px; background: var(--ink);
+  transform-origin: left center;
+  transition: transform var(--t-ui) var(--ease-out);
+}
 .small-err { font-size: 13px; margin-top: 4px; }
 
 /* 文本操作（详情/目录 · 删除本书 · 重下 · 删除 · 清理全部缓存）：13px 文本，不用按钮壳 */
@@ -1448,6 +1478,8 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   padding: 0 20px;
 }
 .toast {
+  /* 父级 .toast-host 是 pointer-events:none（不挡内容），这里必须恢复，否则带动作的 toast 点不动 */
+  pointer-events: auto;
   background: rgba(16,15,15,0.94);
   color: #fff;
   border-radius: var(--r-pill);
@@ -1483,14 +1515,20 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
 .thumb.in { animation: jm-img-in 140ms var(--ease-out) both; }
 
 @media (prefers-reduced-motion: reduce) {
+  /* 循环动画（骨架扫光 / 转圈）直接停；循环和一次性动画都不要"动" */
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
   .loading-spinner { animation: none !important; border-top-color: var(--brand-deep); }
-  .skeleton-thumb, .skeleton-title, .skeleton-meta { animation: none !important; }
+  /* 过渡：只把「位移 / 缩放 / 高度」归零，保留 opacity 与颜色（技能口径：更轻，不是全无） */
+  .toast, .drawer-backdrop, .tos-backdrop, .source-drawer, .side-drawer, .menu-backdrop,
+  .collapse, .d-desc, .sr-layer, .page-push, .page-scrim, .ind, .ptr-wrap, .ptr-indicator,
+  .rt-progress i, .progress-fill, .update-progress-fill, .reader-toolbar, .rt-top, .rt-bottom,
+  .thumb, button, .btn, .chip, .tk, .ditem, .grow, .sheet-row, .list-item, .sheet-head .sheet-close {
+    transition-property: opacity, color, background-color, border-color, box-shadow !important;
+  }
 }
 /* ============================================================
    DNS 加速引导（DnsGuide）
@@ -1948,7 +1986,11 @@ body.jm-scroll-lock { overflow: hidden; }
 
 .update-progress { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .update-progress-bar { flex: 1; height: 6px; border-radius: 8px; background: var(--line, rgba(128,128,128,.25)); overflow: hidden; }
-.update-progress-fill { height: 100%; border-radius: 8px; background: var(--brand, #1677ff); transition: width .2s ease; }
+.update-progress-fill {
+  height: 100%; width: 100%; border-radius: 8px; background: var(--brand, #1677ff);
+  transform-origin: left center;
+  transition: transform var(--t-ui) var(--ease-out);
+}
 /* ============================================================
    详情页（极简版 v6）：紧凑排版 + 分组行 + 折叠
    —— 间距整体收到 8–16，内容只占约六成高度，下方刻意留空
@@ -2068,9 +2110,11 @@ body.jm-scroll-lock { overflow: hidden; }
 .tk:active { transform: scale(0.96); }
 .tk.on { color: var(--ink); }
 .ind {
-  position: absolute; left: 0; bottom: 6px; height: 2px; border-radius: 2px;
+  position: absolute; left: 0; bottom: 6px; height: 2px; width: 1px; border-radius: 2px;
   background: var(--ink);
-  transition: transform var(--t-ui) var(--ease-out), width var(--t-ui) var(--ease-out);
+  transform-origin: left center;
+  /* 只动 transform：位移 + scaleX（底宽 1px，scaleX(N) 视觉宽度就是 N 像素） */
+  transition: transform var(--t-ui) var(--ease-out);
 }
 
 /* 工具行：共 N 部 + 排序胶囊（不套卡片） */

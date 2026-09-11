@@ -841,7 +841,7 @@ export default function ReaderPanel({
         <span className="rt-page mono-num">{current} / {total}</span>
       </div>
       <div className="rt-bottom">
-        <div className="rt-progress" aria-hidden="true"><i style={{ width: pagePct + "%" }} /></div>
+        <div className="rt-progress" aria-hidden="true"><i style={{ transform: "scaleX(" + (pagePct / 100) + ")" }} /></div>
         <div className="rt-tools">
           {!offline && (
             <button className="rt-tool" disabled={testing} onClick={openSourcePicker} title="测速并选择图源">

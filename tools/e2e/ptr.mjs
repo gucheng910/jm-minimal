@@ -65,11 +65,11 @@ async function main() {
   const touch = (type, y) => send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x: 200, y, radiusX: 8, radiusY: 8, force: 1 }] });
   await touch("touchStart", 300);
   for (const y of [330, 380, 440, 500, 560]) { await touch("touchMove", y); await sleep(70); }
-  const mid = await evalJs("(() => { const i = document.querySelector('.ptr-indicator'); return i ? i.getAttribute('style') : 'none'; })()");
+  const mid = await evalJs("(() => { const w = document.querySelector('.ptr-wrap'); const i = document.querySelector('.ptr-indicator'); return { wrap: w ? w.style.transform : 'none', ind: i ? i.style.opacity : 'none', label: i ? i.textContent : '' }; })()");
   await touch("touchEnd", 560);
   await sleep(3500);
   const after = await evalJs("(window.__reqs||[]).filter(r=>r.path==='random_recommend').length");
-  const state = await evalJs("(() => { const i = document.querySelector('.ptr-indicator'); return { cards: document.querySelectorAll('.list-item').length, ind: i ? i.getAttribute('style') : 'none', fatal: (document.getElementById('jm-fatal')||{}).textContent || '', errs: (window.__errs||[]).slice(0,3) }; })()");
+  const state = await evalJs("(() => { const w = document.querySelector('.ptr-wrap'); const i = document.querySelector('.ptr-indicator'); return { cards: document.querySelectorAll('.list-item').length, wrap: w ? w.style.transform : 'none', ind: i ? i.style.opacity : 'none', fatal: (document.getElementById('jm-fatal')||{}).textContent || '', errs: (window.__errs||[]).slice(0,3) }; })()");
 
   console.log("下拉中指示器: " + JSON.stringify(mid));
   console.log("结束状态: " + JSON.stringify(state));

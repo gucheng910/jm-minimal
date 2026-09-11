@@ -74,7 +74,7 @@ export default function UnderlineTabs({ items, value, onChange, scroll, classNam
           </button>
         );
       })}
-      <span className="ind" style={{ width: ind.width, transform: "translateX(" + ind.left + "px)" }} aria-hidden="true" />
+      <span className="ind" style={{ transform: "translateX(" + ind.left + "px) scaleX(" + ind.width + ")" }} aria-hidden="true" />
     </div>
   );
 }

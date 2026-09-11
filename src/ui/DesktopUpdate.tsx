@@ -145,7 +145,7 @@ export default function DesktopUpdate() {
       {downloading && state && (
         <div className="update-progress">
           <div className="update-progress-bar">
-            <div className="update-progress-fill" style={{ width: Math.min(100, state.percent || 0) + "%" }} />
+            <div className="update-progress-fill" style={{ transform: "scaleX(" + (Math.min(100, state.percent || 0) / 100) + ")" }} />
           </div>
           <span className="muted mono-num">
             {fmtBytes(state.transferred)} / {fmtBytes(state.total)}

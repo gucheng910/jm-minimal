@@ -375,7 +375,7 @@ export default function CacheCenter({ onClose }: { onClose: () => void }) {
                   return (
                     <div key={t.id} className="chapter-progress">
                       <div className="muted mono-num">{t.chapterName || ("#" + t.id)} · {STATUS_TEXT[t.status]}{t.status === "running" || t.status === "queued" ? " " + t.done + "/" + t.total + " 页" : ""}</div>
-                      {(t.status === "queued" || t.status === "running") && <div className="progress"><div className="progress-fill" style={{ width: pct + "%" }} /></div>}
+                      {(t.status === "queued" || t.status === "running") && <div className="progress"><div className="progress-fill" style={{ transform: "scaleX(" + (pct / 100) + ")" }} /></div>}
                       {t.status === "failed" && t.error && <div className="err small-err">{t.error}</div>}
                       <div className="row chapter-actions">
                         {(t.status === "running" || t.status === "queued") && <button className="btn soft sm" onClick={() => pauseCache(t.id)}>暂停</button>}
