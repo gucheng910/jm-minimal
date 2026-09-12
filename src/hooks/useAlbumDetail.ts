@@ -169,13 +169,17 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     }
     setError("");
     const reqId = ++reqIdRef.current;
-    const [c] = await Promise.allSettled([
-      client.getAlbumComments(id, 1).catch(() => null),
-      fetchDetail(id, reqId)
-    ]);
-    if (reqIdRef.current !== reqId) return; // 离开详情后忽略过期回包
-    if (c.status === "fulfilled" && c.value) setComments(c.value);
-  }, [applyDetail, fetchDetail]);
+    // 走 run()：切话期间 busy=true —— 详情页的「选择话数」会显示转圈并不可操作
+    // （弱网下原来的切话没有任何反馈，看起来像"点了没反应"）
+    await run(async () => {
+      const [c] = await Promise.allSettled([
+        client.getAlbumComments(id, 1).catch(() => null),
+        fetchDetail(id, reqId)
+      ]);
+      if (reqIdRef.current !== reqId) return; // 离开详情后忽略过期回包
+      if (c.status === "fulfilled" && c.value) setComments(c.value);
+    });
+  }, [applyDetail, fetchDetail, run]);
 
   const loadComments = useCallback(async (aid: number | string) => {
     const data = await run(() => client.getAlbumComments(aid, 1));

@@ -30,8 +30,6 @@ import type { AlbumDetail, AlbumSummary } from "./core/types";
 
 type Mode = "home" | "detail" | "reader" | "week";
 
-// 滚动恢复 key（sessionStorage 兜底，避免 ref 丢失）
-const SCROLL_KEY = "jm:pendingRestoreY";
 
 /** 特殊搜索结果层（详情页作者/标签 → 只读搜索页）的完整状态 */
 interface SRState {
@@ -114,10 +112,12 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   // 用于在离开后拦截仍在运行的 getAlbum/getAlbumComments 回调
   const commentReqIdRef = useRef(0);
 
-  /** 保存待恢复的滚动位置（ref + sessionStorage 双写） */
+  /**
+   * 保存待恢复的滚动位置。**只存在内存里（临时）**：列表位置是"这一趟浏览的上下文"，
+   * 不是长期数据 —— 退出应用重进首页就该回到顶部，所以不落 localStorage/sessionStorage。
+   */
   function saveScrollTarget(y: number) {
     listScrollRef.current = y;
-    try { sessionStorage.setItem(SCROLL_KEY, String(y)); } catch { /* ignore */ }
   }
 
   /**
@@ -127,7 +127,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
    */
   useLayoutEffect(() => {
     if (mode !== "home") return;
-    const y = listScrollRef.current || Number(sessionStorage.getItem(SCROLL_KEY) || "0");
+    const y = listScrollRef.current; // 只认内存里的临时位置；重启/重进应用就是 0 → 停在顶部
     if (y <= 0) return;
     let cancelled = false;
     const cancel = () => { cancelled = true; };

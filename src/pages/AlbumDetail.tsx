@@ -181,9 +181,16 @@ export default function AlbumDetail({
         {series.length > 1 && (
           <label className="grow selectrow">
             <span>选择话数</span>
-            <select value={String(detail.id)} onChange={(e) => onSwitchChapter(e.target.value)} aria-label="选择话数">
+            <select
+              value={String(detail.id)}
+              disabled={busy}
+              aria-busy={busy ? "true" : undefined}
+              onChange={(e) => onSwitchChapter(e.target.value)}
+              aria-label="选择话数"
+            >
               {series.map((s) => <option key={String(s.id)} value={String(s.id)}>{"#" + String(s.sort ?? "") + " " + (s.name || "")}</option>)}
             </select>
+            {busy && <span className="row-spin" aria-hidden="true" />}
             <span className="chev">›</span>
           </label>
         )}

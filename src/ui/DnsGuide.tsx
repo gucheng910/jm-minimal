@@ -7,9 +7,11 @@ import { on } from "../core/bus";
 import { fetchWithTimeout } from "../core/fetchTimeout";
 
 const DOH_SERVERS = [
-  { name: "阿里", dot: "dot.alidns.com" },
+  { name: "阿里（推荐）", dot: "dot.alidns.com" },
+  { name: "360", dot: "dot.360.cn" },
+  { name: "OneDNS", dot: "dot-pure.onedns.net" },
+  { name: "18bit", dot: "dns.18bit.cn", note: "（时段差异性较大，拼运气）" },
   { name: "腾讯", dot: "dot.pub" },
-  { name: "Google", dot: "dns.google" },
 ];
 const PROBE_PATH = "/static/jmapp3apk/version.json?t=";
 const TIMEOUT_MS = 5000;
@@ -170,6 +172,7 @@ export default function DnsGuide() {
                     <div key={s.dot} className="dns-server-item">
                       <span className="dns-server-name">{s.name}</span>
                       <code className="dns-server-addr">{s.dot}</code>
+                      {s.note && <span className="muted dns-server-note">{s.note}</span>}
                       <button className="ghost dns-copy-btn" onClick={() => copyDoT(s.dot)}>
                         {copied === s.dot ? "✔ 已复制" : "复制"}
                       </button>

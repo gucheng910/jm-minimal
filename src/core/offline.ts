@@ -31,17 +31,24 @@ export function invalidateCacheScan(): void {
 
 /**
  * 扫描「已缓存的话」：cache 名只是候选，必须确认里面有非封面条目。
- * 结果带 1.5s 记忆（阅读器 + 缓存中心 + 弹窗可能在同一瞬间各扫一次）。
+ *
+ * ids 省略 = 全库扫描（caches.keys() 之后逐个 open 取条目），结果带 1.5s 记忆。
+ * ids 传入 = **只查这几话**（先 caches.has() 再 open）：进某本书的缓存详情、阅读器切话
+ * 只需要自己那几十话，没必要把整机所有 cache 都开一遍 —— 老机型上这是"进详情页要等半天"的主因。
  */
-export async function scanCachedChapters(): Promise<Map<string, CachedChapterInfo>> {
-  if (scanCache && Date.now() - scanCache.at < SCAN_TTL_MS) return scanCache.value;
+export async function scanCachedChapters(ids?: Iterable<string>): Promise<Map<string, CachedChapterInfo>> {
+  const filtered = ids !== undefined;
+  if (!filtered && scanCache && Date.now() - scanCache.at < SCAN_TTL_MS) return scanCache.value;
   const value = new Map<string, CachedChapterInfo>();
   if (!("caches" in window)) return value;
   try {
-    const names = (await caches.keys()).filter((n) => n.startsWith(OFFLINE_PREFIX));
+    const names = filtered
+      ? Array.from(new Set(Array.from(ids!, (x) => String(x)).filter(Boolean))).map((id) => cacheName(id))
+      : (await caches.keys()).filter((n) => n.startsWith(OFFLINE_PREFIX));
     await Promise.all(names.map(async (name) => {
       const id = name.slice(OFFLINE_PREFIX.length);
       try {
+        if (filtered && !(await caches.has(name))) return; // 不存在直接跳过，别白开一次
         const cache = await caches.open(name); // 名字来自 keys()，不会新建
         const keys = await cache.keys();
         let pages = 0;
@@ -54,7 +61,7 @@ export async function scanCachedChapters(): Promise<Map<string, CachedChapterInf
       } catch { /* 单个 cache 读失败不影响其它 */ }
     }));
   } catch { /* ignore */ }
-  scanCache = { at: Date.now(), value };
+  if (!filtered) scanCache = { at: Date.now(), value };
   return value;
 }
 
@@ -64,6 +71,9 @@ function pageFileName(url: string): string {
 }
 
 const activeBlobURLs = new Set<string>();
+
+/** 离线读页的并发度：老机型上 8 已经能把"等它一张张转 blob"的时间压掉大半 */
+const OFFLINE_READ_CONCURRENCY = 8;
 
 /** 释放全部离线阅读 blob URL（阅读器卸载时调用，防止内存泄漏） */
 export function releaseOfflinePageUrls(): number {
@@ -85,19 +95,28 @@ export async function toOfflinePageUrls(id: number | string, pages: ReadPage[]):
     return pages;
   }
   const cache = await caches.open(name);
-  const out: ReadPage[] = [];
-  for (const p of pages) {
-    const hit = await cache.match(p.image);
-    if (hit && hit.ok) {
-      const blob = await hit.blob();
-      const url = URL.createObjectURL(blob);
-      activeBlobURLs.add(url);
-      // blob URL 会丢失文件名；scramble 重排需要原名，因此随页携带
-      out.push({ page: p.page, image: url, name: p.name || pageFileName(p.image) });
-    } else {
-      out.push(p);
+  // 逐页串行会退化成 N 次往返（40 页 = 40 次 match+blob+createObjectURL，老机型上体感很明显）。
+  // 改成有界并发：保序写回数组，内存峰值最多 8 个 blob 同时在处理。
+  const out: ReadPage[] = new Array(pages.length);
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= pages.length) return;
+      const p = pages[i];
+      const hit = await cache.match(p.image);
+      if (hit && hit.ok) {
+        const blob = await hit.blob();
+        const url = URL.createObjectURL(blob);
+        activeBlobURLs.add(url);
+        // blob URL 会丢失文件名；scramble 重排需要原名，因此随页携带
+        out[i] = { page: p.page, image: url, name: p.name || pageFileName(p.image) };
+      } else {
+        out[i] = p;
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(OFFLINE_READ_CONCURRENCY, pages.length) }, worker));
   return out;
 }
 

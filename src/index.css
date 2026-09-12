@@ -685,6 +685,18 @@ h3 { font-size: 14px; margin: 4px 0; }
   animation: spin 0.9s linear infinite;
 }
 .loading-text { color: var(--ink-3); font-size: 13px; }
+/* 行内小转圈：换源/换话/换线路时贴在那一行上（既是加载反馈，也是"这一项正在生效"的指示） */
+.row-spin {
+  display: inline-block;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  vertical-align: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--brand);
+  animation: spin 0.8s linear infinite;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- 下拉刷新 ---------- */
@@ -940,6 +952,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 }
 .app-sheet .opt-row + .opt-row { box-shadow: inset 0 1px 0 var(--line); }
 .app-sheet .opt-row:active { background: var(--surface-2); }
+.app-sheet .opt-row:disabled { opacity: 0.6; background: none; }
 .app-sheet .opt-row .ck { flex: none; opacity: 0; color: var(--ink); transition: opacity 0.22s ease-out; }
 .app-sheet .opt-row.on .ck { opacity: 1; }
 .app-sheet .opt-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1144,13 +1157,49 @@ h3 { font-size: 14px; margin: 4px 0; }
 .reader-toolbar input.page-input { width: 62px; text-align: center; background: #14161c; color: #fff; border-color: #33363f; padding: 6px; }
 .reader-toolbar .muted { color: #7f8794; }
 .reader-cont { padding: 0; }
-.jm-figure { margin: 0; padding: 0; background: #100F0F; content-visibility: auto; contain-intrinsic-size: auto 900px; }
-/* 相邻页重叠 2px：缩放后的页面渲染高度是小数，Chromium 按设备像素取整绘制时会留下 1 个设备像素的
-   未被覆盖行，露出 .jm-page/.jm-figure 的深色背景（即阅读时看到的黑线）。下一张图与上一张重叠并后绘制，
-   即可盖住该行。注意 content-visibility 的 paint containment 会裁剪子内容，需 2px 才能完全覆盖。 */
-.jm-figure + .jm-figure { margin-top: 6px; }
+/* 每页先是一个「比例盒」骨架：进入阅读器时页数就已知，用 --jm-ar（高 ÷ 宽 %）把高度先撑起来，
+   图片/拼图就绪后 figure[data-ready] 再切回自然高度。
+   为什么不保留 content-visibility：它记的"上次尺寸"会和这里的显式比例盒打架（离屏用 900px、
+   进屏用比例），滚动条与计数会飘；显式比例盒本身已经不需要它来占位了。
+   老内核没有 aspect-ratio，padding-top 百分比是最稳的预留高度写法（封面兜底用的是同一招）。 */
+.jm-figure {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  height: 0;
+  padding-top: var(--jm-ar, 139.5%);
+  background: #100F0F;
+  overflow: hidden;
+}
+/* 相邻页**无缝**：不留间距，用"后一张压住前一张 2px"盖住缩放小数高度取整后留下的 1 设备像素黑线
+   （下一张后绘制 + z-index 更高，就能盖住那一行）。原来留 6px 间距，读者会看到明显的页间空隙。 */
+.jm-figure + .jm-figure { margin-top: -2px; z-index: 1; }
+/* 就绪后淡入（只动 opacity，零位移；低配模式会被全局动效压制掉） */
+.jm-figure[data-ready] > .jm-page,
+.jm-figure[data-ready] > .scramble-canvas { animation: jm-img-in 140ms var(--ease-out) both; }
+.jm-single-wrap[data-ready] > .jm-single,
+.jm-single-wrap[data-ready] > .scramble-canvas { animation: jm-img-in 140ms var(--ease-out) both; }
+/* 阅读区关掉浏览器自带的滚动锚定：高度自校正由 JS 的 keepAnchor 负责，
+   两层同时补偿会叠加成"跳两次"（部分内核还没有这个特性，关了也不影响） */
+.reader-wrap, .jm-figure, .jm-single-wrap { overflow-anchor: none; }
+.jm-figure[data-ready] { height: auto; padding-top: 0; overflow: visible; }
+.jm-figure:not([data-ready]) > .jm-page,
+.jm-figure:not([data-ready]) > .scramble-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  /* 估算比例不准时宁可留黑边，也不要把图拉变形（尺寸自校正放在下一阶段） */
+  object-fit: contain;
+}
 .jm-page { display: block; width: 100%; height: auto; background: #111; }
 .jm-single { display: block; max-width: 100%; max-height: calc(100vh - 160px); width: auto; margin: 10px auto; object-fit: contain; background: #16181f; }
+/* 单页模式：先给一块等高区域 + 居中转圈，图片（或拼好的 canvas）就绪后转圈消失 */
+.jm-single-wrap { position: relative; display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 160px); }
+.jm-single-wrap > .loading-spinner { position: absolute; }
+.jm-single-wrap[data-ready] > .loading-spinner { display: none; }
+.jm-single-wrap .scramble-canvas { max-width: 100%; max-height: calc(100vh - 160px); width: auto; height: auto; object-fit: contain; background: #16181f; }
 /* 仅在连续阅读容器内撑满宽度；单页模式让 canvas 走 .jm-single 的等比约束（否则会被压扁） */
 .reader-cont .scramble-canvas { width: 100%; height: auto; display: block; }
 .reader-wrap .row { justify-content: center; padding: 8px 0; gap: 10px; }
@@ -1314,6 +1363,8 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
   transition: opacity var(--t-press) linear;
 }
 .op-link:active { opacity: 0.6; }
+/* 清理/删除/重下进行中：该项变淡并暂时不可点（避免连点与"点了没反应"） */
+.op-link.busy { opacity: 0.55; pointer-events: none; }
 .op-link.danger { color: var(--err); }
 button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
 
@@ -1608,6 +1659,7 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
 .dns-server-item {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px;
   background: var(--surface-2);
@@ -1633,6 +1685,13 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   padding: 4px 10px;
   font-size: 13px;
   border-radius: var(--r-pill);
+}
+/* 个别 DoT 的补充说明：独占一行的小字，落在地址下方，不抢视线 */
+.dns-server-note {
+  flex-basis: 100%;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 1px 0 0;
 }
 [data-theme="dark"] .dns-server-item {
   background: var(--surface-2);
@@ -2388,6 +2447,7 @@ body.jm-scroll-lock { overflow: hidden; }
   .dns-results > * + * { margin-top: 4px; }
   .dns-servers > * + * { margin-top: 8px; }
   .dns-server-item > * + * { margin-left: 8px; }
+  .dns-server-item > .dns-server-note { margin-left: 0; margin-top: 4px; }
   .tag-block-item > * + * { margin-left: 8px; }
   .tag-block-locked-msg > * + * { margin-left: 6px; }
   .tag-block-meta > * + * { margin-top: 4px; }
@@ -2464,7 +2524,9 @@ html[data-lowfx="1"] .tk:active,
 html[data-lowfx="1"] .ditem:active { transform: none !important; }
 /* 只留"正在加载"的动画（状态反馈，不是装饰）：转圈 + 骨架扫光 */
 html[data-lowfx="1"] .spin,
-html[data-lowfx="1"] .mini-spin { animation-duration: 0.8s !important; animation-iteration-count: infinite !important; }
+html[data-lowfx="1"] .row-spin,
+html[data-lowfx="1"] .mini-spin,
+html[data-lowfx="1"] .loading-spinner { animation-duration: 0.8s !important; animation-iteration-count: infinite !important; }
 html[data-lowfx="1"] .skeleton-thumb::after,
 html[data-lowfx="1"] .skeleton-title::after,
 html[data-lowfx="1"] .skeleton-meta::after { animation-duration: 1.5s !important; animation-iteration-count: infinite !important; }

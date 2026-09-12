@@ -112,6 +112,8 @@ export default function App() {
     }
   }
   const [showSource, setShowSource] = useState(false);
+  /** 换源/换线路正在生效的那一项：浮层内该行显示转圈、整层不可操作，成功后才关浮层 */
+  const [switching, setSwitching] = useState<string | null>(null);
   // 会员页的「诊断与线路」默认折叠：线路 / 图源 / 协议版本 / 测速都是排障信息
   // 会员页「网络与内容」两个设置行：默认都收起（用不到就不占首屏）
   const [dnsOpen, setDnsOpen] = useState(false);
@@ -403,7 +405,8 @@ export default function App() {
   }
 
   async function handleLineChange(host: string) {
-    if (!host) return;
+    if (!host || switching) return;
+    setSwitching(host);
     patch({ busy: true, error: "", msg: "" });
     try {
       client.selectLine(host);
@@ -412,17 +415,26 @@ export default function App() {
       patch({ busy: false, msg: "已切换线路：" + host });
       // 换源浮层点完就关，反馈必须是 toast（会员页的 msg 卡片这时看不见）
       pushToast("已切换线路：" + host, "ok");
+      setShowSource(false); // 生效后才关浮层：切换期间那一行转圈、其余行不可点
     } catch (err) {
       patch({ busy: false, error: String(err) });
       pushToast("切换线路失败：" + String(err).replace(/^Error: /, "").slice(0, 60), "err");
+    } finally {
+      setSwitching(null);
     }
   }
 
   async function loadDaily() {
-    if (!member) return;
-    const d = await client.getDaily(member.uid || "");
-    setDaily(d);
-    patch({ msg: "签到活动已加载（点击签到才会真正签到）" });
+    if (!member || state.busy) return;
+    patch({ busy: true, error: "", msg: "" });
+    try {
+      const d = await client.getDaily(member.uid || "");
+      setDaily(d);
+      patch({ busy: false, msg: "签到活动已加载（点击签到才会真正签到）" });
+    } catch (err) {
+      patch({ busy: false, error: String(err) });
+      pushToast("签到活动加载失败：" + String(err).replace(/^Error: /, "").slice(0, 60), "err");
+    }
   }
 
   async function doCheckIn() {
@@ -464,16 +476,20 @@ export default function App() {
   }
 
   async function handleShuntChange(key: string) {
-    if (!key) return;
+    if (!key || switching) return;
+    setSwitching(key);
     patch({ busy: true, error: "", msg: "" });
     try {
       client.setImageShunt(key);
       await reloadConfig();
       patch({ busy: false, msg: "已切换图源：" + key });
       pushToast("已切换图源：" + key, "ok");
+      setShowSource(false); // 同上：生效后才关浮层
     } catch (err) {
       patch({ busy: false, error: String(err) });
       pushToast("切换图源失败：" + String(err).replace(/^Error: /, "").slice(0, 60), "err");
+    } finally {
+      setSwitching(null);
     }
   }
 
@@ -679,7 +695,7 @@ export default function App() {
           <label className="row"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> 记住登录（本地保存账号，用于刷新会话）</label>
           <div className="form-actions">
             <button type="button" className="ghost" onClick={() => { setRegOpen(true); patch({ error: "", msg: "" }); }}>注册</button>
-            <button disabled={state.busy}>登录</button>
+            <button disabled={state.busy}>{state.busy ? "登录中…" : "登录"}</button>
           </div>
         </form>
         )
@@ -716,10 +732,10 @@ export default function App() {
                     <p className="muted grow-note">
                       活动：{String(daily.event_name || "")} · 3天奖励 {String(daily.three_days_coin ?? "")}币/{String(daily.three_days_exp ?? "")}经验 · 7天奖励 {String(daily.seven_days_coin ?? "")}币/{String(daily.seven_days_exp ?? "")}经验
                     </p>
-                    <button className="btn soft sm" disabled={state.busy} onClick={doCheckIn}>立即签到</button>
+                    <button className="btn soft sm" disabled={state.busy} onClick={doCheckIn}>{state.busy ? "签到中…" : "立即签到"}</button>
                   </>
                 ) : (
-                  <button className="btn soft sm" disabled={state.busy} onClick={() => { void loadDaily(); }}>加载签到活动</button>
+                  <button className="btn soft sm" disabled={state.busy} onClick={() => { void loadDaily(); }}>{state.busy ? "加载中…" : "加载签到活动"}</button>
                 )}
               </div>
             </Collapse>
@@ -847,7 +863,7 @@ export default function App() {
             </button>
             {/* 协议漂移只作为版本行里的一句说明：它是"服务端换版了"的状态，不是本机故障，
                 原来单独用红字报错渲染，用户会当成应用出错（2026-09-11 真机反馈）。 */}
-            <p className="muted menu-note drawer-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}{protoDrift ? "，服务端已到 " + onlineProto : ""}{BUILD_VARIANT === "compat" ? " · 兼容包" : BUILD_VARIANT === "legacy" ? " · 老安卓包" : ""}）</p>
+            <p className="muted menu-note drawer-note">v{LOCAL_VERSION}（官方协议 {APP_VERSION}{protoDrift ? "，服务端已到 " + onlineProto : ""}{BUILD_VARIANT === "compat" ? " · 兼容包" : ""}）</p>
             {isDesktop ? <DesktopUpdate /> : <UpdateSection />}
             <button className="ditem repo-link" onClick={() => openExternal(REPO_URL)}>
               <span>GitHub 仓库</span><span className="v">↗</span>
@@ -866,6 +882,7 @@ export default function App() {
         lines={availableLines}
         currentHost={currentHost}
         busy={state.busy}
+        pendingKey={switching}
         onPickShunt={handleShuntChange}
         onPickLine={handleLineChange}
         onAutoTest={autoPickBest}

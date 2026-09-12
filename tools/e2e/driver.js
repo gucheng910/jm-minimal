@@ -258,6 +258,19 @@
     await waitFor(".reader-toolbar", 15000);
     await sleep(2000);
     log.push({ step: "reader", toolbar: !!q(".reader-toolbar"), readReqs: (window.__reqs || []).filter((r) => r.path === "comic_read").slice(-1), fatal: (document.getElementById("jm-fatal") || {}).textContent || "" });
+    // Phase 1 断言：进入阅读器时页数已知 → 必须先有"比例盒骨架"（有高度），且计数器不能被
+    // "scrollHeight≈0 已滚到底" 误判成一进就停在最后一页（老内核没有 content-visibility 时必现）
+    const figs = qa(".jm-figure");
+    const firstH = figs.length ? Math.round(figs[0].getBoundingClientRect().height) : 0;
+    const pageLabel = ((q(".reader-toolbar .rt-page") || {}).textContent || "").trim();
+    const nums = pageLabel.split("/").map((s) => Number((s || "").trim()));
+    const skeletonFilled = qa(".jm-figure[data-ready]").length;
+    log.push({ step: "reader-skeleton", figures: figs.length, firstHeight: firstH, pageLabel, loadedFigures: skeletonFilled });
+    if (figs.length === 0) throw new Error("阅读器没有渲染页面骨架（.jm-figure 为空）");
+    if (firstH < 100) throw new Error("页面骨架没有预留高度（" + firstH + "px）：计数器与滚动位置会飘");
+    if (nums.length === 2 && Number.isFinite(nums[0]) && Number.isFinite(nums[1]) && nums[1] > 1 && nums[0] === nums[1]) {
+      throw new Error("计数器一进入阅读器就跳到最后一页：" + pageLabel);
+    }
     const backBtn2 = qa(".reader-toolbar button").find((b) => (b.textContent || "").trim() === "返回");
     if (backBtn2) backBtn2.click();
     await sleep(1500);

@@ -16,6 +16,8 @@ interface Props {
   lines: Array<[string, string]>;
   currentHost: string;
   busy: boolean;
+  /** 正在生效的那一项（图源 key 或线路 host）：该行显示转圈、整层不可操作 */
+  pendingKey?: string | null;
   onPickShunt: (key: string) => void;
   onPickLine: (host: string) => void;
   /** 一键测速并应用最快线路/图源，resolve 一行结果文案 */
@@ -23,11 +25,12 @@ interface Props {
 }
 
 export default function SourceSheet({
-  open, onClose, shunts, currentShunt, lines, currentHost, busy, onPickShunt, onPickLine, onAutoTest
+  open, onClose, shunts, currentShunt, lines, currentHost, busy, pendingKey, onPickShunt, onPickLine, onAutoTest
 }: Props) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState("");
   const { mounted, entering, closing } = useSheetTransition(open);
+  const pending = Boolean(pendingKey);
 
   if (!mounted) return null;
 
@@ -43,11 +46,11 @@ export default function SourceSheet({
   }
 
   return (
-    <div className="drawer-backdrop" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={onClose}>
+    <div className="drawer-backdrop" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={() => { if (!pending) onClose(); }}>
       <div className="source-drawer app-sheet" data-entering={entering ? "" : undefined} data-closed={closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="sheet-head">
           <h3>换源</h3>
-          <button type="button" className="sheet-close" aria-label="关闭" onClick={onClose}>×</button>
+          <button type="button" className="sheet-close" aria-label="关闭" disabled={pending} onClick={onClose}>×</button>
         </div>
 
         <p className="sheet-sec">图源</p>
@@ -60,11 +63,15 @@ export default function SourceSheet({
                 key={s.key}
                 type="button"
                 className={"opt-row" + (on ? " on" : "")}
-                onClick={() => { onPickShunt(String(s.key)); onClose(); }}
+                disabled={pending}
+                aria-busy={pendingKey === String(s.key) ? "true" : undefined}
+                onClick={() => onPickShunt(String(s.key))}
               >
-                <CheckIcon size={18} className="ck" />
+                {pendingKey === String(s.key)
+                  ? <span className="row-spin" aria-hidden="true" />
+                  : <CheckIcon size={18} className="ck" />}
                 <span className="nm">{zh(s.title)}</span>
-                <span className="mu">{on ? "当前" : ""}</span>
+                <span className="mu">{pendingKey === String(s.key) ? "切换中…" : on ? "当前" : ""}</span>
               </button>
             );
           })}
@@ -80,18 +87,22 @@ export default function SourceSheet({
                 key={host}
                 type="button"
                 className={"opt-row" + (on ? " on" : "")}
-                onClick={() => { onPickLine(host); onClose(); }}
+                disabled={pending}
+                aria-busy={pendingKey === host ? "true" : undefined}
+                onClick={() => onPickLine(host)}
               >
-                <CheckIcon size={18} className="ck" />
+                {pendingKey === host
+                  ? <span className="row-spin" aria-hidden="true" />
+                  : <CheckIcon size={18} className="ck" />}
                 <span className="nm">{zh(name)}</span>
-                <span className="mu">{on ? "当前" : host}</span>
+                <span className="mu">{pendingKey === host ? "切换中…" : on ? "当前" : host}</span>
               </button>
             );
           })}
         </div>
 
         <div className="row sheet-actions">
-          <button type="button" disabled={busy || testing} onClick={() => { void runTest(); }}>
+          <button type="button" disabled={busy || testing || pending} onClick={() => { void runTest(); }}>
             {testing ? "测速中…" : "一键测速并切换"}
           </button>
         </div>

@@ -12,6 +12,7 @@ import {
 } from "../core/cacheTasks";
 import { cachedCoverUrl, pagesFromCache, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "../core/offline";
 import { ensureBookMeta } from "../core/bookSync";
+import { knownBookId } from "../core/series";
 import { hasOpenSheet } from "../core/uiLocks";
 import { chapterLabel, getBook, getChapter, listChapters, type BookMeta, type ChapterMeta } from "../core/offlineMeta";
 import { saveHistory } from "../core/history";
@@ -107,13 +108,27 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
   const [book, setBook] = useState<BookMeta | null>(null);
   const [bookChapters, setBookChapters] = useState<ChapterMeta[]>([]);
   const [loadingBook, setLoadingBook] = useState(false);
+  /** 正在执行的清理动作（"del:话id" / "re:话id" / "book:书id" / "__all__"）：该项显示进行中、其余不可点 */
+  const [actingKey, setActingKey] = useState<string | null>(null);
 
-  const refreshCached = useCallback(async () => { setCachedIds(await scanCachedChapters()); }, []);
+  /**
+   * 只扫「指定的这几话」。进某本书的缓存详情只需要自己那几十话 ——
+   * 原来这里是 scanCachedChapters()（遍历整机所有 cache），老机型上就是"进详情页要等半天"的主因。
+   */
+  const refreshCached = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) { setCachedIds(new Map()); return; }
+    setCachedIds(await scanCachedChapters(ids));
+  }, []);
 
-  useEffect(() => { void refreshCached(); }, [refreshCached]);
+  /** 当前打开的书有哪些话（缓存变动后只需要重扫这几话） */
+  const bookIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    return on("jm:caches", () => { setTasks(cacheList()); void refreshCached(); });
+    return on("jm:caches", () => {
+      setTasks(cacheList());
+      const ids = bookIdsRef.current;
+      if (ids.length) void refreshCached(ids);
+    });
   }, [refreshCached]);
 
   // 离线阅读时进入沉浸全屏（隐藏顶栏/底栏）
@@ -128,22 +143,33 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
     let [meta, chapters] = await Promise.all([getBook(bookId), listChapters(bookId)]);
     let effective = bookId;
     if ((!meta || meta.chapters.length === 0) && chapters.length > 0) {
-      const filled = await ensureBookMeta(chapters[0].chapterId).catch(() => null);
-      if (filled && filled.bookId) {
-        effective = filled.bookId;
-        meta = filled;
-        if (effective !== bookId) {
-          // 旧数据把话 id 当书 id：把任务与话记录一起改挂到真书 id
-          rekeyBook(bookId, effective, filled.name);
+      // 旧版本把「话 id」当书 id 存过：先按 knownBookId 本地纠正（纯 IDB 查询，不联网）
+      const hint = knownBookId(chapters[0].chapterId);
+      if (hint && hint !== effective) {
+        const alt = await getBook(hint);
+        if (alt) {
+          effective = hint;
+          meta = alt;
+          chapters = await listChapters(effective);
+          rekeyBook(bookId, effective, alt.name);
           setTasks(cacheList());
         }
-        chapters = await listChapters(effective);
       }
     }
     setBook(meta);
     setBookChapters(chapters);
     setLoadingBook(false);
-    void refreshCached();
+    const ids = meta && meta.chapters.length > 0
+      ? meta.chapters.map((c) => String(c.id))
+      : chapters.map((c) => String(c.chapterId));
+    bookIdsRef.current = ids;
+    void refreshCached(ids);
+    // 元数据补全挪到后台：联网慢/断网都不再卡住目录显示（本地够用时 ensureBookMeta 会直接返回）
+    if (chapters.length > 0) {
+      void ensureBookMeta(chapters[0].chapterId)
+        .then((filled) => { if (filled) setBook(filled); })
+        .catch(() => { /* 保持本地降级显示 */ });
+    }
     return effective;
   }, [refreshCached]);
 
@@ -197,15 +223,18 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
       await readOnline(chapterId, label);
       return;
     }
-    // 只有图片、没有 IDB 记录（老版本配额溢出/迁移中断）：联网补一次 scrambleId，否则切片无法重排
-    let scrambleId = rec?.scrambleId;
-    if (!rec) {
-      const r = await client.getRead(chapterId).catch(() => null);
-      if (r) scrambleId = r.scramble_id;
-    }
     const urls = await toOfflinePageUrls(chapterId, pages);
     recordHistory(chapterId, label);
-    setReading({ id: chapterId, title: [book?.name, label].filter(Boolean).join(" "), scrambleId, pages: urls, offline: true });
+    const title = [book?.name, label].filter(Boolean).join(" ");
+    setReading({ id: chapterId, title, scrambleId: rec?.scrambleId, pages: urls, offline: true });
+    // 只有图片、没有 IDB 记录（老版本配额溢出/迁移中断）时才需要联网补 scrambleId ——
+    // 这一步**放到后台**：本地缓存就该立刻打开，不能因为一个可选的切片参数去等网络（弱网/断网时尤其明显）
+    if (!rec) {
+      void client.getRead(chapterId).then((r) => {
+        if (!r || r.scramble_id === undefined || r.scramble_id === null) return;
+        setReading((cur) => (cur && String(cur.id) === String(chapterId) ? { ...cur, scrambleId: r.scramble_id } : cur));
+      }).catch(() => { /* 离线/失败就按未重排显示 */ });
+    }
   }
 
   /** 未缓存的话：正常走网络（没网就报错，不做特殊处理） */
@@ -225,29 +254,46 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
   }
 
   async function deleteBookGroup(g: BookGroup) {
-    for (const t of g.chapters) await removeCache(t.id);
-    setTasks(cacheList());
-    await refreshCached();
-    if (view.kind === "book" && view.bookId === g.bookId) setView({ kind: "list" });
-    pushToast("已删除《" + g.title + "》的缓存", "ok");
+    if (actingKey) return;
+    setActingKey("book:" + g.bookId);
+    try {
+      for (const t of g.chapters) await removeCache(t.id);
+      setTasks(cacheList());
+      await refreshCached(bookIdsRef.current);
+      if (view.kind === "book" && view.bookId === g.bookId) setView({ kind: "list" });
+      pushToast("已删除《" + g.title + "》的缓存", "ok");
+    } finally {
+      setActingKey(null);
+    }
   }
 
   async function reDownloadChapter(chapterId: string) {
-    await reDownloadCache(chapterId);
-    setTasks(cacheList());
-    pushToast("已重新加入缓存队列", "ok");
+    if (actingKey) return;
+    setActingKey("re:" + chapterId);
+    try {
+      await reDownloadCache(chapterId);
+      setTasks(cacheList());
+      pushToast("已重新加入缓存队列", "ok");
+    } finally {
+      setActingKey(null);
+    }
   }
 
   async function deleteOneChapter(chapterId: string) {
-    await removeCache(chapterId);
-    setTasks(cacheList());
-    await refreshCached();
-    if (view.kind === "book") {
-      const rest = await listChapters(view.bookId);
-      if (rest.length === 0) { setView({ kind: "list" }); }
-      else await loadBook(view.bookId);
+    if (actingKey) return;
+    setActingKey("del:" + chapterId);
+    try {
+      await removeCache(chapterId);
+      setTasks(cacheList());
+      if (view.kind === "book") {
+        const rest = await listChapters(view.bookId);
+        if (rest.length === 0) { setView({ kind: "list" }); }
+        else await loadBook(view.bookId);
+      }
+      pushToast("已删除该话缓存", "ok");
+    } finally {
+      setActingKey(null);
     }
-    pushToast("已删除该话缓存", "ok");
   }
 
   if (reading) {
@@ -320,8 +366,14 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
                   </button>
                   {cached && (
                     <div className="chapter-ops">
-                      <span className="op-link" onClick={() => { void reDownloadChapter(id); }}>重下</span>
-                      <span className="op-link danger" onClick={() => { void deleteOneChapter(id); }}>删除</span>
+                      <span
+                        className={"op-link" + (actingKey === "re:" + id ? " busy" : "")}
+                        onClick={() => { void reDownloadChapter(id); }}
+                      >{actingKey === "re:" + id ? "重下中…" : "重下"}</span>
+                      <span
+                        className={"op-link danger" + (actingKey === "del:" + id ? " busy" : "")}
+                        onClick={() => { void deleteOneChapter(id); }}
+                      >{actingKey === "del:" + id ? "删除中…" : "删除"}</span>
                     </div>
                   )}
                 </div>
@@ -353,12 +405,22 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
           value={tab}
           onChange={(k) => setTab(k === "done" ? "done" : "active")}
         />
-        <button className="op-link danger cache-clear" onClick={async () => {
-          const n = await clearAllCacheTasks();
-          setTasks([]);
-          setCachedIds(new Map());
-          pushToast(n > 0 ? "已清理全部缓存（" + n + " 个话）" : "没有可清理的缓存", "ok");
-        }}>清理全部缓存</button>
+        <button
+          className={"op-link danger cache-clear" + (actingKey === "__all__" ? " busy" : "")}
+          onClick={async () => {
+            if (actingKey) return;
+            setActingKey("__all__");
+            try {
+              const n = await clearAllCacheTasks();
+              setTasks([]);
+              setCachedIds(new Map());
+              bookIdsRef.current = [];
+              pushToast(n > 0 ? "已清理全部缓存（" + n + " 个话）" : "没有可清理的缓存", "ok");
+            } finally {
+              setActingKey(null);
+            }
+          }}
+        >{actingKey === "__all__" ? "清理中…" : "清理全部缓存"}</button>
       </div>
 
       {tab === "active" && (
@@ -381,7 +443,7 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
                         {(t.status === "running" || t.status === "queued") && <button className="btn soft sm" onClick={() => pauseCache(t.id)}>暂停</button>}
                         {t.status === "paused" && <button className="btn soft sm" onClick={() => resumeCache(t.id)}>继续</button>}
                         {t.status === "failed" && <button className="btn soft sm" onClick={() => resumeCache(t.id)}>重试</button>}
-                        <button className="btn soft sm danger" onClick={async () => { await removeCache(t.id); setTasks(cacheList()); void refreshCached(); pushToast("已删除该话缓存", "ok"); }}>删除</button>
+                        <button className="btn soft sm danger" onClick={async () => { await removeCache(t.id); setTasks(cacheList()); pushToast("已删除该话缓存", "ok"); }}>删除</button>
                       </div>
                     </div>
                   );
@@ -405,7 +467,10 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
                 </div>
                 <span className="list-ops" onClick={(e) => e.stopPropagation()}>
                   <span className="op-link" onClick={() => { void openBook(g.bookId); }}>详情/目录</span>
-                  <span className="op-link danger" onClick={() => { void deleteBookGroup(g); }}>删除本书</span>
+                  <span
+                    className={"op-link danger" + (actingKey === "book:" + g.bookId ? " busy" : "")}
+                    onClick={() => { void deleteBookGroup(g); }}
+                  >{actingKey === "book:" + g.bookId ? "删除中…" : "删除本书"}</span>
                 </span>
               </button>
             ))}

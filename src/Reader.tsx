@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
 import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
 import { pagesFromCache, releaseOfflinePageUrls, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "./core/offline";
@@ -21,11 +21,6 @@ import { on } from "./core/bus";
 type ReaderMode = "continuous" | "single";
 
 const MODE_KEY = "jmclient.reader.mode";
-
-function progressKey(id: number | string): string {
-  // 页号方案：老版本存的是像素滚动值（jmclient.read.y.<id>），新键避免误当页号恢复
-  return "jmclient.read.page." + String(id);
-}
 
 interface Props {
   albumId: number | string;
@@ -206,6 +201,10 @@ export default function ReaderPanel({
   const [chapterMetas, setChapterMetas] = useState<ChapterMeta[]>([]);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
+  /** 正在生效的那一话（该行显示转圈、整层不可点） */
+  const [switchKey, setSwitchKey] = useState<string | null>(null);
+  /** 正在生效的那一个图源 */
+  const [sourceBusy, setSourceBusy] = useState<string | null>(null);
   /** 测速代际：关闭弹窗就 +1，让在途的测速结果作废（不再切源、不再刷新列表） */
   const speedGenRef = useRef(0);
 
@@ -214,6 +213,14 @@ export default function ReaderPanel({
     return saved === "single" ? "single" : "continuous";
   });
   const [current, setCurrent] = useState(1);
+  /**
+   * 每页骨架的估算比例（高 ÷ 宽 × 100）。页数在进入阅读器时就已知，先用它把每页"撑起来"：
+   * 图片/拼图就绪后 figure 再切回自然高度（同一话内页面尺寸基本一致，学到的比例误差通常只有 1px 级）。
+   */
+  const ratioRef = useRef(139.5);
+  /** 当前页检测函数：骨架→内容切换会改变高度，切完要重算一次，避免计数停在旧值 */
+  const recomputeRef = useRef<(() => void) | null>(null);
+  const recomputeRafRef = useRef(0);
   const [jumpInput, setJumpInput] = useState("1");
   // 沉浸阅读：控件默认不显示，点画面中间唤出，3 秒无操作自动淡出
   const [chromeOn, setChromeOn] = useState(false);
@@ -245,9 +252,14 @@ export default function ReaderPanel({
    */
   const bookId = bookMeta?.bookId || "";
   const refreshCached = useCallback(async () => {
-    setCachedIds(await scanCachedChapters());
-    if (bookId) setChapterMetas(await listChapters(bookId));
-  }, [bookId]);
+    // 只扫「本书的话 + 当前话」：阅读器切话、开缓存弹窗都只关心自己这本书，
+    // 全库扫描在老机型上要遍历整机所有 cache（几十秒级的等待就是这么来的）
+    const metas = bookId ? await listChapters(bookId) : [];
+    const ids = metas.map((c) => String(c.chapterId));
+    if (albumId) ids.push(String(albumId));
+    setCachedIds(await scanCachedChapters(ids));
+    if (bookId) setChapterMetas(metas);
+  }, [bookId, albumId]);
 
   useEffect(() => { if (bookId) void refreshCached(); }, [bookId, refreshCached]);
 
@@ -285,7 +297,13 @@ export default function ReaderPanel({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    root.querySelectorAll<HTMLImageElement>("img.jm-page").forEach((img) => applyScramble(img, albumId, scrambleId));
+    keepAnchor(() => {
+      root.querySelectorAll<HTMLImageElement>("img.jm-page").forEach((img) => {
+        if (!img.complete || img.naturalWidth === 0) return; // 还没解码：等 onLoad
+        applyScramble(img, albumId, scrambleId);
+        markPageReady(img);
+      });
+    });
   }, [albumId, scrambleId, pageUrls]);
 
 
@@ -330,8 +348,8 @@ export default function ReaderPanel({
     }
     setCurrent(p);
     setJumpInput(String(p));
-    if (total > 0) localStorage.setItem(progressKey(albumId), String(p));
-  }, [mode, total, albumId]);
+    // 只更新"当前是第几页"的临时状态：不写存储（章节内位置不做记录）
+  }, [mode, total]);
 
   // —— 浮标自动显隐（滚动/拖动/悬停唤起，静止 1.7s 后淡出）——
   const showRail = useCallback(() => {
@@ -413,26 +431,12 @@ export default function ReaderPanel({
     return () => window.removeEventListener("resize", update);
   }, [mode]);
 
-  // —— 页进度：恢复上次页码 + 当前页检测（扫 .jm-figure 容器而非 img，兼容切块重组/懒加载）——
-  // 兼容两种滚动宿主：在线阅读（窗口滚动）与缓存中心离线阅读（fixed overlay 内滚动）
+  // —— 当前页检测（扫 .jm-figure 容器而非 img，兼容切块重组/懒加载）——
+  // 兼容两种滚动宿主：在线阅读（窗口滚动）与缓存中心离线阅读（fixed overlay 内滚动）。
+  // 注意：**不恢复也不记录章节内的页码** —— 按产品要求，阅读只保留"上次读到哪一话"（历史记录），
+  // 章节内位置属于临时状态，退出重进从第一页开始。
   useEffect(() => {
-    const key = progressKey(albumId);
-    const clampP = (n: number) => Math.min(Math.max(1, n), total);
-    const saved = clampP(Number(localStorage.getItem(key) || 0));
-    if (mode !== "continuous") {
-      // 单页模式：仅恢复页码（无需滚动）
-      if (saved >= 1) {
-        setCurrent(saved);
-        setJumpInput(String(saved));
-      }
-      return;
-    }
-    const first = document.getElementById("jm-pg-" + saved);
-    if (first) {
-      setCurrent(saved);
-      setJumpInput(String(saved));
-      first.scrollIntoView({ block: "start" });
-    }
+    if (mode !== "continuous") return; // 单页模式页码由翻页/跳页控制，无需监听滚动
     const figs = Array.from(document.querySelectorAll<HTMLElement>(".jm-figure"));
     if (figs.length === 0) return;
     // 向上找最近的滚动容器（如 .cache-overlay）；找不到则按窗口滚动处理
@@ -449,6 +453,10 @@ export default function ReaderPanel({
     const isWin = hostEl === null;
     const host = (hostEl || document.scrollingElement || document.documentElement) as HTMLElement;
     const compute = () => {
+      // 布局还没立起来时不要判定：图片未解码时每页 0 高 → scrollHeight≈0 会让下面的
+      // "滚到底 ⇒ total" 条件第一帧就成立，计数器一进阅读器就跳到最后一页。
+      // 骨架比例盒已经把高度撑起来了，这里再兜一道（短章节也不会误判）。
+      if (host.scrollHeight < host.clientHeight * 1.2) return;
       // 阅读参考线：滚动视口（窗口或 overlay 容器）45% 高度处
       const lineY = (isWin ? 0 : host.getBoundingClientRect().top) + host.clientHeight * 0.45;
       let cur = 1;
@@ -460,15 +468,19 @@ export default function ReaderPanel({
       // 已滚到底：最后一页可能不足以越过参考线
       const st = isWin ? window.scrollY : host.scrollTop;
       if (st + host.clientHeight >= host.scrollHeight - 6) cur = total;
-      localStorage.setItem(key, String(cur));
       setCurrent(cur);
       setJumpInput(String(cur));
       showRail();
     };
     const target = isWin ? window : host;
     target.addEventListener("scroll", compute, { passive: true });
+    recomputeRef.current = compute; // 骨架切内容后高度变了，需要主动重算一次
     compute();
-    return () => target.removeEventListener("scroll", compute);
+    return () => {
+      target.removeEventListener("scroll", compute);
+      if (recomputeRef.current === compute) recomputeRef.current = null;
+      if (recomputeRafRef.current) { cancelAnimationFrame(recomputeRafRef.current); recomputeRafRef.current = 0; }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [albumId, mode, total, pageUrls, showRail]);
 
@@ -495,6 +507,8 @@ export default function ReaderPanel({
 
   /** 手动选源：弹窗保持打开，测速结果与当前选中项都在弹窗里看 */
   async function changeSource(key: string) {
+    if (sourceBusy) return;
+    setSourceBusy(key);
     client.setImageShunt(key);
     try {
       if (key !== "0") await client.getSetting();
@@ -505,6 +519,8 @@ export default function ReaderPanel({
       pushToast(key === "0" ? "已开启快速通道" : "图源已切换", "ok");
     } catch {
       pushToast("图源切换失败，请重试", "err");
+    } finally {
+      setSourceBusy(null);
     }
   }
 
@@ -700,6 +716,7 @@ export default function ReaderPanel({
     const label = chapterLabel(c) || ("#" + id);
     if (id === String(albumId)) { setChapOpen(false); return; }
     setSwitchBusy(true);
+    setSwitchKey(id);
     try {
       const next = await resolvePages(id);
       if (!next) { pushToast("该话本地数据缺失，联网后可加载", "err"); return; }
@@ -713,6 +730,7 @@ export default function ReaderPanel({
       pushToast("切换失败：" + String(err).replace(/^Error: /, "").slice(0, 80), "err");
     } finally {
       setSwitchBusy(false);
+      setSwitchKey(null);
     }
   }
 
@@ -794,6 +812,69 @@ export default function ReaderPanel({
     });
   }
 
+  /** 阅读时的滚动宿主：缓存中心离线阅读是 overlay 容器内滚动，其余是窗口滚动（null = 窗口） */
+  function readerScrollHost(): HTMLElement | null {
+    const figs = rootRef.current?.querySelectorAll<HTMLElement>(".jm-figure");
+    let el: HTMLElement | null = figs && figs.length > 0 ? figs[0].parentElement : null;
+    while (el && el !== document.body) {
+      const cs = getComputedStyle(el);
+      if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && el.scrollHeight > el.clientHeight + 2) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * 尺寸自校正的配套：改高度前后把滚动位置补回来。
+   * 锚点取"视口里最上面那一页"——变化发生在它上方时它会被顶走同样的距离，补回去即可；
+   * 变化在它下方时锚点不动（delta≈0），自然不补。
+   * 不依赖 CSS scroll anchoring（老内核不一定支持；支持的内核已被 CSS 的 overflow-anchor:none 关掉，
+   * 否则两层补偿会叠加成"跳两次"），两种滚动宿主都覆盖。
+   */
+  function keepAnchor(mutate: () => void): void {
+    const root = rootRef.current;
+    if (!root) { mutate(); return; }
+    const figs = Array.from(root.querySelectorAll<HTMLElement>(".jm-figure"));
+    const anchor = figs.find((f) => f.getBoundingClientRect().bottom > 0) || null;
+    const before = anchor ? anchor.getBoundingClientRect().top : 0;
+    mutate();
+    if (!anchor) return;
+    const delta = anchor.getBoundingClientRect().top - before;
+    if (Math.abs(delta) < 0.5) return;
+    const host = readerScrollHost();
+    if (host) host.scrollTop += delta;
+    else window.scrollBy(0, delta);
+  }
+
+  /** 记住这一页的真实比例：同话后续页的骨架直接用它（比例没变就什么都不做） */
+  function learnRatio(img: HTMLImageElement): void {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return;
+    const pct = Math.round((h / w) * 1000) / 10;
+    if (!(pct > 60 && pct < 400) || pct === ratioRef.current) return;
+    ratioRef.current = pct;
+    // 还没就绪的骨架同步换成新比例（跑在 keepAnchor 里，所以不会把读者顶走）
+    rootRef.current?.querySelectorAll<HTMLElement>(".jm-figure:not([data-ready])").forEach((f) => {
+      f.style.setProperty("--jm-ar", pct + "%");
+    });
+  }
+
+  /** 内容就绪：比例盒骨架 → 自然高度（先补偿滚动，再在下一帧重算当前页） */
+  function markPageReady(img: HTMLImageElement): void {
+    keepAnchor(() => {
+      learnRatio(img);
+      const fig = img.closest(".jm-figure");
+      if (fig instanceof HTMLElement && fig.dataset.ready !== "1") fig.dataset.ready = "1";
+      const single = img.closest(".jm-single-wrap");
+      if (single instanceof HTMLElement) single.dataset.ready = "1";
+    });
+    if (recomputeRafRef.current) return;
+    recomputeRafRef.current = requestAnimationFrame(() => {
+      recomputeRafRef.current = 0;
+      recomputeRef.current?.();
+    });
+  }
+
   function pageSrc(p: ReadPage): string {
     const src = p.image;
     const key = imageName(p) + "|" + src;
@@ -806,8 +887,16 @@ export default function ReaderPanel({
 
   function renderPage(p: ReadPage) {
     return (
-      <figure key={String(p.page)} id={"jm-pg-" + p.page} data-page={p.page} className="jm-figure">
-        <img className="jm-page" data-page={p.page} src={pageSrc(p)} alt={imageName(p)} crossOrigin="anonymous" loading="lazy" decoding="async" draggable={false} onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} onError={onImgError} />
+      <figure
+        key={String(p.page)}
+        id={"jm-pg-" + p.page}
+        data-page={p.page}
+        className="jm-figure"
+        style={{ "--jm-ar": ratioRef.current + "%" } as CSSProperties}
+      >
+        <img className="jm-page" data-page={p.page} src={pageSrc(p)} alt={imageName(p)} crossOrigin="anonymous" loading="lazy" decoding="async" draggable={false}
+          onLoad={(e) => { applyScramble(e.currentTarget, albumId, scrambleId); markPageReady(e.currentTarget); }}
+          onError={onImgError} />
       </figure>
     );
   }
@@ -909,18 +998,26 @@ export default function ReaderPanel({
               {sourceRows.map((s) => {
                 const active = String(client.imageShunt) === s.key;
                 return (
-                  <button key={s.key} className={"sheet-row" + (active ? " active" : "")} onClick={() => { void changeSource(s.key); }}>
+                  <button
+                    key={s.key}
+                    className={"sheet-row" + (active ? " active" : "")}
+                    disabled={Boolean(sourceBusy)}
+                    aria-busy={sourceBusy === s.key ? "true" : undefined}
+                    onClick={() => { void changeSource(s.key); }}
+                  >
                     <div>
                       <div className="title">{s.title}{active ? "（当前）" : ""}</div>
-                      <div className="muted">{[s.host, s.ms != null ? s.ms + " ms" : (testing ? "测速中…" : ""), s.ok === false && !testing ? "不可用" : ""].filter(Boolean).join(" · ")}</div>
+                      <div className="muted">{sourceBusy === s.key ? "正在切换…" : [s.host, s.ms != null ? s.ms + " ms" : (testing ? "测速中…" : ""), s.ok === false && !testing ? "不可用" : ""].filter(Boolean).join(" · ")}</div>
                     </div>
-                    <span className={"badge" + (active ? " ok" : "")}>{active ? "✓" : ""}</span>
+                    {sourceBusy === s.key
+                      ? <span className="row-spin" aria-hidden="true" />
+                      : <span className={"badge" + (active ? " ok" : "")}>{active ? "✓" : ""}</span>}
                   </button>
                 );
               })}
             </div>
             <div className="row sheet-actions">
-              <button disabled={testing} onClick={() => { void runSpeedTest(); }}>{testing ? "测速中…" : "重新测速"}</button>
+              <button disabled={testing || Boolean(sourceBusy)} onClick={() => { void runSpeedTest(); }}>{testing ? "测速中…" : "重新测速"}</button>
             </div>
           </div>
         </div>
@@ -1001,14 +1098,22 @@ export default function ReaderPanel({
                   ? "已缓存 · " + info.pages + " 页" + (rec && rec.total > info.pages ? "/" + rec.total : "")
                   : "未缓存";
                 return (
-                  <button key={id} className={"sheet-row" + (isCur ? " active" : "")} onClick={() => { void switchToChapter(c); }}>
+                  <button
+                    key={id}
+                    className={"sheet-row" + (isCur ? " active" : "")}
+                    disabled={switchBusy}
+                    aria-busy={switchKey === id ? "true" : undefined}
+                    onClick={() => { void switchToChapter(c); }}
+                  >
                     <div>
                       <div className="title">{label}{isCur ? "（当前）" : ""}</div>
                       <div className="muted">
-                        {[pagesText, !cached && offline ? "离线不可读" : ""].filter(Boolean).join(" · ")}
+                        {switchKey === id ? "正在加载这一话…" : [pagesText, !cached && offline ? "离线不可读" : ""].filter(Boolean).join(" · ")}
                       </div>
                     </div>
-                    <span className={"badge" + (cached ? " ok" : "")}>{cached ? "✓" : ""}</span>
+                    {switchKey === id
+                      ? <span className="row-spin" aria-hidden="true" />
+                      : <span className={"badge" + (cached ? " ok" : "")}>{cached ? "✓" : ""}</span>}
                   </button>
                 );
               })}
@@ -1067,13 +1172,21 @@ export default function ReaderPanel({
   const bubblePage = scrubPage ?? current;
   const bubbleRatio = total > 1 ? Math.min(1, Math.max(0, (bubblePage - 1) / (total - 1))) : 0;
 
-  // 初始空 pages（后台 getRead 尚未返回）显示加载态
+  // 页数还没拿到（父组件先以空 pages 挂载）：先给几张等高骨架 + 转圈，而不是一张文字卡
   if (pageUrls.length === 0) {
     return (
       <div className={"reader-wrap" + (chromeOn ? " chrome-on" : "")} ref={rootRef} onClick={onReaderTap}>
         {toolbar}
         <h2 className="reader-title">{title}</h2>
-        <div className="card"><p className="muted">正在加载阅读数据…</p></div>
+        <div className="reader-cont" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <figure key={i} className="jm-figure" style={{ "--jm-ar": ratioRef.current + "%" } as CSSProperties} />
+          ))}
+        </div>
+        <div className="loading-box small">
+          <span className="loading-spinner" aria-hidden="true" />
+          <span className="muted">正在加载阅读数据…</span>
+        </div>
         {overlays}
       </div>
     );
@@ -1085,7 +1198,14 @@ export default function ReaderPanel({
       <div className={"reader-wrap" + (chromeOn ? " chrome-on" : "")} ref={rootRef} onClick={onReaderTap}>
         {toolbar}
         <h2 className="reader-title">{title}</h2>
-        {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous" onLoad={(e) => applyScramble(e.currentTarget, albumId, scrambleId)} onError={onImgError} />}
+        {/* key 跟着页走：换页时转圈重新出现，不会沿用上一页的"已就绪"标记 */}
+        <div className="jm-single-wrap" key={page ? String(page.page) : "none"}>
+          <span className="loading-spinner" aria-hidden="true" />
+          {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous"
+            onLoad={(e) => { applyScramble(e.currentTarget, albumId, scrambleId); markPageReady(e.currentTarget); }}
+            onError={onImgError} />}
+        </div>
+
         {overlays}
       </div>
     );
