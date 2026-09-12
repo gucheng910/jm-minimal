@@ -66,15 +66,21 @@ export function useHomeFeed(opts: HomeFeedOptions = {}): HomeFeedApi {
   }, []);
 
   const loadLatest = useCallback(async () => {
+    const prev = itemsRef.current;
+    setItems([]); // 刷新/切换分段：先出骨架（即时反馈），拿到数据再填充
     const list = await run(() => client.getLatest());
     if (list) show(list, "latest", list.length >= PAGE_SIZE, 1);
+    else if (prev.length > 0) setItems(prev); // 失败保住旧列表
   }, [run, show]);
 
   const loadRandom = useCallback(async () => {
+    const prev = itemsRef.current;
+    setItems([]);
     const list = await run(() => client.getRandomRecommend());
     if (list) {
       show(list, "latest", false, 1);
     } else {
+      if (prev.length > 0) setItems(prev); // 失败保住旧列表
       // run() 已置 error；这里统一成可操作的提示
       setError("网络连接失败，推荐内容加载不出来。先去会员页「DNS 加速」配置 DoT 公共 DNS（可解决大多数运营商 DNS 污染）；配置后需删除后台重新进入 App 使设置生效，再重试；仍失败再尝试魔法或切换线路。");
       optsRef.current.onRandomFail?.();

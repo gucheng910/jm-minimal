@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useSheetTransition } from "../hooks/useSheetTransition";
 import { CheckIcon } from "./icons";
 import { zh } from "../core/zh";
+import { SkeletonRows } from "./SkeletonRows";
 
 interface Props {
   open: boolean;
@@ -55,7 +56,7 @@ export default function SourceSheet({
 
         <p className="sheet-sec">图源</p>
         <div className="sheet-list">
-          {shunts.length === 0 && <p className="sheet-empty">配置尚未就绪，稍后重试</p>}
+          {shunts.length === 0 && (busy ? <SkeletonRows count={4} /> : <p className="sheet-empty">配置尚未就绪，稍后重试</p>)}
           {shunts.map((s) => {
             const on = String(s.key) === String(currentShunt);
             return (
@@ -79,7 +80,7 @@ export default function SourceSheet({
 
         <p className="sheet-sec">线路</p>
         <div className="sheet-list">
-          {lines.length === 0 && <p className="sheet-empty">线路表未就绪</p>}
+          {lines.length === 0 && (busy ? <SkeletonRows count={3} /> : <p className="sheet-empty">线路表未就绪</p>)}
           {lines.map(([host, name]) => {
             const on = host === currentHost;
             return (

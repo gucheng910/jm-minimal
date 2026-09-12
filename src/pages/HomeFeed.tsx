@@ -70,7 +70,7 @@ export default function HomeFeed({
           </div>
         </div>
       )}
-      {busy && items.length === 0 ? <SkeletonGrid /> : null}
+      {busy && !error && items.length === 0 ? <SkeletonGrid /> : null}
       <AlbumGrid key={gridKey} items={items} onOpen={onOpenAlbum} />
       {hasMore && <div ref={sentinelRef} className="cat-sentinel" aria-hidden="true" />}
       {busy && items.length > 0 && hasMore ? <p className="cat-more">正在加载第 {page + 1} 页…</p> : null}

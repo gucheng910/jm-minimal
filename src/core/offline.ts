@@ -75,6 +75,27 @@ const activeBlobURLs = new Set<string>();
 /** 离线读页的并发度：老机型上 8 已经能把"等它一张张转 blob"的时间压掉大半 */
 const OFFLINE_READ_CONCURRENCY = 8;
 
+/**
+ * blob 游标：换话/换源前调用，返回当前已创建的 blob 数量。
+ * 配合 releaseOfflinePageUrlsBefore()，只释放"上一话"的 blob —— 若换话时立刻全放，
+ * 屏上还没被替换掉的旧页图片会瞬间裂开（blob URL 已失效）。
+ */
+export function blobCheckpoint(): number {
+  return activeBlobURLs.size;
+}
+
+/** 释放游标之前的 blob（本次新加的保留）；返回释放数量 */
+export function releaseOfflinePageUrlsBefore(cursor: number): number {
+  let i = 0;
+  let n = 0;
+  for (const url of activeBlobURLs) {
+    if (i++ >= cursor) break;
+    try { URL.revokeObjectURL(url); n += 1; } catch { /* ignore */ }
+    activeBlobURLs.delete(url);
+  }
+  return n;
+}
+
 /** 释放全部离线阅读 blob URL（阅读器卸载时调用，防止内存泄漏） */
 export function releaseOfflinePageUrls(): number {
   let n = 0;

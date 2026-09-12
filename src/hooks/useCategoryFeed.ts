@@ -83,6 +83,9 @@ export function useCategoryFeed(): CategoryFeedApi {
     const reqId = ++reqIdRef.current;
     setBusy(true);
     setError("");
+    // 刷新/切分类立刻清空旧列表 → 骨架立现（"刷新也要即时反馈"）；失败时再放回去，网络抖动不至于清空整页
+    const prev = itemsRef.current;
+    if (replace) setItems([]);
     try {
       const result = await client.getCategoryAlbums(c, p, o);
       if (reqIdRef.current !== reqId) return; // 切分类/切排序后丢弃过期回包
@@ -99,7 +102,10 @@ export function useCategoryFeed(): CategoryFeedApi {
       setHasMore(content.length > 0 && next.length < totalNum);
       prefetchCovers(next);
     } catch (err) {
-      if (reqIdRef.current === reqId) setError(String(err));
+      if (reqIdRef.current === reqId) {
+        if (replace && prev.length > 0) setItems(prev);
+        setError(String(err));
+      }
     } finally {
       if (reqIdRef.current === reqId) setBusy(false);
     }

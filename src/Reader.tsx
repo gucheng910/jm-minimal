@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
 import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
-import { pagesFromCache, releaseOfflinePageUrls, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "./core/offline";
+import { blobCheckpoint, pagesFromCache, releaseOfflinePageUrls, releaseOfflinePageUrlsBefore, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "./core/offline";
 import { chapterLabel, getChapter, listChapters, type BookChapter, type ChapterMeta } from "./core/offlineMeta";
 import { saveHistory } from "./core/history";
 import { useBackHandler } from "./hooks/useBackHandler";
@@ -11,6 +11,7 @@ import { popSheetLock, pushSheetLock } from "./core/uiLocks";
 import { useSheetTransition } from "./hooks/useSheetTransition";
 import { measureAll } from "./core/speed";
 import { pushToast } from "./ui/toast";
+import { SkeletonRows } from "./ui/SkeletonRows";
 import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
 import { NO_SEAM } from "./core/constants";
@@ -214,6 +215,13 @@ export default function ReaderPanel({
   });
   const [current, setCurrent] = useState(1);
   /**
+   * 渲染代数：换话 / 换源后 +1，用作页面容器的 key → 整块重建（新骨架、新 canvas、从头渲染），
+   * 而不是在旧 DOM 上逐张替换（旧做法会留下上一话的 canvas/尺寸状态，观感像"打补丁"）。
+   */
+  const [stageGen, setStageGen] = useState(0);
+  /** 换话/换源那一刻的 blob 游标：等新一话提交渲染后再释放它之前的 blob（否则屏上旧图会裂） */
+  const blobCursorRef = useRef(0);
+  /**
    * 每页骨架的估算比例（高 ÷ 宽 × 100）。页数在进入阅读器时就已知，先用它把每页"撑起来"：
    * 图片/拼图就绪后 figure 再切回自然高度（同一话内页面尺寸基本一致，学到的比例误差通常只有 1px 级）。
    */
@@ -289,6 +297,12 @@ export default function ReaderPanel({
   }, [anySheetOpen]);
 
   useEffect(() => { currentRef.current = current; }, [current]);
+
+  // 换话/换源：新一话已提交渲染（stageGen 变化），此时才释放上一话的 blob（避免屏上旧图裂开）
+  useEffect(() => {
+    if (stageGen === 0) return;
+    releaseOfflinePageUrlsBefore(blobCursorRef.current);
+  }, [stageGen]);
 
   const [pageUrls, setPageUrls] = useState<ReadPage[]>(pages);
   // 父组件先以空 pages[] 渲染阅读器（立即进入），后台获取到实际数据后更新 props → 同步到内部状态
@@ -410,14 +424,6 @@ export default function ReaderPanel({
     if (scrubRaf.current) cancelAnimationFrame(scrubRaf.current);
   }, []);
 
-  // 连续阅读时隐藏系统滚动条（由右侧浮标代替），仅阅读器所在的文档/overlay 生效
-  useEffect(() => {
-    if (mode !== "continuous") return;
-    const root = document.documentElement;
-    root.classList.add("jm-reading");
-    return () => root.classList.remove("jm-reading");
-  }, [mode]);
-
   // 浮标纵向范围：避开顶部工具栏（可换行）与底部提示行
   useEffect(() => {
     if (mode !== "continuous") return;
@@ -514,8 +520,13 @@ export default function ReaderPanel({
       if (key !== "0") await client.getSetting();
       const r = await client.getRead(albumId);
       if (!r) return;
+      blobCursorRef.current = blobCheckpoint();
       setPageUrls(r.images);
-      jumpTo(1);
+      setCurrent(1);
+      setJumpInput("1");
+      setScrubPage(null);
+      setStageGen((g) => g + 1); // 整块重载：新骨架 + 从头渲染
+      resetReaderScroll();
       pushToast(key === "0" ? "已开启快速通道" : "图源已切换", "ok");
     } catch {
       pushToast("图源切换失败，请重试", "err");
@@ -718,12 +729,15 @@ export default function ReaderPanel({
     setSwitchBusy(true);
     setSwitchKey(id);
     try {
+      blobCursorRef.current = blobCheckpoint();
       const next = await resolvePages(id);
       if (!next) { pushToast("该话本地数据缺失，联网后可加载", "err"); return; }
       setOverride({ id, pages: next.pages, scrambleId: next.scrambleId, label, sort: Number(c.sort) || undefined });
       setCurrent(1);
       setJumpInput("1");
-      window.scrollTo(0, 0);
+      setScrubPage(null);
+      setStageGen((g) => g + 1); // 整块重载：像重新进入阅读器一样
+      resetReaderScroll();
       recordHistory(id, label, Number(c.sort) || undefined);
       setChapOpen(false);
     } catch (err) {
@@ -844,6 +858,13 @@ export default function ReaderPanel({
     const host = readerScrollHost();
     if (host) host.scrollTop += delta;
     else window.scrollBy(0, delta);
+  }
+
+  /** 换话/换源后回到顶部：窗口滚动与缓存中心 overlay 两种宿主都要处理 */
+  function resetReaderScroll(): void {
+    const host = readerScrollHost();
+    if (host) host.scrollTop = 0;
+    else window.scrollTo(0, 0);
   }
 
   /** 记住这一页的真实比例：同话后续页的骨架直接用它（比例没变就什么都不做） */
@@ -1087,6 +1108,7 @@ export default function ReaderPanel({
             </div>
             <p className="muted">共 {chapters.length} 话 · 当前 {curLabel || "第1话"}</p>
             <div className="list sheet-list">
+              {chapters.length === 0 && <SkeletonRows count={6} />}
               {chapters.map((c) => {
                 const id = String(c.id);
                 const label = chapterLabel(c) || ("#" + id);
@@ -1199,7 +1221,7 @@ export default function ReaderPanel({
         {toolbar}
         <h2 className="reader-title">{title}</h2>
         {/* key 跟着页走：换页时转圈重新出现，不会沿用上一页的"已就绪"标记 */}
-        <div className="jm-single-wrap" key={page ? String(page.page) : "none"}>
+        <div className="jm-single-wrap" key={stageGen + ":" + (page ? String(page.page) : "none")}>
           <span className="loading-spinner" aria-hidden="true" />
           {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous"
             onLoad={(e) => { applyScramble(e.currentTarget, albumId, scrambleId); markPageReady(e.currentTarget); }}
@@ -1215,7 +1237,7 @@ export default function ReaderPanel({
     <div className={"reader-wrap" + (chromeOn ? " chrome-on" : "")} ref={rootRef} onClick={onReaderTap}>
       {toolbar}
       <h2 className="reader-title">{title}</h2>
-      <div className="reader-cont">{pageUrls.map((p) => renderPage(p))}</div>
+      <div className="reader-cont" key={"stage" + stageGen}>{pageUrls.map((p) => renderPage(p))}</div>
       {total > 1 && (
         <div ref={railRef} role="slider" aria-label="阅读进度" aria-valuemin={1} aria-valuemax={total} aria-valuenow={bubblePage}
           className={"reader-rail" + (railVisible ? " show" : "")}

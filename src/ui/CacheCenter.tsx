@@ -12,6 +12,7 @@ import {
 } from "../core/cacheTasks";
 import { cachedCoverUrl, pagesFromCache, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "../core/offline";
 import { ensureBookMeta } from "../core/bookSync";
+import { SkeletonRows } from "./SkeletonRows";
 import { knownBookId } from "../core/series";
 import { hasOpenSheet } from "../core/uiLocks";
 import { chapterLabel, getBook, getChapter, listChapters, type BookMeta, type ChapterMeta } from "../core/offlineMeta";
@@ -329,7 +330,8 @@ export default function CacheCenter({ onClose, entering, closing }: { onClose: (
           </div>
           <button className="btn soft sm" aria-label="返回缓存列表" onClick={() => setView({ kind: "list" })}>返回</button>
         </div>
-        {loadingBook && <p className="muted cache-empty">正在读取本地数据…</p>}
+        {/* 目录来自本地 IDB，很快；但旧缓存要先纠正书 id，这里统一给行骨架过渡，别只给一句文字 */}
+        {loadingBook && <SkeletonRows count={6} />}
         {!loadingBook && book && book.tags.length > 0 && (
           <p className="muted book-tags">{book.tags.map((t) => "#" + t).join("  ")}</p>
         )}

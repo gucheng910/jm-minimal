@@ -740,6 +740,19 @@ h3 { font-size: 14px; margin: 4px 0; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- 行式列表骨架（封面骨架之外的列表统一用它过渡） ---------- */
+.skeleton-rows { display: flex; flex-direction: column; gap: 10px; padding: 6px 0; }
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  padding: 13px 14px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+}
+.skeleton-row-main { flex: 1; min-width: 0; }
+.skeleton-row .skeleton-title { margin: 0 0 7px; width: 46%; }
+.skeleton-row .skeleton-meta { margin: 0; width: 28%; }
+
 /* ---------- 网格骨架屏 ---------- */
 .skeleton-grid {
   display: grid;
@@ -1212,11 +1225,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 .reader-wrap .row button:hover { background: rgba(255, 255, 255, 0.16); }
 .reader-wrap .muted { color: #7f8794; font-size: 13px; }
 
-/* ---------- 阅读器右侧页进度浮标（B 方案：拖动圆点跳页，替代系统滚动条） ---------- */
-/* 连续阅读时隐藏系统滚动条（PC/Electron），由右侧浮标承担阅读进度 */
-html.jm-reading { scrollbar-width: none; }
-html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
-
+/* ---------- 阅读器右侧页进度浮标（拖动圆点跳页；系统滚动条已恢复，两者并存） ---------- */
 .reader-rail {
   position: fixed;
   right: 3px;
@@ -1232,6 +1241,10 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
   transition: opacity 0.18s ease;
 }
 .reader-rail.show { opacity: 1; pointer-events: auto; }
+/* 桌面/鼠标设备有常驻滚动条：浮标往左让开，别和滚动条叠在一起（触屏是悬浮滚动条，无需避让） */
+@media (pointer: fine) {
+  .reader-rail { right: 22px; }
+}
 .reader-rail-line {
   position: absolute;
   left: 50%;

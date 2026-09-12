@@ -75,6 +75,9 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void): Se
     const reqId = ++reqIdRef.current;
     setBusy(true);
     setError("");
+    // 新搜索/刷新：先清空旧结果让骨架立现（即时反馈）；失败时回滚，避免网络抖动清空整页
+    const prev = itemsRef.current;
+    if (replace) setItems([]);
     try {
       const result = await client.search(q, p, 0, searchType, sortOrder);
       if (reqIdRef.current !== reqId) return; // 换词/换类型/换排序后丢弃过期回包
@@ -90,7 +93,10 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void): Se
       setTotal(totalNum);
       setHasMore(next.length < totalNum);
     } catch (err) {
-      if (reqIdRef.current === reqId) setError(String(err));
+      if (reqIdRef.current === reqId) {
+        if (replace && prev.length > 0) setItems(prev);
+        setError(String(err));
+      }
     } finally {
       if (reqIdRef.current === reqId) setBusy(false);
     }
