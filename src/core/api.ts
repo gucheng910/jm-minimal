@@ -1,7 +1,7 @@
 import { APP_VERSION, AUTO_SELECT_TTL_MS, CONTENT_SECRET, FALLBACK_SHUNT_KEYS, TOKEN_SECRET, UI_KEYS } from "./constants";
 import { aesEcbDecrypt, md5Hex } from "./crypto";
 import { API_PATHS } from "./endpoints";
-import { measureAll, measureImages } from "./speed";
+import { measureAll, measureImages, pickFastestSource } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
 import { getMemCache, makeKey, setMemCache } from "./requestCache";
 import { bookIdOf, mergeBookMeta, rememberSeries } from "./series";
@@ -182,9 +182,10 @@ export class JMClient {
     if (!this.setting) { try { await this.getSetting(); } catch { /* 尽力而为 */ } }
     const stamp = String(Date.now());
     // 1) 线路测速
-    const lineItems = servers.map(([host]) => ({ label: host, url: "https://" + host + "/static/jmapp3apk/version.json?t=" + stamp }));
+    const lineItems = servers.map(([host]) => ({ label: host, url: "https://" + host + "/static/jmapp3apk/version.json?t=" + stamp, tag: host }));
     const lineSamples = await measureAll(lineItems, servers.length);
-    const bestLine = lineSamples.find((s) => s.ok);
+    // 线路没有 express 概念（tag 就是主机名，不会是 "0"），这里等价于"最快的可用线路"
+    const bestLine = pickFastestSource(lineSamples);
     let anyOk = false;
     if (bestLine) {
       const host = bestLine.url.replace(/^https?:\/\//, "").split("/")[0];
@@ -210,7 +211,7 @@ export class JMClient {
     // 后者对 403/404 也会 resolve，会把"连得上但不给图"的图床误判为可用（老设备封面全白就是这么来的）
     const imgItems = hostByKey
       .filter((p) => p.host)
-      .map((p) => ({ label: p.key, url: "https://" + p.host + "/media/logo/new_logo.png?t=" + stamp }));
+      .map((p) => ({ label: p.key, url: "https://" + p.host + "/media/logo/new_logo.png?t=" + stamp, tag: p.key }));
     const okHosts = new Set<string>();
     if (imgItems.length > 0) {
       const samples = await measureImages(imgItems, 6000);
@@ -219,13 +220,10 @@ export class JMClient {
       // 对 /media/logo/new_logo.png 返回 200，对正文 /media/photos/*.webp 直接 ERR_CONNECTION_RESET。
       // 只按"能不能出图 + 快不快"挑，express 必然胜出 → 封面正常、整本正文全黑。
       // 所以：官方源里有任何一个可用就不用 express，express 只在官方源全挂时兜底。
-      const okSamples = samples.filter((s) => s.ok);
-      const bestImg = okSamples.find((s) => s.label !== "0") || okSamples[0];
-      if (bestImg) {
-        const bestHost = bestImg.url.replace(/^https?:\/\//, "").split("/")[0];
-        const pick = hostByKey.find((p) => p.host === bestHost);
-        if (pick) { this.setImageShunt(pick.key); anyOk = true; }
-      }
+      // 选源规则收在 core/speed.pickFastestSource：官方源优先于 express（0），按 tag 精确取 key，
+      // 不再用 host 反查（host 带尾斜杠/重复时反查会失败或串行）
+      const bestImg = pickFastestSource(samples, "0");
+      if (bestImg && bestImg.tag !== undefined) { this.setImageShunt(String(bestImg.tag)); anyOk = true; }
     }
     // 3) 用选定线路 + 图源刷新配置（图床随之更新），并记住本次最优选择
     await this.getSetting().catch(() => { /* ignore */ });

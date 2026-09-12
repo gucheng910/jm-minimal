@@ -1225,7 +1225,11 @@ h3 { font-size: 14px; margin: 4px 0; }
 .reader-wrap .row button:hover { background: rgba(255, 255, 255, 0.16); }
 .reader-wrap .muted { color: #7f8794; font-size: 13px; }
 
-/* ---------- 阅读器右侧页进度浮标（拖动圆点跳页；系统滚动条已恢复，两者并存） ---------- */
+/* ---------- 阅读器右侧页进度浮标（拖动圆点跳页，替代系统滚动条：与 1.8.3 行为一致） ---------- */
+/* 连续阅读时隐藏系统滚动条（PC/Electron/Android），由右侧浮标承担阅读进度 */
+html.jm-reading { scrollbar-width: none; }
+html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
+
 .reader-rail {
   position: fixed;
   right: 3px;
@@ -1241,10 +1245,6 @@ h3 { font-size: 14px; margin: 4px 0; }
   transition: opacity 0.18s ease;
 }
 .reader-rail.show { opacity: 1; pointer-events: auto; }
-/* 桌面/鼠标设备有常驻滚动条：浮标往左让开，别和滚动条叠在一起（触屏是悬浮滚动条，无需避让） */
-@media (pointer: fine) {
-  .reader-rail { right: 22px; }
-}
 .reader-rail-line {
   position: absolute;
   left: 50%;
@@ -1252,7 +1252,7 @@ h3 { font-size: 14px; margin: 4px 0; }
   bottom: 2px;
   width: 3px;
   transform: translateX(-50%);
-  border-radius: 8px;
+  border-radius: 2px;
   background: rgba(255, 255, 255, 0.15);
 }
 .reader-rail.show .reader-rail-line { background: rgba(255, 255, 255, 0.28); }
@@ -1278,7 +1278,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 .reader-thumb-num {
   min-width: 21px;
   text-align: center;
-  font-size: 11px;
+  font-size: 10.5px;
   line-height: 1;
   padding: 4px 5px;
   border-radius: 8px;
@@ -1478,6 +1478,28 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
 .mini-spin { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: gate-spin .8s linear infinite; }
 @keyframes gate-spin { to { transform: rotate(360deg); } }
 .age-tip { margin: 14px 0 0; font-size: 13px; color: var(--ink-3); }
+/* 18+ 页右上角「无网直达缓存」：老内核没有 env()，先给基础值再覆盖（否则整条声明会被丢弃 → 按钮回到文档流） */
+.age-cache {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  top: calc(env(safe-area-inset-top) + 14px);
+  right: calc(env(safe-area-inset-right) + 14px);
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink-2);
+  box-shadow: var(--sh-1);
+  transition: background 120ms var(--ease-out);
+}
+.age-cache:active { background: #fff; color: var(--ink); }
+/* 缓存中心打开期间：确认页降到缓存中心（190）之下当背板，两个方向的过渡都不露主页 */
+.age-gate.behind { z-index: 189; }
 
 /* ---------- 评论富文本 ---------- */
 .comment-body { margin: 4px 0 0; font-size: 13px; line-height: 1.65; word-break: break-word; white-space: pre-wrap; color: var(--ink); }

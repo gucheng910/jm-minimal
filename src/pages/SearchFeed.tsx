@@ -127,7 +127,7 @@ export default function SearchFeed({
               排序：{sortLabel}
             </button>
           </div>
-          {error && <div className="card err">{error}</div>}
+          {items.length === 0 && error && <div className="card err">{error}</div>}
           {busy && !error && items.length === 0 ? <SkeletonGrid /> : null}
           {!busy && !error && items.length === 0 ? <p className="muted sr-empty">没有找到相关漫画</p> : null}
           <AlbumGrid key={gridKey} items={items} onOpen={onOpenAlbum} />

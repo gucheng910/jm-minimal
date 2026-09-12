@@ -46,7 +46,7 @@ export default function WeekRank({
         </select>
         <button disabled={busy || !issue || !type} onClick={onLoad}>加载该期</button>
       </div>
-      {error && <div className="card err">{error}</div>}
+      {items.length === 0 && error && <div className="card err">{error}</div>}
       <AlbumGrid key={gridKey} items={items} onOpen={onOpenAlbum} />
     </div>
   );

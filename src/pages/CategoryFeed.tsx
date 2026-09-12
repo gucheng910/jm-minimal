@@ -119,7 +119,7 @@ export default function CategoryFeed({
         )}
       </div>
 
-      {error && <div className="card err">{error}</div>}
+      {items.length === 0 && error && <div className="card err">{error}</div>}
       {busy && !error && items.length === 0 ? <SkeletonGrid /> : null}
       <AlbumGrid key={gridKey} items={items} onOpen={onOpenAlbum} />
       {hasMore && <div ref={sentinelRef} className="cat-sentinel" aria-hidden="true" />}

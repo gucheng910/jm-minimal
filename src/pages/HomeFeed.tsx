@@ -61,7 +61,7 @@ export default function HomeFeed({
   return (
     <>
       <UnderlineTabs items={HOME_TABS} value={feed} onChange={onPickFeed} />
-      {error && (
+      {items.length === 0 && error && (
         <div className="card err">
           {error}
           <div className="row" style={{ marginTop: 8 }}>

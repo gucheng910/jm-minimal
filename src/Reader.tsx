@@ -9,7 +9,7 @@ import { saveHistory } from "./core/history";
 import { useBackHandler } from "./hooks/useBackHandler";
 import { popSheetLock, pushSheetLock } from "./core/uiLocks";
 import { useSheetTransition } from "./hooks/useSheetTransition";
-import { measureAll } from "./core/speed";
+import { measureImages, pickFastestSource, type SpeedItem } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { SkeletonRows } from "./ui/SkeletonRows";
 import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
@@ -424,13 +424,24 @@ export default function ReaderPanel({
     if (scrubRaf.current) cancelAnimationFrame(scrubRaf.current);
   }, []);
 
+  // 连续阅读时隐藏系统滚动条（由右侧浮标承担进度），只在本阅读器挂载期间生效
+  useEffect(() => {
+    if (mode !== "continuous") return;
+    const root = document.documentElement;
+    root.classList.add("jm-reading");
+    return () => root.classList.remove("jm-reading");
+  }, [mode]);
+
   // 浮标纵向范围：避开顶部工具栏（可换行）与底部提示行
+  // 注意：工具栏是整屏遮罩（position:fixed; inset:0），它的底边=屏幕底，拿它算浮标起点会把浮标推到屏幕外、高度算成 0
+  // （1.8.3 的 .reader-toolbar 没有这条样式，内流小盒子底边≈顶栏底边，所以那时的写法是对的）。这里改取顶栏 .rt-top 的底边。
   useEffect(() => {
     if (mode !== "continuous") return;
     const update = () => {
-      const tb = document.querySelector<HTMLElement>(".reader-toolbar");
-      const top = (tb ? tb.getBoundingClientRect().bottom : 0) + 6;
-      setRailTop(top > 0 ? top : 64);
+      const bar = document.querySelector<HTMLElement>(".reader-toolbar .rt-top");
+      const y = (bar ? bar.getBoundingClientRect().bottom : 0) + 6;
+      const max = Math.max(64, window.innerHeight - 96 - 80); // 底部 96px 提示行 + 至少 80px 轨道
+      setRailTop(Math.min(y > 0 ? y : 64, max));
     };
     update();
     window.addEventListener("resize", update);
@@ -511,25 +522,23 @@ export default function ReaderPanel({
     return rows;
   }
 
-  /** 手动选源：弹窗保持打开，测速结果与当前选中项都在弹窗里看 */
+  /** 手动选源：立刻关浮层，阅读器先进加载骨架，再按新源从头填充（失败把原页放回） */
   async function changeSource(key: string) {
     if (sourceBusy) return;
     setSourceBusy(key);
     client.setImageShunt(key);
+    closeSourcePicker();
+    const prevPages = beginRestage();
     try {
       if (key !== "0") await client.getSetting();
-      const r = await client.getRead(albumId);
-      if (!r) return;
-      blobCursorRef.current = blobCheckpoint();
+      const [r] = await Promise.all([client.getRead(albumId), holdStage()]);
+      if (!r) { setPageUrls(prevPages); return; }
       setPageUrls(r.images);
-      setCurrent(1);
-      setJumpInput("1");
-      setScrubPage(null);
-      setStageGen((g) => g + 1); // 整块重载：新骨架 + 从头渲染
-      resetReaderScroll();
+      commitRestage();
       pushToast(key === "0" ? "已开启快速通道" : "图源已切换", "ok");
     } catch {
       pushToast("图源切换失败，请重试", "err");
+      setPageUrls(prevPages);
     } finally {
       setSourceBusy(null);
     }
@@ -568,7 +577,7 @@ export default function ReaderPanel({
         return { key: k.key, host: host.replace(/^https?:\/\//, "") };
       }));
       const hostMap = new Map<string, string>();
-      const items: Array<{ label: string; url: string; noCors: boolean }> = [];
+      const items: SpeedItem[] = [];
       const stamp = String(Date.now());
       for (const p of probes) {
         if (!p.host) continue;
@@ -577,7 +586,7 @@ export default function ReaderPanel({
         items.push({
           label: label + "（" + p.host + "）",
           url: "https://" + p.host + "/media/albums/" + String(albumId) + "_3x4.jpg?v=" + stamp,
-          noCors: true
+          tag: p.key
         });
       }
       if (items.length === 0) {
@@ -585,32 +594,39 @@ export default function ReaderPanel({
         return;
       }
       if (gen !== speedGenRef.current) return; // 弹窗已关闭：不再测速
-      const samples = await measureAll(items, 3);
+      // 用 <img> 真实解码测：no-cors 的 fetch 对 403/404 也返回 ok，会把"连得上但不给图"的源当成可用
+      const samples = await measureImages(items);
       if (gen !== speedGenRef.current) return; // 测速期间被关闭：结果作废，不切源
-      // 每行写回耗时/可用性（没有样本的图源视为不可用）
+      jlog("speedtest", samples.map((s) => String(s.tag) + "=" + s.ms + (s.ok ? "" : "×")).join(" "));
+      // 每行写回耗时/可用性：按 tag 精确对应（原来拿 url.includes(host) 反查，host 互为子串时会串行）
       setSourceRows((list) => list.map((row) => {
         const host = hostMap.get(row.key);
-        const s = host ? samples.find((x) => x.url.includes(host)) : undefined;
+        const s = samples.find((x) => x.tag === row.key);
         return { ...row, host, ms: s ? s.ms : undefined, ok: s ? s.ok : false };
       }));
-      const best = samples.find((s) => s.ok);
-      if (!best) {
+      // 选源交给 core/speed.pickFastestSource：官方源优先于 express，且不再按 host 反查、失败不再静默落到 rows[0]
+      const best = pickFastestSource(samples, "0");
+      if (!best || best.tag === undefined) {
         pushToast("所有图源均测速失败，请检查网络后重试", "err");
         return;
       }
-      const bestHost = best.url.replace(/^https?:\/\//, "").split("/")[0];
-      let bestKey = rows[0].key;
-      for (const [k, h] of hostMap) {
-        if (h === bestHost) { bestKey = k; break; }
-      }
+      const bestKey = String(best.tag);
       const bestTitle = rows.find((x) => x.key === bestKey)?.title || "图源";
       client.setImageShunt(bestKey);
-      const r = await client.getRead(albumId);
-      if (r) {
-        setPageUrls(r.images);
-        jumpTo(1);
+      // 换源同样是整块重载：与手动选源一致，先骨架再从第 1 页填充（失败把原页放回）
+      const prevPages = beginRestage();
+      try {
+        const r = await client.getRead(albumId);
+        if (!r) setPageUrls(prevPages);
+        else { setPageUrls(r.images); commitRestage(); }
+        // 快速通道（key 0）常常封面上排第一但正文拉不到图：跳过它时要说明，别让用户以为选错了
+        const skippedExpress = bestKey !== "0"
+          && samples.some((s) => s.ok && String(s.tag) === "0" && s.ms < best.ms);
+        pushToast("已切换最快可用图源：" + bestTitle + "（" + best.ms + " ms）" + (skippedExpress ? "，已跳过快速通道（正文图不稳）" : ""), "ok");
+      } catch {
+        setPageUrls(prevPages);
+        pushToast("测速切换失败，请重试", "err");
       }
-      pushToast("已切换最快图源：" + bestTitle + "（" + best.ms + " ms）", "ok");
     } catch {
       pushToast("测速切换失败，请重试", "err");
     } finally {
@@ -699,6 +715,27 @@ export default function ReaderPanel({
     return { pages: r.images, scrambleId: r.scramble_id };
   }
 
+  /** 换话/换源的最短加载态：数据秒回时也能看见骨架，不会一闪而过 */
+  const STAGE_MIN_MS = 180;
+  const holdStage = () => new Promise<void>((res) => window.setTimeout(res, STAGE_MIN_MS));
+
+  /** 整块重载第一步：清空当前页 → 阅读器立刻显示骨架；返回原页以便失败时放回 */
+  function beginRestage(): ReadPage[] {
+    const prev = pageUrls;
+    blobCursorRef.current = blobCheckpoint();
+    setPageUrls([]);
+    return prev;
+  }
+
+  /** 整块重载第二步：新页已就绪，整块重挂并回到第 1 页（与重新进入阅读器一致） */
+  function commitRestage(): void {
+    setCurrent(1);
+    setJumpInput("1");
+    setScrubPage(null);
+    setStageGen((g) => g + 1);
+    resetReaderScroll();
+  }
+
   /** 阅读用页列表：本地命中就把已缓存页换成 blob URL，未缓存页回落原 URL */
   async function resolvePages(id: string): Promise<{ pages: ReadPage[]; scrambleId?: number | string } | null> {
     const raw = await rawPages(id);
@@ -728,20 +765,18 @@ export default function ReaderPanel({
     if (id === String(albumId)) { setChapOpen(false); return; }
     setSwitchBusy(true);
     setSwitchKey(id);
+    // 立刻关浮层并把当前页清空：阅读器先显示骨架（正在加载阅读数据…），新一话拿到后逐页填充
+    setChapOpen(false);
+    const prevPages = beginRestage();
     try {
-      blobCursorRef.current = blobCheckpoint();
-      const next = await resolvePages(id);
-      if (!next) { pushToast("该话本地数据缺失，联网后可加载", "err"); return; }
+      const [next] = await Promise.all([resolvePages(id), holdStage()]);
+      if (!next) { pushToast("该话本地数据缺失，联网后可加载", "err"); setPageUrls(prevPages); return; }
       setOverride({ id, pages: next.pages, scrambleId: next.scrambleId, label, sort: Number(c.sort) || undefined });
-      setCurrent(1);
-      setJumpInput("1");
-      setScrubPage(null);
-      setStageGen((g) => g + 1); // 整块重载：像重新进入阅读器一样
-      resetReaderScroll();
+      commitRestage();
       recordHistory(id, label, Number(c.sort) || undefined);
-      setChapOpen(false);
     } catch (err) {
       pushToast("切换失败：" + String(err).replace(/^Error: /, "").slice(0, 80), "err");
+      setPageUrls(prevPages);
     } finally {
       setSwitchBusy(false);
       setSwitchKey(null);

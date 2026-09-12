@@ -41,7 +41,8 @@ export interface CategoryFeedApi {
   reset: () => void;
 }
 
-export function useCategoryFeed(): CategoryFeedApi {
+/** onStaleFail：刷新/加载更多失败但旧列表还在时的提示（此时不进错误态，避免内容在屏上却报网络错误） */
+export function useCategoryFeed(onStaleFail?: (msg: string) => void): CategoryFeedApi {
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [blocks, setBlocks] = useState<CategoryBlock[]>([]);
   const [items, setItems] = useState<AlbumSummary[]>([]);
@@ -103,8 +104,14 @@ export function useCategoryFeed(): CategoryFeedApi {
       prefetchCovers(next);
     } catch (err) {
       if (reqIdRef.current === reqId) {
-        if (replace && prev.length > 0) setItems(prev);
-        setError(String(err));
+        if (prev.length > 0) {
+          // 旧列表还能用：回滚并撤掉错误态，只提示一句（同 useHomeFeed 的处理）
+          setItems(prev);
+          setError("");
+          onStaleFail?.(replace ? "刷新失败，已保留当前内容" : "加载更多失败，请稍后重试");
+        } else {
+          setError(String(err));
+        }
       }
     } finally {
       if (reqIdRef.current === reqId) setBusy(false);

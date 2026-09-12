@@ -64,7 +64,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     isReaderActive: () => modeRef.current === "reader",
     onReadFail: () => setMode("detail")
   });
-  const cat = useCategoryFeed();
+  // 列表已有内容、只是刷新/分页失败时的提示：只 toast，不把整屏顶成错误态
+  const staleFail = useCallback((msg: string) => pushToast(msg, "err"), []);
+  const cat = useCategoryFeed(staleFail);
   // 首页内容流：列表/分页/错误都在 hook 内；onListShown 负责「是否切回 home」的编排
   const home = useHomeFeed({
     onListShown: () => {
@@ -73,11 +75,12 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       if (modeRef.current === "detail" || modeRef.current === "reader") return;
       setMode("home");
     },
-    onRandomFail: () => pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns")
+    onRandomFail: () => pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns"),
+    onStaleFail: staleFail
   });
-  const week = useWeekRank();
+  const week = useWeekRank(staleFail);
   // 搜索纯数字 JM 号时服务端返回 redirect_aid → 直接打开详情页
-  const search = useSearchFeed((aid) => { void openDetail({ id: aid } as AlbumSummary); });
+  const search = useSearchFeed((aid) => { void openDetail({ id: aid } as AlbumSummary); }, staleFail);
   // 同步 mode 的 ref：异步回调里判断用户是否已主动进入详情/阅读器（防止首页预取把页面打回 home）
   const modeRef = useRef<Mode>("home");
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -373,7 +376,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           if (alive && list) {
             home.setError("");
             home.show(list, "latest", false, 1);
-          } else if (alive) {
+          } else if (alive && !home.hasItems()) {
+            // 已经有内容在屏上（最优记忆/后台刷新先到了）就不再占用整屏错误态，否则会出现"内容明明在却报网络错误"
             home.setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
             pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
           }
@@ -388,7 +392,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           }
         }
       } catch (err) {
-        if (alive) home.setError(String(err));
+        if (alive && !home.hasItems()) home.setError(String(err));
       }
     })();
     return () => { alive = false; };

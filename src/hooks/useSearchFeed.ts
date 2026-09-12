@@ -50,7 +50,8 @@ export interface SearchFeedApi {
 }
 
 /** onRedirectAid：搜索纯数字 JM 号时服务端返回 redirect_aid，由调用方直接打开详情页 */
-export function useSearchFeed(onRedirectAid: (aid: string | number) => void): SearchFeedApi {
+/** onStaleFail：搜索/加载更多失败但旧结果还在时的提示（此时不进错误态，避免内容在屏上却报网络错误） */
+export function useSearchFeed(onRedirectAid: (aid: string | number) => void, onStaleFail?: (msg: string) => void): SearchFeedApi {
   const [query, setQuery] = useState("");
   const [type, setType] = useState("site");
   const [order, setOrder] = useState("");
@@ -94,8 +95,13 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void): Se
       setHasMore(next.length < totalNum);
     } catch (err) {
       if (reqIdRef.current === reqId) {
-        if (replace && prev.length > 0) setItems(prev);
-        setError(String(err));
+        if (prev.length > 0) {
+          setItems(prev);
+          setError("");
+          onStaleFail?.(replace ? "搜索失败，已保留上次结果" : "加载更多失败，请稍后重试");
+        } else {
+          setError(String(err));
+        }
       }
     } finally {
       if (reqIdRef.current === reqId) setBusy(false);

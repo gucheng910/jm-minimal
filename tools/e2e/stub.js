@@ -121,6 +121,9 @@
       else if (typeof body === "string") fields = Object.fromEntries(new URLSearchParams(body));
       else if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) fields = Object.fromEntries(body);
     } catch { /* 忽略 */ }
+    // 失败注入：window.__failMap[path] = n → 该路径接下来 n 次请求直接抛网络错误（刷新失败的回归用）
+    const failMap = window.__failMap || (window.__failMap = {});
+    if (failMap[p] > 0) { failMap[p] -= 1; throw new TypeError("Failed to fetch"); }
     // 图片：图源1 的图床刻意慢 300ms，用于验证「更快的源」自动选中更快的那一个
     if (/\.(jpg|jpeg|png|webp)$/i.test(u.pathname)) {
       if (u.hostname.startsWith("mock-img1")) await new Promise((r) => setTimeout(r, 300));

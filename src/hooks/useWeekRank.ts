@@ -22,7 +22,8 @@ export interface WeekRankApi {
   reset: () => void;
 }
 
-export function useWeekRank(): WeekRankApi {
+/** onStaleFail：刷新/加载更多失败但旧列表还在时的提示（此时不进错误态，避免内容在屏上却报网络错误） */
+export function useWeekRank(onStaleFail?: (msg: string) => void): WeekRankApi {
   const [payload, setPayload] = useState<WeekPayload | null>(null);
   const [items, setItems] = useState<AlbumSummary[]>([]);
   const [issue, setIssue] = useState("");
@@ -32,6 +33,9 @@ export function useWeekRank(): WeekRankApi {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const reqIdRef = useRef(0);
+  // 镜像当前列表：失败时要判断"旧列表还在不在"，不能读闭包里的 items
+  const itemsRef = useRef<AlbumSummary[]>([]);
+  itemsRef.current = items;
 
   const load = useCallback(async (issueId: string, typeId: string, p = 1, replace = true) => {
     if (!issueId) return; // typeId 空串 = 全部类型，是合法值
@@ -48,11 +52,18 @@ export function useWeekRank(): WeekRankApi {
       setPage(p);
       setHasMore(list.length >= PAGE_SIZE);
     } catch (err) {
-      if (reqIdRef.current === reqId) setError(String(err));
+      if (reqIdRef.current === reqId) {
+        if (itemsRef.current.length > 0) {
+          setError("");
+          onStaleFail?.(replace ? "刷新失败，已保留当前内容" : "加载更多失败，请稍后重试");
+        } else {
+          setError(String(err));
+        }
+      }
     } finally {
       if (reqIdRef.current === reqId) setBusy(false);
     }
-  }, []);
+  }, [onStaleFail]);
 
   const open = useCallback(async () => {
     const reqId = ++reqIdRef.current;
@@ -70,7 +81,7 @@ export function useWeekRank(): WeekRankApi {
       }
       return true;
     } catch (err) {
-      if (reqIdRef.current === reqId) setError(String(err));
+      if (reqIdRef.current === reqId && itemsRef.current.length === 0) setError(String(err));
       return false;
     } finally {
       if (reqIdRef.current === reqId) setBusy(false);

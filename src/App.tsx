@@ -905,8 +905,14 @@ export default function App() {
       {backHint && <div className="back-hint">再按一次返回退出</div>}
       <ToastHost />
       <TosModal open={tosOpen} requireWait={!tosAccepted} onAccept={acceptTos} />
+      {/* 缓存中心打开时确认页不抽走，只压到它下面当背板：缓存中心是淡入淡出的，
+          抽走会让后面的主页在过渡期间露出来（真机反馈"打开和关闭都要跳过一下主页"） */}
       {ageGate && (
-        <div className="age-gate">
+        <div className={"age-gate" + (cacheAnim.mounted ? " behind" : "")}>
+          {/* 无网时的出口：右上角直达离线缓存（缓存中心只需本地 IDB，不依赖已初始化网络） */}
+          <button className="age-cache" aria-label="离线缓存" onClick={() => setShowCache(true)}>
+            <DownloadIcon size={20} />
+          </button>
           <div className="age-card">
             <img className="age-logo-img" src="./icons/icon-192.png" alt="JM极简版" />
             <h1>JMClient</h1>

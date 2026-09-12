@@ -49,6 +49,9 @@ export default function LibPage({
 
   useEffect(() => {
     let alive = true;
+    // 先清空：否则切到「收藏」时上一次的列表还留在屏上，请求失败就成了"内容在、却报网络错误"
+    setItems(null);
+    setError("");
     (async () => {
       try {
         if (kind === "history") {

@@ -30,6 +30,28 @@
     el.click();
   };
 
+  // 18+ 确认页右上角「无网直达缓存」：点开缓存中心时确认页不能盖在上面，关掉后要回到确认页
+  const gateCacheBtn = q(".age-cache");
+  if (!gateCacheBtn) throw new Error("18+ 页没有右上角缓存入口");
+  const zOf = (sel) => { const el = q(sel); return el ? Number(getComputedStyle(el).zIndex) : NaN; };
+  const zGate0 = zOf(".age-gate");
+  gateCacheBtn.click();
+  await waitFor(".cache-overlay");
+  await sleep(60); // 淡入过渡中：确认页要留在下面当背板（抽走会在过渡期间露出主页）
+  const midGate = !!q(".age-gate");
+  const midZ = { gate: zOf(".age-gate"), cache: zOf(".cache-overlay") };
+  const midCacheOpacity = Number(getComputedStyle(q(".cache-overlay")).opacity);
+  await sleep(400);
+  const openZ = { gate: zOf(".age-gate"), cache: zOf(".cache-overlay") };
+  const cacheClose = q(".cache-header .ghost");
+  if (cacheClose) cacheClose.click();
+  await sleep(800);
+  const backZ = zOf(".age-gate");
+  log.push({ step: "gate-cache-entry", midGate, midCacheOpacity, midZ, openZ, zGate0, backZ, backToGate: !!q(".age-gate") });
+  if (!midGate) throw new Error("缓存中心淡入时确认页被抽走（过渡期间会露出主页）");
+  if (!(midZ.gate < midZ.cache) || !(openZ.gate < openZ.cache)) throw new Error("确认页没有压在缓存中心之下");
+  if (!q(".age-gate") || !(backZ > openZ.cache)) throw new Error("关掉缓存后确认页没有回到最上层");
+
   (await waitFor(".age-confirm")).click();
   await waitFor(".list-item");
   await sleep(600);
@@ -52,6 +74,23 @@
     const recTab = qa(".tabs .tk").find((b) => (b.textContent || "").trim() === "推荐");
     if (recTab) { recTab.click(); await sleep(1800); }
   }
+
+  // ---- 刷新失败但旧列表还在：只能给提示，不能顶出错误卡 ----
+  // 曾经的 bug：失败回滚旧列表后 error 没撤，于是"内容明明加载出来了却提示网络问题"
+  window.__failMap = { random_recommend: 99 };
+  window.dispatchEvent(new CustomEvent("jm:refreshHome"));
+  let failCards = 0;
+  let failErr = "";
+  for (let i = 0; i < 150; i++) {
+    await sleep(100);
+    failCards = qa(".list-item").length;
+    failErr = ((q(".card.err") || {}).textContent || "").slice(0, 40);
+    if (failCards > 0 || failErr) break; // 重试跑完：要么列表回来了，要么真的报了错
+  }
+  log.push({ step: "refresh-fail-keeps-list", cards: failCards, errCard: failErr, toast: ((q(".toast") || {}).textContent || "").slice(0, 40) });
+  if (failCards > 0 && failErr) throw new Error("刷新失败回滚了列表，却同时顶出了错误卡：" + failErr);
+  if (failCards === 0) throw new Error("刷新失败没有把旧列表放回来（出现空白/骨架停留）");
+  window.__failMap = { random_recommend: 0 };
 
   // 下拉刷新用 CDP 原生触摸单独验证（见 _archive/ptr-cdp.mjs）：
   // 合成 DOM TouchEvent 在无触摸的桌面环境下 React 不会挂监听，测不出真实行为

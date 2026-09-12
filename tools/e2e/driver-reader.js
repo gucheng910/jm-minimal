@@ -68,6 +68,20 @@
   await sleep(900);
   log.push({ step: "toolbar", buttons: tbButtons(), sourceSelectGone: !q(".reader-toolbar select.source-select") });
 
+  // 右侧浮标（阅读器的"滚动条"）必须在视口内且有实际高度：
+  // 工具栏是 position:fixed inset:0 的整屏遮罩，若拿它的 rect.bottom 当浮标起点，浮标会被推到屏幕外且高度为 0
+  window.scrollBy(0, 400);
+  await sleep(200);
+  const railEl = q(".reader-rail");
+  const rr = railEl ? railEl.getBoundingClientRect() : null;
+  const railDiag = rr ? {
+    h: Math.round(rr.height), top: Math.round(rr.top), bottom: Math.round(rr.bottom),
+    opacity: getComputedStyle(railEl).opacity,
+    inView: rr.height > 120 && rr.top >= 0 && rr.bottom <= innerHeight + 1
+  } : null;
+  if (!railDiag || !railDiag.inView || railDiag.opacity !== "1") throw new Error("阅读器右侧浮标不可见: " + JSON.stringify(railDiag));
+  log.push({ step: "rail", ...railDiag });
+
   // ---- 更快的源：弹窗 + 自动测速 ----
   btn("更快的源").click();
   await waitFor(".reader-sheet");
@@ -77,6 +91,15 @@
     testing: /正在测速/.test(txt(q(".reader-sheet .muted"))),
     contrast: assertContrast("更快的源")
   });
+  // 系统返回键：只关弹窗，不退出阅读器（先测，避免之后选源时浮层已自动关闭）
+  back();
+  await waitGone(".reader-sheet", 8000);
+  log.push({ step: "back-closes-source-sheet", readerAlive: !!q(".reader-wrap"), toolbar: tbButtons() });
+
+  // 重新打开：自动测速完成 → 浮层保持打开，行内写回耗时
+  btn("更快的源").click();
+  await waitFor(".reader-sheet");
+  await sleep(300);
   await waitUntil(() => !/正在测速/.test(txt(q(".reader-sheet .muted"))), 20000, "speed test done");
   await sleep(400);
   log.push({
@@ -86,20 +109,21 @@
     toast: txt(q(".toast")),
     probeReqs: (window.__reqs || []).filter((r) => r.path === "setting").length
   });
-  // 手动点「图源1」（更慢的那个）：弹窗保持打开、当前项跟着变
+  // 手动点「图源1」（更慢的那个）：浮层立刻关闭，阅读器先进骨架再整块填充
   const slow = qa(".reader-sheet .sheet-row").find((r) => /图源1/.test(txt(r)));
   if (slow) slow.click();
-  await sleep(1200);
+  await sleep(80);
+  const sourceStage = { loadingShown: !!q(".reader-wrap .loading-box.small"), skeletons: qa(".reader-cont .jm-figure > img").length };
+  if (!sourceStage.loadingShown) throw new Error("换源后没有出现加载骨架");
+  await waitGone(".reader-sheet", 8000);
+  await waitUntil(() => !q(".reader-wrap .loading-box.small") && qa(".reader-cont .jm-figure").length > 0, 12000, "source reload filled");
   log.push({
     step: "source-manual",
-    sheetStillOpen: !!q(".reader-sheet"),
-    active: qa(".reader-sheet .sheet-row").filter((r) => r.classList.contains("active")).map((r) => txt(r.querySelector(".title"))),
+    sheetClosed: !q(".reader-sheet"),
+    stage: sourceStage,
+    figures: qa(".reader-cont .jm-figure").length,
     toast: txt(q(".toast"))
   });
-  // 系统返回键：只关弹窗，不退出阅读器
-  back();
-  await waitGone(".reader-sheet", 8000);
-  log.push({ step: "back-closes-source-sheet", readerAlive: !!q(".reader-wrap"), toolbar: tbButtons() });
 
   // ---- 关闭弹窗即取消在途测速（不再切源/刷新）----
   btn("更快的源").click();
@@ -110,7 +134,7 @@
   log.push({
     step: "close-cancels-speedtest",
     toolbar: tbButtons(),
-    switchedAfterClose: /已切换最快图源/.test(txt(q(".toast"))),
+    switchedAfterClose: /已切换最快/.test(txt(q(".toast"))),
     sheetOpen: !!q(".reader-sheet")
   });
 
@@ -125,12 +149,18 @@
   });
   const ch3 = qa(".reader-sheet .sheet-row").find((r) => /第3话/.test(txt(r)));
   ch3.click();
-  await sleep(1600);
+  await sleep(80);
+  const chapterStage = { loadingShown: !!q(".reader-wrap .loading-box.small"), skeletons: qa(".reader-cont .jm-figure > img").length };
+  if (!chapterStage.loadingShown) throw new Error("换话后没有出现加载骨架");
+  await waitGone(".reader-sheet", 8000);
+  await waitUntil(() => !q(".reader-wrap .loading-box.small") && qa(".reader-cont .jm-figure").length > 0, 12000, "chapter reload filled");
   log.push({
     step: "chapter-switched",
     title: txt(q(".reader-title")),
     lastReadId: readIds().slice(-1)[0],
     sheetClosed: !q(".reader-sheet"),
+    stage: chapterStage,
+    figures: qa(".reader-cont .jm-figure").length,
     toolbar: tbButtons()
   });
 
