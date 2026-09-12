@@ -13,7 +13,6 @@
     "cap:sync": "cap sync android",
     "pc:pack": "vite build && electron-builder --win nsis portable",
     "build:compat": "tsc --noEmit && vite build --mode compat",
-    "build:legacy": "tsc --noEmit && vite build --mode legacy",
     "e2e:compat": "node tools/e2e/compat.mjs"
   },
   "dependencies": {

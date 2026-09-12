@@ -7,6 +7,22 @@ import { pickApkAsset } from "./updateAsset";
 const REPO = "gucheng910/jm-minimal";
 const API_URL = "https://api.github.com/repos/" + REPO + "/releases/latest";
 
+/**
+ * 下载通道：GitHub 的 release 资源在国内网络经常取不到 —— 实测小米 4W（Android 6）上
+ * api.github.com 通（757ms 200），但 release 下载地址 30s 超时，DownloadManager 直接报 failed，
+ * 用户看到的就是"能检查到新版本，但更新不了"。所以直连失败后按顺序换镜像。
+ * 镜像只是 URL 前缀拼接（ghproxy 家族都是这个形式），下面两个在受限网络实测能取到文件。
+ */
+const MIRROR_PREFIXES = ["https://ghproxy.net/", "https://gh-proxy.com/"];
+/** 单通道等待上限：DownloadManager 失败一般 30s 左右返回，45s 够用又不会让用户干等 */
+const CHANNEL_TIMEOUT_MS = 45000;
+
+function downloadChannels(url: string): Array<{ label: string; url: string }> {
+  const list = [{ label: "直连", url: url }];
+  MIRROR_PREFIXES.forEach(function (p, i) { list.push({ label: "镜像 " + (i + 1), url: p + url }); });
+  return list;
+}
+
 type UpdState = "idle" | "checking" | "latest" | "available" | "downloading" | "ready" | "installing";
 
 interface UpdaterApi {
@@ -44,10 +60,12 @@ const LABEL: Record<UpdState, string> = {
 export default function UpdateSection() {
   const [state, setState] = useState<UpdState>("idle");
   const [dlUrl, setDlUrl] = useState("");
-  const pollRef = useRef<number | null>(null);
+  /** 当前正在尝试的下载通道（显示在按钮上，让"卡在哪一步"可见） */
+  const [channel, setChannel] = useState("");
+  const aliveRef = useRef(true);
   const isNative = Capacitor.isNativePlatform();
 
-  useEffect(() => () => { if (pollRef.current) window.clearInterval(pollRef.current); }, []);
+  useEffect(() => () => { aliveRef.current = false; }, []);
 
   async function checkUpdate() {
     if (state !== "idle") return;
@@ -76,26 +94,43 @@ export default function UpdateSection() {
     }
   }
 
+  /** 走一条通道：发起下载 → 轮询到结束（失败/超时都算这条通道不通） */
+  async function runChannel(c: { label: string; url: string }): Promise<boolean> {
+    try {
+      await updater.download({ url: c.url });
+    } catch {
+      return false;
+    }
+    const t0 = Date.now();
+    while (aliveRef.current && Date.now() - t0 < CHANNEL_TIMEOUT_MS) {
+      await new Promise(function (r) { window.setTimeout(r, 1000); });
+      let s: { done: boolean; failed?: boolean } | null = null;
+      try { s = await updater.status(); } catch { s = null; }
+      if (s && s.done) return !s.failed;
+    }
+    return false;
+  }
+
   async function startDownload() {
     if (!dlUrl) return;
     setState("downloading");
-    try {
-      await updater.download({ url: dlUrl });
-    } catch (e) {
-      setState("idle");
-      pushToast("开始下载失败：" + String(e).slice(0, 80), "err");
-      return;
+    const channels = downloadChannels(dlUrl);
+    for (let i = 0; i < channels.length; i++) {
+      if (!aliveRef.current) return;
+      const c = channels[i];
+      setChannel(c.label);
+      if (i > 0) pushToast("直连下载不通，改走" + c.label + "…", "info");
+      if (await runChannel(c)) {
+        if (!aliveRef.current) return;
+        setChannel("");
+        setState("ready");
+        return;
+      }
     }
-    pollRef.current = window.setInterval(async () => {
-      try {
-        const s = await updater.status();
-        if (s.done) {
-          if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; }
-          if (s.failed) { setState("idle"); pushToast("下载失败，请重试", "err"); }
-          else setState("ready");
-        }
-      } catch { /* 继续轮询 */ }
-    }, 2000);
+    if (!aliveRef.current) return;
+    setChannel("");
+    setState("idle");
+    pushToast("下载失败：直连与镜像都不通，可到 GitHub 发行页手动下载", "err");
   }
 
   async function doInstall() {
@@ -117,7 +152,7 @@ export default function UpdateSection() {
         else if (state === "available") startDownload();
         else if (state === "ready") doInstall();
       }}>
-        {LABEL[state]}
+        {LABEL[state] + (state === "downloading" && channel ? "（" + channel + "）" : "")}
       </button>
     </div>
   );

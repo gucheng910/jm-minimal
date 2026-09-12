@@ -16,10 +16,11 @@ if (!/^[Ee]:[\\/]JMClient$/i.test(process.cwd())) {
  *   node tools/release.mjs 1.7.1 --skip-pc       # 跳过 Electron 打包（只想出 APK 时）
  *   node tools/release.mjs 1.7.1 --skip-android  # 跳过 Android 打包
  *   node tools/release.mjs 1.7.1 --verify-only  # 只校验已发布的 Release（走 gh API，本机被墙也能用）
+ *   node tools/release.mjs 2.1.0 --rebuild      # 同版本重建（不动版本号）——替换已发布的同版本产物时用
  *
- * 一共产出 3 个 APK：modern（WebView 80+）/ compat（WebView 57+，ES5 兼容产物）/
- * legacy（Android 6 / API 23，minSdk 23 + 关 SW + 不含去条纹），后者由
- * tools/build-legacy-apk.ps1 构建（同一套 release/ 命名：jm-minimal-legacy-<ver>.apk）。
+ * 一共产出 2 个 APK：modern（WebView 80+）/ compat（老内核 + Android 6，
+ * minSdk 23 + 关 ServiceWorker + 不含去条纹）。2.1.0 起原 legacy 并入 compat，
+ * 由 tools/build-compat-apk.ps1 构建（产物：release/jm-minimal-compat-<ver>.apk）。
  *
  * 编码进去的坑（都是踩过的）：
  *   1) cap sync 必须在仓库根跑，否则静默用旧 web 资源 → 脚本会比对 dist 与 android 资产的哈希
@@ -45,6 +46,8 @@ const DRY = flags.has("--dry-run");
 const SKIP_PC = flags.has("--skip-pc");
 const SKIP_ANDROID = flags.has("--skip-android");
 const VERIFY_ONLY = flags.has("--verify-only");
+// 同版本重建：不改版本号（package.json 已经是该版本），用于"替换已发布的同版本产物"
+const REBUILD = flags.has("--rebuild");
 const notesArg = argv.indexOf("--notes");
 
 const log = (...a) => console.log(...a);
@@ -95,7 +98,7 @@ if (!version) die("用法：node tools/release.mjs <x.y.z> [--publish|--dry-run|
 const pkg = JSON.parse(readText("package.json"));
 const curVersion = pkg.version;
 // --skip-pc --skip-android = 复用上一轮产物发布，此时版本号必然与当前一致（不再要求递增）
-const reuseOnly = (SKIP_PC && SKIP_ANDROID) || VERIFY_ONLY;
+const reuseOnly = (SKIP_PC && SKIP_ANDROID) || VERIFY_ONLY || REBUILD;
 if (reuseOnly) {
   if (version !== curVersion) die("复用产物发布时版本号必须与 package.json 一致（当前 " + curVersion + "，传入 " + version + "）");
 } else {
@@ -129,7 +132,6 @@ if (VERIFY_ONLY) {
   const candidates = [
     ["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")],
     ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")],
-    ["jm-minimal-legacy-" + version + ".apk", path.join(ROOT, "release/jm-minimal-legacy-" + version + ".apk")],
     ["jm-minimal-setup-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe")],
     ["jm-minimal-setup-" + version + ".exe.blockmap", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe.blockmap")],
     ["latest.yml", path.join(ROOT, "release-pc/latest.yml")],
@@ -147,7 +149,7 @@ if (VERIFY_ONLY) {
 // ---------------------------------------------------------------- 版本同步
 // 复用产物发布（--skip-pc --skip-android）时产物已按当前版本号构建好，
 // 再改版本号会与实际产物对不上（尤其 versionCode 会凭空 +1）
-step(reuseOnly ? "复用产物发布：跳过版本号同步" : "同步版本号（4 处 + BUILD_TAG）");
+step(REBUILD ? "同版本重建：跳过版本号同步" : reuseOnly ? "复用产物发布：跳过版本号同步" : "同步版本号（4 处 + BUILD_TAG）");
 const today = new Date();
 const stamp = "v" + today.getFullYear() + String(today.getMonth() + 1).padStart(2, "0") + String(today.getDate()).padStart(2, "0") + "-" + version;
 
@@ -246,14 +248,11 @@ let apkPath = "";
 if (!SKIP_ANDROID) {
   apkPath = buildAndroidApk("modern", "dist");
 
-  step("构建兼容包 web 产物（vite build --mode compat：额外产出 ES5 legacy 包 + polyfills）");
-  run(exe("npm"), ["run", "build:compat"]);
-  buildAndroidApk("compat", "dist-compat");
-
-  // 老安卓包（Android 6 / API 23）：脚本内部自己完成「打补丁 → build:legacy → cap copy(dist-legacy)
-  // → gradle → 还原工程文件」，产物落在 release/jm-minimal-legacy-<ver>.apk（minSdk=23）。
-  step("构建老安卓包（minSdk 23 + JM_NO_SW + JM_NO_SEAM + BUILD_VARIANT=legacy）");
-  run("pwsh", ["-NoProfile", "-File", path.join(ROOT, "tools/build-legacy-apk.ps1"), "-Version", version]);
+  // 兼容包（2.1.0 起原 legacy 并入这里，是能装到 Android 6 的那一个）：脚本内部自己完成
+  // 「打补丁(minSdk 23) → build:compat（JM_NO_SEAM=1）→ cap copy(dist-compat) → gradle → 还原工程文件」，
+  // 产物落在 release/jm-minimal-compat-<ver>.apk（minSdk=23）。
+  step("构建兼容包（老内核 + 老安卓：minSdk 23 + JM_NO_SW + JM_NO_SEAM）");
+  run("pwsh", ["-NoProfile", "-File", path.join(ROOT, "tools/build-compat-apk.ps1"), "-Version", version]);
 
   step("还原 Android 资产为现代包（工作区不留兼容包资源）");
   syncAndroidAssets("dist");
@@ -291,7 +290,6 @@ if (!SKIP_PC) {
 const assetCandidates = [
   ["jm-minimal-modern-" + version + ".apk", path.join(ROOT, "release/jm-minimal-modern-" + version + ".apk")],
   ["jm-minimal-compat-" + version + ".apk", path.join(ROOT, "release/jm-minimal-compat-" + version + ".apk")],
-  ["jm-minimal-legacy-" + version + ".apk", path.join(ROOT, "release/jm-minimal-legacy-" + version + ".apk")],
   ["jm-minimal-setup-" + version + ".exe", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe")],
   ["jm-minimal-setup-" + version + ".exe.blockmap", path.join(ROOT, "release-pc/jm-minimal-setup-" + version + ".exe.blockmap")],
   ["latest.yml", path.join(ROOT, "release-pc/latest.yml")],

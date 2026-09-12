@@ -140,14 +140,13 @@ node -e "const fs=require('fs'),c=require('crypto');const b=fs.readFileSync('rel
 - 单工程 android/，包名 dev.jmclient.app；minSdk 24 / targetSdk 36 / compileSdk 36（见 docs/00 → docs/_archive/16-Android打包.md 历史首包记录）。
 - 签名走 android/keystore.properties（storeFile/storePassword/keyAlias/keyPassword，**不入库**）；缺失时 assembleRelease 会用 debug 签名，无法覆盖安装旧正式版。
 - 正式构建命令：`cd android && ..\build-rel.cmd`（封装 JAVA_HOME → Android Studio JBR）＝ gradlew assembleRelease。
-- **modern / compat / legacy 是三份真正不同的构建**（compat 自 1.8.2 起，legacy 自 2.0.0 起；此前是同一份文件复制改名，见 §8.11）：
+- **modern / compat 是两份真正不同的构建**（compat 自 1.8.2 起；**2.1.0 起原 legacy 并入 compat**，只剩这两个安卓包）：
   | 变体 | web 产物 | 构建命令 | 目标内核 | 体积 |
   |---|---|---|---|---|
   | modern | `dist/`（target es2022，含 `?.`/`??` 等语法） | `npm run build` | WebView / Chromium **80+** | ≈3.9 MB |
-  | compat | `dist-compat/`（额外产出 nomodule 的 ES5 legacy 包 + core-js polyfills） | `npm run build:compat` | Chromium **61+**（靠 `@vitejs/plugin-legacy` 的现代性探测自动选包） | ≈4.5 MB |
-  | legacy | `dist-legacy/`（同一套 ES5 产物，但 `BUILD_VARIANT=legacy`） | `npm run build:legacy` 或 `pwsh tools/build-legacy-apk.ps1` | Android **6.0（API 23）**+ / Chromium 57+ | ≈4.2 MB |
-  - modern / compat **minSdk 24（Android 7.0+）**：把 minSdk 再往下降会被 `org.apache.cordova:framework:14.0.1`（Capacitor 8 自带 Cordova 兼容层）挡住，
-    报 `uses-sdk:minSdkVersion 23 cannot be smaller than version 24`；legacy 变体用合并器官方的 `tools:overrideLibrary` 放行，minSdk 23（Android 6）真机跑通，见 §4.2。
+  | compat | `dist-compat/`（额外产出 nomodule 的 ES5 legacy 包 + core-js polyfills；正式包再叠加 `JM_NO_SEAM=1`） | `npm run build:compat` 或 `pwsh tools/build-compat-apk.ps1` | Android **6.0（API 23）**+ / Chromium 57+ | ≈4.3 MB |
+  - modern 包 **minSdk 24（Android 7.0+）**：把 minSdk 再往下降会被 `org.apache.cordova:framework:14.0.1`（Capacitor 8 自带 Cordova 兼容层）挡住，
+    报 `uses-sdk:minSdkVersion 23 cannot be smaller than version 24`；compat 包用合并器官方的 `tools:overrideLibrary` 放行到 minSdk 23（Android 6）真机跑通，见 §4.2。
   - `index.html` 内置 ES5 兜底提示：内核连 Promise/fetch 都没有时显示「请更新系统 WebView」，不再白屏。
 - **验证兼容包真的能在老内核跑**：`npm run build:compat && npm run e2e:compat`——它把 dist-compat 改造成
   "模拟老浏览器"页面（去掉现代入口与 `__vite_is_modern_browser` 探测脚本）再跑导航回归；
@@ -172,19 +171,20 @@ cd android; ..\build-rel.cmd; cd ..
 > gradle wrapper 已切腾讯镜像（distributionUrl=…gradle-8.14.3-bin.zip），services.gradle.org 被墙不影响。
 > Android 应用内更新（src/ui/UpdateSection.tsx + AppUpdaterPlugin）检查 GitHub Release，按资产名匹配 modern/compat。
 
-### 4.2 老内核构建（legacy：Android 6 / WebView 57）
+### 4.2 老安卓构建（compat：Android 6 / WebView 57）
 
-第三条变体，专门给 Android 6（API 23）这类老机器。与 compat 的差别：minSdk 降到 23，并关掉两个会在老内核崩掉/拖垮的能力。
+**compat 包就是能装到 Android 6（API 23）的那一个**（2.1.0 起原 legacy 并入这里，不再单独出包）。
+与「纯老内核」相比多两点：minSdk 降到 23，并关掉两个会在老内核崩掉/拖垮的能力。
 
 ```powershell
-pwsh -NoProfile -File scripts\build-legacy-apk.ps1 -Version 1.9.9
+pwsh -NoProfile -File tools\build-compat-apk.ps1 -Version 2.1.0
 # 内部顺序（不能乱）：minSdk 23 + tools:overrideLibrary →（先设 JM_NO_SEAM=1 再）npm run build:compat
-#   → JM_WEB_DIR=dist-compat + JM_WEBVIEW_DEBUG=1 + JM_NO_SW=1 + npx cap copy android
-#   → cd android + build-rel.cmd → release/jm-minimal-legacy-<ver>.apk → finally 还原被改的工程文件
-# 产物：release\jm-minimal-legacy-1.9.9.apk（minSdk=23，versionName/versionCode 与正式包一致）
+#   → JM_WEB_DIR=dist-compat + JM_NO_SW=1 + npx cap copy android
+#   → cd android + build-rel.cmd → release/jm-minimal-compat-<ver>.apk → finally 还原被改的工程文件
+# 产物：release\jm-minimal-compat-2.1.0.apk（minSdk=23，versionName/versionCode 与 modern 包一致）
 ```
 
-三个构建期开关（都在脚本内设，modern/compat 包不受影响）：
+两个构建期开关 + 一个诊断开关（都在 build-compat-apk.ps1 内设，modern 包不受影响）：
 
 | 开关 | 作用 | 不设的后果 |
 |---|---|---|
@@ -245,8 +245,7 @@ gh release upload v1.4.1 release-pc/latest.yml release-pc/jm-minimal-setup-1.4.1
 | 平台 | 文件名 | 备注 |
 |---|---|---|
 | Android | jm-minimal-modern-<ver>.apk | 更新器匹配子串 "modern"；现代内核构建（WebView 80+） |
-| Android | jm-minimal-compat-<ver>.apk | 更新器匹配子串 "compat"；**老内核构建**（含 ES5 legacy 包，Chromium 61+），与 modern 不是同一份文件 |
-| Android | jm-minimal-legacy-<ver>.apk | 更新器匹配子串 "legacy"；**老安卓包**（minSdk 23 / Android 6，关 ServiceWorker、不含去条纹）。三个 APK 同 versionName，靠构建期 `BUILD_VARIANT` 区分 |
+| Android | jm-minimal-compat-<ver>.apk | 更新器匹配子串 "compat"；**老内核 + 老安卓包**（minSdk 23 / Android 6，含 ES5 legacy 包、关 ServiceWorker、不含去条纹）。两个 APK 同 versionName，靠构建期 `BUILD_VARIANT` 区分 |
 | PC 安装 | jm-minimal-setup-<ver>.exe | electron-updater 严格按 latest.yml 找它 |
 | PC 便携 | jm-minimal-portable-<ver>.exe | README 链接 |
 

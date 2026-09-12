@@ -3,7 +3,8 @@ import { pickApkAsset, type UpdateAsset } from "./updateAsset";
 
 const a = (name: string): UpdateAsset => ({ name, browser_download_url: "https://example.com/" + name });
 const BOTH = [a("jm-minimal-modern-1.8.2.apk"), a("jm-minimal-compat-1.8.2.apk")];
-const THREE = [...BOTH, a("jm-minimal-legacy-1.8.2.apk")];
+// 2.1.0 起 legacy 已并入 compat；历史 Release（含 2.1.0 当天的版本）里可能还残留 legacy 资产
+const WITH_STALE_LEGACY = [...BOTH, a("jm-minimal-legacy-1.8.2.apk")];
 
 describe("pickApkAsset", () => {
   it("modern 构建必须挑 modern 包（不能挑到 compat）", () => {
@@ -12,13 +13,13 @@ describe("pickApkAsset", () => {
   it("compat 构建必须挑 compat 包（不能挑到 modern）", () => {
     expect(pickApkAsset(BOTH, "compat")?.name).toBe("jm-minimal-compat-1.8.2.apk");
   });
-  it("legacy 构建必须挑 legacy 包（不能挑到 compat/modern）", () => {
-    expect(pickApkAsset(THREE, "legacy")?.name).toBe("jm-minimal-legacy-1.8.2.apk");
-    expect(pickApkAsset(THREE, "modern")?.name).toBe("jm-minimal-modern-1.8.2.apk");
-    expect(pickApkAsset(THREE, "compat")?.name).toBe("jm-minimal-compat-1.8.2.apk");
+  it("Release 里残留 legacy 资产时，modern/compat 仍各自命中自己的包", () => {
+    expect(pickApkAsset(WITH_STALE_LEGACY, "modern")?.name).toBe("jm-minimal-modern-1.8.2.apk");
+    expect(pickApkAsset(WITH_STALE_LEGACY, "compat")?.name).toBe("jm-minimal-compat-1.8.2.apk");
   });
-  it("三包齐发时，缺 legacy 资产的老 Release 对 legacy 构建返回 null（宁可提示，也不推错包）", () => {
+  it("未知变体（历史 legacy 包的 BUILD_VARIANT）不推任何包，宁可让用户手动下载", () => {
     expect(pickApkAsset(BOTH, "legacy")).toBeNull();
+    expect(pickApkAsset(WITH_STALE_LEGACY, "legacy")).toBeNull();
   });
   it("大小写与中文命名都兼容", () => {
     expect(pickApkAsset([a("JM-Minimal-COMPAT-1.8.2.apk")], "compat")?.name).toContain("COMPAT");

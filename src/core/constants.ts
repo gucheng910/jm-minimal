@@ -17,10 +17,13 @@ export const LOCAL_VERSION =
   (typeof globalThis !== "undefined" && (globalThis as { __builtinVersion?: string }).__builtinVersion) ||
   (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0");
 /**
- * 构建变体：modern（现代内核）/ compat（老内核兼容包）/ legacy（Android 6 老安卓包）。
- * 由 vite.config.ts 的 define 注入 __BUILD_VARIANT__（--mode compat / --mode legacy）。
- * **应用内更新器据此挑选对应的 APK 资产**——三个包同 versionName，只能靠构建期注入区分，
- * 否则 compat / legacy 用户会被引导下载装不上或跑不起来的包。
+ * 构建变体：modern（现代内核）/ compat（老内核 + Android 6 老安卓包）。
+ * 由 vite.config.ts 的 define 注入 __BUILD_VARIANT__（--mode compat）。
+ * **应用内更新器据此挑选对应的 APK 资产**——两个包同 versionName，只能靠构建期注入区分，
+ * 否则 compat 用户会被引导下载装不上或跑不起来的包。
+ *
+ * 2.1.0 起原来的 legacy（Android 6 / minSdk 23 / 关 ServiceWorker / 不含去条纹）**并入 compat**：
+ * compat 现在就是 minSdk 23 的老安卓包（构建见 tools/build-compat-apk.ps1），只发两个安卓包。
  */
 declare const __BUILD_VARIANT__: string;
 declare const __NO_SEAM__: boolean;
@@ -31,9 +34,9 @@ declare const __NO_SEAM__: boolean;
  */
 export const NO_SEAM: boolean = typeof __NO_SEAM__ !== "undefined" && __NO_SEAM__ === true;
 
-export const BUILD_VARIANT: string = (() => {
+export const BUILD_VARIANT: "modern" | "compat" = (() => {
   const v = (typeof __BUILD_VARIANT__ !== "undefined" ? String(__BUILD_VARIANT__) : "modern").toLowerCase();
-  return v === "compat" || v === "legacy" ? v : "modern";
+  return v === "compat" ? "compat" : "modern";
 })();
 
 export const HOST_URLS: string[] = [
