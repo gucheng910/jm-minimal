@@ -468,7 +468,23 @@ export default function ReaderPanel({
       walk = walk.parentElement;
     }
     const isWin = hostEl === null;
-    const host = (hostEl || document.scrollingElement || document.documentElement) as HTMLElement;
+    // 不能只信 document.scrollingElement：小米 4W（Android 6 / WebView 57）上它返回 <body>，
+    // 而 body 自身不滚动（scrollHeight === clientHeight）→ 下面"布局未立起来"的守卫恒为真，
+    // 页码计数、浮标唤起、锚点补偿在老设备上全部失效（2026-09-12 真机定位）。
+    // 所以在候选里挑一个"真的能滚"的元素：嵌套宿主 → scrollingElement → documentElement → body。
+    const pickHost = (): HTMLElement => {
+      const list: HTMLElement[] = [];
+      if (hostEl) list.push(hostEl);
+      const se = document.scrollingElement as HTMLElement | null;
+      if (se) list.push(se);
+      list.push(document.documentElement);
+      if (document.body) list.push(document.body);
+      for (const el of list) {
+        if (el && el.scrollHeight > el.clientHeight + 2) return el;
+      }
+      return list[0] || document.documentElement;
+    };
+    const host = pickHost();
     const compute = () => {
       // 布局还没立起来时不要判定：图片未解码时每页 0 高 → scrollHeight≈0 会让下面的
       // "滚到底 ⇒ total" 条件第一帧就成立，计数器一进阅读器就跳到最后一页。
