@@ -131,6 +131,12 @@ export default function App() {
   const touchStartX = useRef<number | null>(null);
   const [showCache, setShowCache] = useState(false);
   const [libPanel, setLibPanel] = useState<null | "favorite" | "history">(null);
+  /**
+   * 收藏/足迹浮层是否被详情页盖住。
+   * 浮层**不卸载**（列表内容与滚动位置都留着），只是隐藏；详情返回时揭开，
+   * 于是「从足迹/收藏进详情」退出后回到的是原列表，而不是首页。
+   */
+  const [libBehind, setLibBehind] = useState(false);
   const lastBackRef = useRef(0);
   // 侧边抽屉是否打开（返回键优先关抽屉；用 ref 读，避免原生监听随状态反复重注册）
   const menuOpenRef = useRef(false);
@@ -223,6 +229,11 @@ export default function App() {
     };
     return on("jm:lineChanged", handler);
   }, []);
+
+  // 收藏/足迹里点开的详情页真正渲染出来了 → 把浮层藏到它后面（此时藏不会露出主页）
+  useEffect(() => on("jm:detailOpened", () => setLibBehind(true)), []);
+  // 从详情退回列表 → 揭开浮层，回到原来的收藏/足迹（内容与滚动位置都还在）
+  useEffect(() => on("jm:detailClosed", () => setLibBehind(false)), []);
 
   // 购买成功后刷新会员余额（已记住账号时）
   useEffect(() => {
@@ -527,6 +538,9 @@ export default function App() {
   }, [protoDrift, onlineProto]);
 
   function navTo(action: string) {
+    // 切 tab 就是离开收藏/足迹的语境：把浮层收掉（否则它会一直挂在列表上方）
+    setLibPanel(null);
+    setLibBehind(false);
     setTab(action);
     window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     setTimeout(() => emit("jm:nav", action), 80);
@@ -538,6 +552,8 @@ export default function App() {
       return;
     }
     // 已在首页：回到顶部并通知首页实例刷新推荐内容
+    setLibPanel(null);
+    setLibBehind(false);
     window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     emit("jm:refreshHome");
   }
@@ -577,6 +593,8 @@ export default function App() {
   }
 
   async function openMember() {
+    setLibPanel(null);
+    setLibBehind(false);
     setTab("member");
     window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     // 同步 client 侧已就绪的配置快照（不重复 getSetting，避免覆盖已选好的图床域名）
@@ -893,9 +911,12 @@ export default function App() {
           kind={libPanel}
           entering={libAnim.entering}
           closing={libAnim.closing}
-          onClose={() => setLibPanel(null)}
+          hidden={libBehind}
+          onClose={() => { setLibPanel(null); setLibBehind(false); }}
           onOpenAlbum={(aid) => {
-            setLibPanel(null);
+            // 这里**不关**浮层：只让它在详情渲染出来后藏到后面（隐藏由 jm:detailOpened 触发），
+            // 于是从详情返回时回到的还是这份列表，而不是首页。
+            // 藏的动作不能放在点击瞬间——那 120ms 里详情还没出来，中间会先露一下主页。
             setTab("home");
             window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
             setTimeout(() => emit("jm:openAid", String(aid)), 120);

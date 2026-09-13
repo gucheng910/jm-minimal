@@ -106,6 +106,12 @@ export function saveHistory(entry: HistoryEntry): void {
   debouncedSetJSON(KEY, list.slice(0, HISTORY_MAX), 500);
 }
 
+/** 删除一条足迹（按书 id）。延迟 0：删除必须立刻落盘，不能等防抖。 */
+export function removeHistory(bookId: string): void {
+  const list = loadHistory().filter((x) => x.bookId !== bookId);
+  debouncedSetJSON(KEY, list, 0);
+}
+
 export function clearHistory(): void {
   debouncedSetJSON(KEY, [], 0);
 }

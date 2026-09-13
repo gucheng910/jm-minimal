@@ -11,6 +11,7 @@ import { useSearchFeed } from "./hooks/useSearchFeed";
 import SearchFeed from "./pages/SearchFeed";
 import AlbumDetailPage from "./pages/AlbumDetail";
 import HomeFeed from "./pages/HomeFeed";
+import { SkeletonGrid } from "./ui/SkeletonGrid";
 import PullToRefresh from "./ui/PullToRefresh";
 import { useHomeFeed } from "./hooks/useHomeFeed";
 import { useAlbumDetail } from "./hooks/useAlbumDetail";
@@ -99,10 +100,17 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     return on("jm:setting", h);
   }, []);
 
-  // 首页分段：推荐（随机推荐接口）/ 最新；「每周必看」是跳去周榜页，不占分段位
-  const [homeFeed, setHomeFeed] = useState<"random" | "latest">("random");
+  // 首页分段：推荐（随机推荐接口）/ 最新 / 每周必看
+  const [homeFeed, setHomeFeed] = useState<"random" | "latest" | "weekly">("random");
   function pickHomeFeed(key: string) {
-    if (key === "weekly") { gotoPage("ranking"); return; }
+    if (key === "weekly") {
+      // 就地渲染周榜：只切分段，不切 tab。
+      // 以前这里走 gotoPage("ranking") → App 收到 jm:goto 会 setTab("categories")，
+      // 于是"点每周必看"实际是把用户甩到分类页，周榜只是顺带渲染在那儿。
+      setHomeFeed("weekly");
+      if (!week.payload) void week.open(); // 已有数据就直接复用，不重复拉
+      return;
+    }
     const next = key === "latest" ? "latest" : "random";
     setHomeFeed(next);
     if (next === "latest") void home.loadLatest();
@@ -343,6 +351,21 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     });
   }, [pageMode]);
 
+  /**
+   * 退出详情页时通知外壳（把先前被详情盖住的收藏/足迹浮层揭开，回到原列表）。
+   * 用 mode 的迁移判定，比在每个退出口各插一句可靠：
+   *   · 详情 → 读者：不算（用户还在看，浮层继续藏着）
+   *   · 读者 → 详情：不算（回到详情页，浮层继续藏着）
+   *   · 详情 → home 等：才算真正退出
+   * 本 effect 只 emit、不订阅，不受「jm:back 按注册顺序派发」那条约束影响。
+   */
+  const prevModeRef = useRef<Mode>(mode);
+  useEffect(() => {
+    const prev = prevModeRef.current;
+    prevModeRef.current = mode;
+    if (prev === "detail" && mode !== "detail" && mode !== "reader") emit("jm:detailClosed");
+  }, [mode]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -434,7 +457,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     setMode("home");
     window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     // 按当前分段重载：在「最新」上重试就不该把列表换成随机推荐
-    if (homeFeed === "latest") void home.loadLatest();
+    if (homeFeed === "weekly") void week.open();
+    else if (homeFeed === "latest") void home.loadLatest();
     else void home.loadRandom();
   }
 
@@ -458,6 +482,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         setSrOpen(false);
       }
       setMode("detail");
+      // 详情页真正渲染出来的这一刻通知外壳：可以把收藏/足迹浮层藏到后面了。
+      // 不能在点击瞬间就藏 —— 那 120ms 里详情还没出来，中间会先露一下主页。
+      emit("jm:detailOpened");
       // 新页从顶部开始（列表位置已存进 listScrollRef，返回时恢复）
       window.scrollTo(0, 0);
     };
@@ -595,9 +622,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     );
   }
 
-  function gotoPage(action: string) {
-    emit("jm:goto", action);
-  }
+  // 原来这里有个 gotoPage(action) → emit("jm:goto")，唯一用途是把「每周必看」交给 App 处理，
+  // 而 App 那一步是 setTab("categories") —— 也就是"点每周必看却被甩到分类页"的来源。
+  // 现在每周必看在首页内联渲染，这条跳转链没有调用方了，删掉。
+  // （App 侧对 jm:goto 的订阅与 core/bus 里的事件类型保持不动；独立周榜页 mode === "week" 也照旧保留，
+  //   仍可由 jm:nav "ranking" 触发。）
 
   if (pageMode === "search") {
     return (
@@ -677,6 +706,24 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         // 推荐 / 最新 是两套内容，切换时也走同一条进场
         gridKey={"g" + settingTick + "-" + homeFeed}
         feed={homeFeed}
+        weekly={homeFeed === "weekly"
+          ? (week.payload ? (
+            <WeekRank
+              inline
+              payload={week.payload}
+              items={week.items}
+              issue={week.issue}
+              type={week.type}
+              busy={week.busy}
+              error={week.error}
+              gridKey={"weekhome" + settingTick}
+              onIssueChange={week.setIssue}
+              onTypeChange={week.setType}
+              onLoad={() => { void week.load(week.issue, week.type, 1, true); }}
+              onOpenAlbum={openDetail}
+            />
+          ) : <SkeletonGrid />)
+          : undefined}
         onPickFeed={pickHomeFeed}
         onRetry={retryHomeFeed}
         onGotoDns={() => emit("jm:gotoDns")}

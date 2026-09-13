@@ -27,10 +27,30 @@ export default function Collapse({ open, children, className }: Props) {
     if (!el) return;
     const measure = () => setH(el.offsetHeight);
     measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    // 老内核没有 ResizeObserver（Chrome 64 才引入，而 compat 包要跑到 WebView 57）：
+    // 高度只在「展开这一瞬」量一次，之后封面图加载完、评论异步到达都会把内容撑高，
+    // 而 .collapse 是 overflow:hidden → 多出来的部分被**永久裁掉**。
+    // 实测（2026-09-13）：详情页展开「相关漫画」时面板量到 523px，图片加载后内容 691px，
+    // 底部 168px 一直看不到，且不会自愈。
+    // 补两个「内容变高了」的信号：图片 load（load 不冒泡，必须用捕获）+ DOM 变动（评论追加），
+    // 再加几次延迟重测，兜住"布局比图片事件更晚到"的情况。
+    const timers = [150, 500, 1500, 3000].map((ms) => window.setTimeout(measure, ms));
+    el.addEventListener("load", measure, true);
+    let mo: MutationObserver | undefined;
+    if (typeof MutationObserver !== "undefined") {
+      mo = new MutationObserver(measure);
+      mo.observe(el, { childList: true, subtree: true });
+    }
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      el.removeEventListener("load", measure, true);
+      mo?.disconnect();
+    };
   }, [ever, open]);
 
   return (

@@ -73,10 +73,30 @@ export function prefetchCovers(list: AlbumSummary[], count = 6): void {
   } catch { /* ignore */ }
 }
 
-export const AlbumCard = memo(function AlbumCard({ album, onOpen }: { album: AlbumSummary; onOpen: (a: AlbumSummary) => void }) {
+export const AlbumCard = memo(function AlbumCard({ album, onOpen, onRemove }: {
+  album: AlbumSummary;
+  onOpen: (a: AlbumSummary) => void;
+  /**
+   * 给了就显示右上角删除角标（足迹/收藏的「管理」模式用）。
+   * 用 span[role=button] 而不是 <button>：外层卡片本身就是 button，里面再嵌 button 是非法 HTML。
+   */
+  onRemove?: (a: AlbumSummary) => void;
+}) {
   return (
     <button className="list-item" onClick={() => onOpen(album)}>
       <Cover url={albumCoverUrl(album)} alt={album.name} />
+      {onRemove && (
+        <span
+          className="card-remove"
+          role="button"
+          tabIndex={0}
+          aria-label={"删除 " + album.name}
+          onClick={(e) => { e.stopPropagation(); onRemove(album); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onRemove(album); }
+          }}
+        >×</span>
+      )}
       <div>
         <div className="title">{album.name}</div>
         <div className="muted">{[album.author, album.category?.title, album.sub].filter(Boolean).join(" · ")}</div>

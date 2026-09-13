@@ -2631,3 +2631,52 @@ html[data-lowfx="1"] .toast { background: var(--surface); }
 html[data-lowfx="1"] .side-drawer,
 html[data-lowfx="1"] .app-sheet,
 html[data-lowfx="1"] .cache-overlay .cache-body { box-shadow: none; }
+
+/* ============================================================
+   收藏 / 足迹（2026-09-13）
+   —— ① 管理模式：卡片右上角删除角标
+   —— ② 被详情页盖住时的隐藏态：浮层**保持挂载**，列表内容与滚动位置都不丢
+   ============================================================ */
+/* 角标要相对卡片定位。卡片本身是 <button>，角标用 span[role=button] 免得嵌套 button（非法 HTML） */
+.list-item { position: relative; }
+.card-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  /* 与 .back-hint 同一组底色/前景：本项目里已用过的对比安全配色 */
+  color: #fff;
+  background: rgba(20, 22, 28, 0.92);
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  box-shadow: var(--sh-1);
+}
+
+/* 浮层头部右侧按钮组（管理 + 关闭）。注意 `.cache-header > button` 只匹配直接子元素，
+   这里按钮被包进 .lib-actions，所以把图标按钮的外观在这条规则里补齐。 */
+.lib-actions { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; }
+.lib-actions > .ghost {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  border-radius: var(--r-md);
+}
+.lib-actions > .ghost:active { background: var(--surface-2); }
+.lib-actions > .lib-manage { width: auto; padding: 0 10px; font-size: 13px; font-weight: 600; }
+
+/* 被详情盖住：不可见、不接收点击，但保持挂载。
+   用 visibility 而不是 display:none —— display:none 会把浮层内部的滚动位置清零。 */
+.cache-overlay[data-hidden] { visibility: hidden; pointer-events: none; }

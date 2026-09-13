@@ -37,6 +37,17 @@ export interface AppEvents {
   "jm:authChanged": undefined;
   /** 请求打开换源浮层（会员页「诊断与线路」复用顶栏那一个浮层） */
   "jm:openSource": undefined;
+  /**
+   * 从收藏/足迹点开的详情页**真正打开了**。
+   * 订阅方（App）据此把收藏/足迹浮层藏起来——必须等这一步，不能在点击瞬间就藏，
+   * 否则详情还没渲染出来，中间会露出一下主页（真机反馈过这类"跳过一下"）。
+   */
+  "jm:detailOpened": undefined;
+  /**
+   * 从详情页退回到列表/主页（在读者里来回切不算）。
+   * 订阅方据此把先前藏起来的收藏/足迹浮层重新揭开，列表内容与滚动位置都还在。
+   */
+  "jm:detailClosed": undefined;
 }
 
 type EmitArgs<K extends keyof AppEvents> = AppEvents[K] extends undefined ? [] : [detail: AppEvents[K]];
