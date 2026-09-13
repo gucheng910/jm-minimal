@@ -12,7 +12,10 @@
   --surface-2: #E6E4D9;
   --ink: #100F0F;
   --ink-2: #575653;
-  --ink-3: #6F6E69;
+  /* 次级文字（.muted / 元信息 / 13px）：原 #6F6E69 在纸上只有 4.47:1，未达 WCAG AA 的 4.5:1。
+     改成 #68675F → 纸上 4.97、卡上 5.53，仍明显浅于 --ink-2（6.42），层级不变。
+     复算：npm run contrast（tools/contrast-audit.mjs，读这里的真实令牌值） */
+  --ink-3: #68675F;
   --line: #DAD8CE;
   --line-strong: #CECDC3;
   /* 强调色：官方橙在界面里退场，选中/主操作统一用墨色（只保留在 App 图标与启动图） */
@@ -21,6 +24,10 @@
   --brand-soft: #E6E4D9;
   /* 中性黑（主按钮 / 选中态） */
   --black: #100F0F;
+  /* 反色按钮的前景色（浅色底黑字 / 暗色底浅字），见暗色块的说明 */
+  --btn-ink: #fff;
+  /* 输入控件填充色（暗色下要比卡片略亮一档，才看得出是个输入框） */
+  --field-bg: var(--surface);
   /* 可点击文字链接（详情页作者/标签） */
   --link: #205EA6;
   /* 语义色 */
@@ -28,6 +35,28 @@
   --ok-soft: #E9EBDD;
   --err: #AF3029;
   --err-soft: #F6E7E4;
+  /* ---- 结构色（原来是散落各处的硬编码，暗色只能一对一转写 → 见下方 2026-09-13 说明）---- */
+  --glass: rgba(255, 255, 255, 0.86);        /* 顶栏玻璃 */
+  --glass-strong: rgba(255, 255, 255, 0.9);  /* 底栏玻璃 */
+  --thumb-a: #EFEDE1;                        /* 封面占位渐变起 */
+  --thumb-b: #E3E0D2;                        /* 封面占位渐变止 */
+  --thumb-fill: #EAE7DA;                     /* 封面图自身底色 */
+  /* ---- 阅读器（自成一套深色，漫画图片要中性黑底）----
+     这些值原来直接写在 .reader-* 规则里，改主题时阅读器完全不跟着动。 */
+  --reader-bg: #000;
+  --reader-ink: #EDEEF1;
+  --reader-ink-2: #E8E8EA;
+  --reader-ink-3: #878580;      /* 与暗色 --ink-3 同值：黑底上 5.19:1 */
+  --reader-line: #33363F;
+  --reader-field: #16181F;      /* 页码输入框 / 单页图底 */
+  --reader-accent: #F2F0E5;     /* 阅读器内的浅色按钮文字 */
+  --reader-hover: rgba(255, 255, 255, 0.16);
+  /* ---- 视口高度 ----
+     移动端地址栏伸缩时 100vh 不变 → 图片高度会跳；dvh 才是真实可视高度。
+     老内核不认 dvh，用 @supports 兜底：不支持的浏览器留在 100vh（行为与现在完全一致）。 */
+  --vh100: 100vh;
+  /* 阅读器上下要留出的控件高度（原来到处写 calc(100vh - 160px) 这个魔法数） */
+  --reader-chrome: 160px;
   /* 几何 */
   --r-sm: 8px;
   --r-md: 12px;
@@ -74,6 +103,12 @@ html { background: var(--bg); }
   --brand-deep: #100F0F;
   --brand-soft: rgba(206,205,195,0.22);
   --black: #F2F0E5;
+  /* 反色按钮的前景色。暗色下 --black 是浅色，所以这里必须是**深色**。
+     必须是令牌而不是 [data-theme="dark"] button {...}：
+     后者选择器权重是 (0,1,1)，会压过 .link / .backtxt / .d-more 这些 (0,1,0) 的类规则，
+     把详情页的作者/标签蓝字染成 #1C1B1A —— 近黑配近黑，等于看不见（2026-09-13 修复）。 */
+  --btn-ink: #1C1B1A;
+  --field-bg: var(--surface-2);
   --link: #8AB4FF;
   --ok: #9CC26B;
   --ok-soft: rgba(52, 211, 153, 0.14);
@@ -83,7 +118,9 @@ html { background: var(--bg); }
   --sh-2: 0 8px 24px -10px rgba(0, 0, 0, 0.52);
 }
 [data-theme="dark"] .top-bar {
-  background: rgba(28, 31, 39, 0.88);
+  /* 原 rgba(28,31,39,.88)：色相 ≈224° 的蓝灰，与暖中性底 #100F0F（30°）冲突。
+     换成同亮度的暖中性 rgba(32,30,28)：相对底色仍是 1.15 的轻微抬升，观感一致但不再发蓝。 */
+  background: rgba(32, 30, 28, 0.88);
   border-bottom-color: transparent;
 }
 [data-theme="dark"] .top-bar.scrolled {
@@ -95,13 +132,12 @@ html { background: var(--bg); }
 [data-theme="dark"] .top-actions button:active,
 [data-theme="dark"] .menu-btn:active { background: #343331; }
 [data-theme="dark"] .bottom-nav {
-  background: rgba(28, 31, 39, 0.92);
+  background: rgba(32, 30, 28, 0.92); /* 同上：蓝灰 #1C1F27 → 暖中性 */
   border-top-color: #343331;
 }
 [data-theme="dark"] .nav-item { color: var(--ink-3); }
 [data-theme="dark"] .nav-item.active { color: var(--brand); }
 [data-theme="dark"] .nav-item.active svg { filter: drop-shadow(0 2px 4px rgba(16,15,15,0.18)); }
-[data-theme="dark"] button { background: #F2F0E5; color: #1C1B1A; }
 [data-theme="dark"] button.ghost {
   background: var(--surface);
   color: var(--ink);
@@ -111,13 +147,7 @@ html { background: var(--bg); }
 [data-theme="dark"] button.ghost.danger { border-color: rgba(255,138,128,0.3); }
 [data-theme="dark"] .card.err { border-color: rgba(255,138,128,0.3); }
 [data-theme="dark"] .card.msg { border-color: rgba(156,194,107,0.35); }
-[data-theme="dark"] select, [data-theme="dark"] input, [data-theme="dark"] textarea {
-  background: var(--surface-2);
-  border-color: var(--line-strong);
-  color: var(--ink);
-}
 [data-theme="dark"] .chip { border-color: var(--line); color: var(--ink-2); }
-[data-theme="dark"] .chip.active { background: var(--black); color: #1C1B1A; }
 [data-theme="dark"] .list-item { background: var(--surface); }
 [data-theme="dark"] .list-item .thumb-box { background: var(--surface-2); }
 [data-theme="dark"] .thumb.empty { background: linear-gradient(135deg, rgba(206,205,195,0.20), rgba(16,15,15,0.05)); }
@@ -154,11 +184,9 @@ html { background: var(--bg); }
 [data-theme="dark"] .toast.err { background: rgba(175,48,41,0.95); }
 [data-theme="dark"] .cache-overlay { background: var(--bg); }
 [data-theme="dark"] .ad-banner { background: var(--surface-2); }
-[data-theme="dark"] .skeleton-thumb,
-[data-theme="dark"] .skeleton-title,
-[data-theme="dark"] .skeleton-meta {
-  background: linear-gradient(90deg, #282726, #2c313b, #282726);
-}
+/* 骨架屏不需要暗色覆盖：浅色定义本身就走 --line / --line-strong（暗色令牌已是暖中性）。
+   原来的覆盖把底色换成蓝灰渐变 linear-gradient(90deg,#282726,#2c313b,#282726)，
+   既跑出色板，也把"平面底 + ::after 扫光"的结构改成了另一种画法。 */
 /* 残留浅色硬编码值的暗色覆盖 */
 [data-theme="dark"] .menu-btn:active,
 [data-theme="dark"] .top-actions button:active,
@@ -166,15 +194,6 @@ html { background: var(--bg); }
 [data-theme="dark"] .member-page .card button:active {
   background: #343331;
 }
-[data-theme="dark"] .card.err { border-color: rgba(255,138,128,0.3); }
-[data-theme="dark"] .card.msg { border-color: rgba(156,194,107,0.35); }
-[data-theme="dark"] .thumb.empty {
-  background: linear-gradient(135deg, rgba(206,205,195,0.20), rgba(16,15,15,0.05));
-}
-[data-theme="dark"] .source-drawer::before { background: #3E3C3A; }
-[data-theme="dark"] .progress { background: #343331; }
-[data-theme="dark"] button.ghost.danger { border-color: rgba(255,138,128,0.3); }
-[data-theme="dark"] .member-page .card button { background: var(--surface); color: var(--ink); border-color: var(--line-strong); }
 [data-theme="dark"] .skeleton-item { background: var(--surface); }
 [data-theme="dark"] .searchbar input {
   background: var(--surface-2);
@@ -193,16 +212,17 @@ html { background: var(--bg); }
   color: #CECDC3;
 }
 [data-theme="dark"] .tos-link, [data-theme="dark"] .op-link { color: #CECDC3; }
-[data-theme="dark"] .thumb-box {
-  background: linear-gradient(135deg, #282726, #2c313b);
-}
 [data-theme="dark"] .thumb-box .thumb { background: #282726; }
 [data-theme="dark"] .list-item .thumb-fallback,
 [data-theme="dark"] .list-item .thumb.empty {
   color: #9F9D96;
 }
-[data-theme="dark"] .member-page .card button:active { background: #343331; }
 [data-theme="dark"] .cache-overlay-reader { background: #100F0F; }
+
+/* dvh 支持时用真实可视高度（移动端地址栏伸缩不再让阅读器图片跳动） */
+@supports (height: 100dvh) {
+  :root { --vh100: 100dvh; }
+}
 
 /* ---- 侧边栏暗色模式开关样式 ---- */
 .theme-toggle {
@@ -260,7 +280,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-#root { min-height: 100vh; }
+#root { min-height: var(--vh100); }
 
 /* ---------- 应用骨架（移动壳） ---------- */
 .app {
@@ -269,7 +289,7 @@ body {
   /* 左右 20px：极简版的统一页边留白（原 12px 太贴边） */
   padding: calc(var(--top-h) + 4px) 20px calc(var(--nav-h) + 20px);
   padding-bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
-  min-height: 100vh;
+  min-height: var(--vh100);
 }
 
 /* ---------- 顶栏：白玻璃 ---------- */
@@ -312,6 +332,9 @@ body {
 .menu-btn {
   background: transparent;
   color: var(--ink-2);
+  /* 44×44：Apple HIG / Material 的最小可点区（原 8px 内边距 + 20px 图标 = 36×36） */
+  min-width: 44px;
+  min-height: 44px;
   padding: 8px;
   border-radius: 12px;
   display: inline-flex;
@@ -329,6 +352,8 @@ body {
 .top-actions button {
   background: transparent;
   color: var(--ink-2);
+  min-width: 44px;
+  min-height: 44px;
   padding: 8px;
   border-radius: 12px;
   display: inline-flex;
@@ -387,7 +412,7 @@ button {
   border-radius: var(--r-sm);
   border: 0;
   background: var(--black);
-  color: #fff;
+  color: var(--btn-ink);
   cursor: pointer;
   transition: transform var(--t-press) var(--ease-out), opacity var(--t-press) linear,
     background var(--t-press) linear, box-shadow var(--t-ui) var(--ease-out);
@@ -418,7 +443,7 @@ select, input, textarea {
   padding: 9px 10px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
-  background: var(--surface);
+  background: var(--field-bg);
   color: var(--ink);
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -512,6 +537,7 @@ h3 { font-size: 14px; margin: 4px 0; }
   background: var(--surface-2);
   color: var(--ink);
   border: 0;
+  min-height: 40px; /* 触控目标：热词 / 搜索记录 / 更多分类都是高频点击 */
   padding: 8px 14px;
   font-size: 14px;
   font-weight: 400;
@@ -521,7 +547,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 .chip:active { transform: scale(0.94); }
 .chip.active {
   background: var(--black);
-  color: #fff;
+  color: var(--btn-ink);
   border-color: var(--black);
   font-weight: 600;
 }
@@ -818,6 +844,9 @@ h3 { font-size: 14px; margin: 4px 0; }
 .comment-item .muted { font-size: 11px; }
 .comment-item p { margin: 3px 0 0; font-size: 13px; line-height: 1.55; }
 .comment-box textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; }
+/* 「加载更多评论」行：官方每页 10 条，没有它就只能看到第一页 */
+.comment-more { margin: 10px 0 2px; }
+.comment-more button { width: 100%; }
 
 /* ---------- 左侧菜单抽屉（半屏覆盖 + 推拉效果） ---------- */
 .menu-backdrop {
@@ -1021,7 +1050,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 
 /* ---------- 阅读器（沉浸深色） ---------- */
 /* 常态：纯黑 + 图片，零控件；控件只在点画面时浮出（见下） */
-.reader-wrap { background: #000; color: #edeef1; min-height: 100vh; padding-bottom: 0; }
+.reader-wrap { background: var(--reader-bg); color: var(--reader-ink); min-height: var(--vh100); padding-bottom: 0; }
 /* 标题只在控制条里显示；这里留 sr-only（保留文本，测试与读屏仍可读） */
 .reader-title {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
@@ -1048,8 +1077,8 @@ h3 { font-size: 14px; margin: 4px 0; }
 .rt-bottom { padding: 0 14px; transform: translateY(6px); transition: transform var(--t-enter) var(--ease-out); }
 .reader-toolbar.show .rt-top,
 .reader-toolbar.show .rt-bottom { transform: none; }
-.rt-title { flex: 1; min-width: 0; font-size: 14px; color: #e8e8ea; }
-.rt-page { flex: none; font-size: 13px; color: #c9c9cc; }
+.rt-title { flex: 1; min-width: 0; font-size: 14px; color: var(--reader-ink-2); }
+.rt-page { flex: none; font-size: 13px; color: var(--reader-ink-3); }
 .rt-progress { height: 2px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); margin-bottom: 16px; overflow: hidden; }
 .rt-progress i {
   display: block; height: 100%; width: 100%; background: #fff;
@@ -1061,7 +1090,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 /* 工具按钮：图标 + 11px 小字，四个等分（原来 9 个文字按钮挤成两行） */
 .reader-toolbar .rt-tool {
   display: inline-flex; flex-direction: column; align-items: center; gap: 6px;
-  min-width: 64px; padding: 8px 10px; color: #e8e8ea; font-size: 11px;
+  min-width: 64px; padding: 8px 10px; color: var(--reader-ink-2); font-size: 11px;
 }
 .reader-toolbar .rt-tool svg { width: 20px; height: 20px; stroke-width: 1.6; }
 .reader-toolbar .rt-tool:disabled { opacity: 0.35; }
@@ -1072,6 +1101,30 @@ h3 { font-size: 14px; margin: 4px 0; }
   padding: 10px 14px; font-size: 13px; box-shadow: none;
 }
 .reader-sheet .settings-actions button.btn-deseam.on { background: var(--ink); color: var(--surface); font-weight: 500; }
+/* 二选一（阅读器「翻页方向」）。**不能复用 .sheet-actions**：
+   那条规则是 .sheet-actions button:last-child { flex:1; background: var(--brand-deep); color:#fff }
+   —— 为「取消 / 确定」这种动作行设计的，会把末位按钮**无条件**画成实心主按钮。
+   用在这里的后果实测：两个按钮都是实心黑（分不出选没选中），宽度 91 vs 289。
+   这里另起一套：等宽、未选中是浅灰、选中才用墨色实心。 */
+.seg-choice { display: flex; gap: 8px; margin-top: 6px; }
+.seg-choice > button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 400;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+.seg-choice > button.on {
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: 600;
+  border-color: var(--ink);
+}
+
 .reader-sheet .settings-actions input.page-input {
   width: 68px; text-align: center; background: var(--surface-2); color: var(--ink);
   border: 0; padding: 10px; font-size: 13px;
@@ -1079,7 +1132,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 
 .reader-toolbar button {
   background: transparent;
-  color: #e8e8ea;
+  color: var(--reader-ink-2);
   padding: 9px 11px;
   font: inherit;
   font-size: 13px;
@@ -1087,7 +1140,7 @@ h3 { font-size: 14px; margin: 4px 0; }
   transition: background var(--t-press) linear, opacity var(--t-press) linear;
 }
 .reader-toolbar button:hover { background: rgba(255, 255, 255, 0.14); }
-.reader-toolbar button.btn-deseam.on { background: #F2F0E5; color: #100F0F; font-weight: 600; }
+.reader-toolbar button.btn-deseam.on { background: var(--reader-accent); color: #100F0F; font-weight: 600; }
 .reader-toolbar button.btn-deseam.on:hover { background: #fff; }
 .reader-toolbar button:disabled { opacity: 0.35; }
 /* 阅读器内弹窗（更快的源 / 换话 / 选话缓存）：底部抽屉，z-index 高于阅读器工具栏与缓存中心 overlay */
@@ -1116,8 +1169,9 @@ h3 { font-size: 14px; margin: 4px 0; }
 /* 浮层右上角的关闭：只用叉，不带文字 */
 .sheet-head .sheet-close {
   flex: none;
-  width: 30px;
-  height: 30px;
+  /* 30×30 摸不准；视觉尺寸由字形决定，盒子里留白即可 */
+  width: 44px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1167,8 +1221,8 @@ h3 { font-size: 14px; margin: 4px 0; }
 }
 .sheet-actions button:last-child:hover { background: var(--brand); }
 .sheet-actions button:disabled { opacity: 0.5; }
-.reader-toolbar input.page-input { width: 62px; text-align: center; background: #14161c; color: #fff; border-color: #33363f; padding: 6px; }
-.reader-toolbar .muted { color: #7f8794; }
+.reader-toolbar input.page-input { width: 62px; text-align: center; background: var(--reader-field); color: #fff; border-color: var(--reader-line); padding: 6px; }
+.reader-toolbar .muted { color: var(--reader-ink-3); }
 .reader-cont { padding: 0; }
 /* 每页先是一个「比例盒」骨架：进入阅读器时页数就已知，用 --jm-ar（高 ÷ 宽 %）把高度先撑起来，
    图片/拼图就绪后 figure[data-ready] 再切回自然高度。
@@ -1206,24 +1260,24 @@ h3 { font-size: 14px; margin: 4px 0; }
   /* 估算比例不准时宁可留黑边，也不要把图拉变形（尺寸自校正放在下一阶段） */
   object-fit: contain;
 }
-.jm-page { display: block; width: 100%; height: auto; background: #111; }
-.jm-single { display: block; max-width: 100%; max-height: calc(100vh - 160px); width: auto; margin: 10px auto; object-fit: contain; background: #16181f; }
+.jm-page { display: block; width: 100%; height: auto; background: var(--reader-bg); }
+.jm-single { display: block; max-width: 100%; max-height: calc(var(--vh100) - var(--reader-chrome)); width: auto; margin: 10px auto; object-fit: contain; background: var(--reader-field); }
 /* 单页模式：先给一块等高区域 + 居中转圈，图片（或拼好的 canvas）就绪后转圈消失 */
-.jm-single-wrap { position: relative; display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 160px); }
+.jm-single-wrap { position: relative; display: flex; align-items: center; justify-content: center; min-height: calc(var(--vh100) - var(--reader-chrome)); }
 .jm-single-wrap > .loading-spinner { position: absolute; }
 .jm-single-wrap[data-ready] > .loading-spinner { display: none; }
-.jm-single-wrap .scramble-canvas { max-width: 100%; max-height: calc(100vh - 160px); width: auto; height: auto; object-fit: contain; background: #16181f; }
+.jm-single-wrap .scramble-canvas { max-width: 100%; max-height: calc(var(--vh100) - var(--reader-chrome)); width: auto; height: auto; object-fit: contain; background: var(--reader-field); }
 /* 仅在连续阅读容器内撑满宽度；单页模式让 canvas 走 .jm-single 的等比约束（否则会被压扁） */
 .reader-cont .scramble-canvas { width: 100%; height: auto; display: block; }
 .reader-wrap .row { justify-content: center; padding: 8px 0; gap: 10px; }
 .reader-wrap .row button {
-  background: rgba(255, 255, 255, 0.09);
-  color: #F2F0E5;
+  background: var(--reader-btn);
+  color: var(--reader-accent);
   padding: 7px 16px;
   font-size: 13px;
 }
-.reader-wrap .row button:hover { background: rgba(255, 255, 255, 0.16); }
-.reader-wrap .muted { color: #7f8794; font-size: 13px; }
+.reader-wrap .row button:hover { background: var(--reader-hover); }
+.reader-wrap .muted { color: var(--reader-ink-3); font-size: 13px; }
 
 /* ---------- 阅读器右侧页进度浮标（拖动圆点跳页，替代系统滚动条：与 1.8.3 行为一致） ---------- */
 /* 连续阅读时隐藏系统滚动条（PC/Electron/Android），由右侧浮标承担阅读进度 */
@@ -2050,8 +2104,8 @@ body.jm-scroll-lock { overflow: hidden; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   padding: 0 !important;
   border-radius: 50%;
   background: transparent !important;
@@ -2112,6 +2166,8 @@ body.jm-scroll-lock { overflow: hidden; }
 .d-head { display: flex; align-items: flex-start; gap: 8px; max-width: var(--measure); }
 .backtxt {
   display: inline-flex; align-items: center; gap: 2px; flex: none;
+  /* 视觉上仍是「返回」两字，命中区撑到 44 高（详情页最常用的操作之一） */
+  min-height: 44px;
   padding: 6px 8px 6px 0; margin: 0;
   background: none !important; border: 0; color: var(--ink);
   font: inherit; font-size: 14px; cursor: pointer; border-radius: var(--r-sm);
@@ -2140,7 +2196,9 @@ body.jm-scroll-lock { overflow: hidden; }
 /* 展开中与收起动画期间都解除 clamp，否则文字会先跳回 2 行再收框 */
 .d-desc.open { -webkit-line-clamp: unset; }
 .d-more {
-  display: inline-block; margin-top: 6px; padding: 0;
+  display: inline-block; margin-top: 2px;
+  /* 纯文字「展开/收起」原来只有 19px 高，补出可点区 */
+  padding: 12px 4px 10px;
   background: none !important; border: 0; color: var(--link);
   font: inherit; font-size: 13px; cursor: pointer;
 }

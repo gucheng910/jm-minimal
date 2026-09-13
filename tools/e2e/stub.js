@@ -4,7 +4,9 @@
     localStorage.setItem("jmclient.hostcfg.v1", JSON.stringify({ ts: Date.now(), cfg: { Setting: [HOST], Server: [HOST], jm3_Server: [[HOST, "線路1"]] } }));
     localStorage.setItem("jmclient.autoSelect.v1", JSON.stringify({ host: HOST, shunt: "1", ts: Date.now() }));
     localStorage.setItem("jmclient.tosAccepted.v1", "1");
-    localStorage.setItem("jmclient.theme", "light");
+    // 主题默认锁浅色：e2e 断言都基于浅色。
+    // ?e2edark=<任意值> 时不写，让 App 走「首次启动跟随系统偏好」那条路径（配合 harness 的 E2E_DARK=1）。
+    if (!/[?&]e2edark=/.test(location.search)) localStorage.setItem("jmclient.theme", "light");
     // ?e2eauth=1：种一个「有 token 但本地有效期已过」的会话，用于验证登录态判据一致性
     if (location.search.includes("e2eauth=1")) {
       localStorage.setItem("jwttoken", JSON.stringify("stale-token"));
@@ -182,7 +184,38 @@
       return json(d);
     }
     if (p === "comic_read") { window.__reqs.push({ path: p, id: u.searchParams.get("id") }); return json({ id: u.searchParams.get("id"), name: "读取测试", scramble_id: 0, images: [{ page: 1, image: "https://mock.jm.local/1.jpg", name: "001" }, { page: 2, image: "https://mock.jm.local/2.jpg", name: "002" }] }); }
-    if (p === "forum") { window.__reqs.push({ path: p, aid: u.searchParams.get("aid") }); return json({ list: [] }); }
+    // 评论：按真实接口的形状分页 —— 每页 10 条，total 是总数（实测 aid=283429 为 478）。
+    // 原来的桩永远返回 { list: [] }，等于评论区分页从来没被端到端测过。
+    if (p === "forum") {
+      const aid = u.searchParams.get("aid");
+      const page = Number(u.searchParams.get("page") || 1);
+      window.__reqs.push({ path: p, aid, page });
+      const TOTAL = Number(window.__forumTotal ?? 478);
+      const SIZE = 10;
+      const start = (page - 1) * SIZE;
+      const list = [];
+      for (let i = 0; i < SIZE && start + i < TOTAL; i++) {
+        const n = start + i + 1;
+        list.push({
+          CID: 100000 + n,
+          AID: aid,
+          nickname: "读者" + n,
+          content: "<p>第 " + n + " 条评论</p>",
+          update_at: "2026-09-13",
+          spoiler: n % 7 === 0 ? 1 : 0
+        });
+      }
+      // 如实模拟真实服务端的怪癖：请求超出范围的 page 时把**第一页原样返回**
+      // （实测 aid=1472364 total=1，page=2/3 回来的还是同一条 CID）。
+      // 客户端必须靠 CID 去重 + 收敛 total 才不会重复条目、不会无限点下去。
+      if (list.length === 0 && TOTAL > 0) {
+        for (let i = 0; i < SIZE && i < TOTAL; i++) {
+          const n = i + 1;
+          list.push({ CID: 100000 + n, AID: aid, nickname: "读者" + n, content: "<p>第 " + n + " 条评论</p>", update_at: "2026-09-13", spoiler: 0 });
+        }
+      }
+      return json({ list, total: TOTAL });
+    }
     if (p === "search") {
       const q = u.searchParams.get("search_query") || "";
       const type = u.searchParams.get("search_type") || "";

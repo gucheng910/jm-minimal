@@ -71,6 +71,9 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void, onS
   itemsRef.current = items;
   const redirectRef = useRef(onRedirectAid);
   redirectRef.current = onRedirectAid;
+  // 回调走 ref 镜像：search 的依赖保持 []，否则每次重渲换新函数会让 reqIdRef 守卫失效
+  const staleFailRef = useRef(onStaleFail);
+  staleFailRef.current = onStaleFail;
 
   const search = useCallback(async (q: string, p: number, replace: boolean, searchType: string, sortOrder: string) => {
     const reqId = ++reqIdRef.current;
@@ -98,7 +101,7 @@ export function useSearchFeed(onRedirectAid: (aid: string | number) => void, onS
         if (prev.length > 0) {
           setItems(prev);
           setError("");
-          onStaleFail?.(replace ? "搜索失败，已保留上次结果" : "加载更多失败，请稍后重试");
+          staleFailRef.current?.(replace ? "搜索失败，已保留上次结果" : "加载更多失败，请稍后重试");
         } else {
           setError(String(err));
         }

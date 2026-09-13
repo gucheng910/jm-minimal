@@ -29,7 +29,7 @@ if (!/^[Ee]:[\\/]JMClient$/i.test(process.cwd())) {
  *   4) 发布后自动做 BUILDING §5.4 校验：线上 latest.yml sha512 对比 + 资产 HEAD 200
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import fs, { readFileSync, writeFileSync, copyFileSync, existsSync, statSync, readdirSync, rmSync } from "node:fs";
+import fs, { readFileSync, writeFileSync, copyFileSync, existsSync, statSync, readdirSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -312,14 +312,30 @@ const assets = assetCandidates.filter(([n, f]) => {
 });
 
 /**
- * 收尾清理：只保留最近 keep 个版本的产物（历史版本在 GitHub Release 上有归档），
- * 并清掉所有 -log 调试包。避免 release/ 与 release-pc/ 无限膨胀（曾累计 900MB）。
+ * 收尾清理：把超出保留数的旧产物**移到 `<dir>/_old/`**，而不是删除。
+ *
+ * 为什么改成移走（2026-09-13 教训）：原来是 `rmSync` 直接删。清理规则是"只留最近 2 个版本"，
+ * 于是在工作副本里跑一次发版就会把 1.9.x 那批**只存在于本地的测试包**抹掉
+ * —— 它们从没发布到 GitHub Release（线上版本列表是 1.8.3 → 2.0.0，没有 1.9.x），
+ * 删掉就是永久丢失。release/ 和 release-pc/ 都在 .gitignore 里，也没有任何备份。
+ *
+ * 现在：移到 _old/ 子目录，日志里写清楚移了什么；空间仍然受限（_old/ 可以手动清），
+ * 但**不会再有不可恢复的删除**。想彻底关掉清理：--keep-all。
  */
 function pruneArtifacts(keep = 2) {
+  if (flags.has("--keep-all")) {
+    step("清理旧产物");
+    log("  --keep-all：跳过清理，产物全部保留");
+    return;
+  }
   const verOf = (name) => (name.match(/-(\d+\.\d+\.\d+)(?:-log)?\.(?:apk|exe|exe\.blockmap)$/) || [])[1];
   const versions = new Set();
   for (const dir of ["release", "release-pc"]) {
-    for (const f of readdirSync(path.join(ROOT, dir))) {
+    // 目录可能不存在（例如 --skip-pc 从来没打过 PC 包）——不能直接 readdirSync，
+    // 否则收尾清理会抛 ENOENT 把整个发版脚本带成 exit 1（产物其实已经好了）。
+    const full = path.join(ROOT, dir);
+    if (!existsSync(full)) { log("  · 跳过不存在的目录：" + dir); continue; }
+    for (const f of readdirSync(full)) {
       const v = verOf(f);
       if (v) versions.add(v);
     }
@@ -330,20 +346,32 @@ function pruneArtifacts(keep = 2) {
     return 0;
   });
   const keepSet = new Set(sorted.slice(-keep));
-  let removed = 0;
+  let moved = 0;
+  let keepAll = 0;
   for (const dir of ["release", "release-pc"]) {
     const full = path.join(ROOT, dir);
+    if (!existsSync(full)) continue; // 同上：目录不存在就跳过，别让收尾清理把脚本带崩
+    let oldDir = "";
     for (const f of readdirSync(full)) {
       const v = verOf(f);
       if (!v) continue;
-      if (f.includes("-log.") || !keepSet.has(v)) {
-        rmSync(path.join(full, f), { force: true });
-        removed++;
+      // -log 调试包与超出保留数的版本都移走（-log 是构建期临时产物，不必长期占位）
+      const stale = f.includes("-log.") || !keepSet.has(v);
+      if (!stale) { keepAll++; continue; }
+      if (!oldDir) {
+        oldDir = path.join(full, "_old");
+        if (!existsSync(oldDir)) mkdirSync(oldDir, { recursive: true });
+      }
+      try {
+        renameSync(path.join(full, f), path.join(oldDir, f));
+        moved++;
+      } catch (err) {
+        log("  ! 移动失败（已保留原处）：" + f + " —— " + String(err).slice(0, 80));
       }
     }
   }
-  step("清理旧产物");
-  log("  保留版本：" + [...keepSet].join(" / ") + "，删除 " + removed + " 个文件");
+  step("清理旧产物（移到 release/_old，不删除）");
+  log("  保留版本：" + [...keepSet].join(" / ") + "，保留 " + keepAll + " 个，移走 " + moved + " 个");
 }
 
 /** §5.4 发布后校验：走 gh API（资产下载域名在本机可能被墙） */

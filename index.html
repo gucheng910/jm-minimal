@@ -8,7 +8,9 @@
     <link rel="icon" href="./icons/icon-192.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-    <script>try{var t=localStorage.getItem("jmclient.theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
+    <!-- 首帧定主题：用户显式选过听用户的，没选过跟随系统。
+         必须与 src/core/theme.ts 的 initialDark() 保持一致，否则会先闪一下白再变暗。 -->
+    <script>try{var t=localStorage.getItem("jmclient.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(d)document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />

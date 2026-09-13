@@ -2,47 +2,28 @@
 const { app, BrowserWindow, shell, session, ipcMain } = require("electron");
 const { createDnsCleaner } = require("./dns-clean.cjs");
 const { createDesktopUpdater } = require("./updater.cjs");
-const http = require("http");
+const { createStaticServer } = require("./static-server.cjs");
 const fs = require("fs");
 const path = require("path");
 
 const DIST = path.join(__dirname, "..", "dist");
-const MIME = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".webmanifest": "application/manifest+json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".ico": "image/x-icon"
-};
 
 function startServer(port) {
   return new Promise((resolve, reject) => {
-    const srv = http.createServer((req, res) => {
-      const urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
-      const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
-      const file = path.normalize(path.join(DIST, rel));
-      if (!file.startsWith(DIST)) { res.writeHead(403); res.end(); return; }
-      fs.readFile(file, (err, data) => {
-        if (err) {
-          // SPA 回退到 index.html
-          fs.readFile(path.join(DIST, "index.html"), (e2, d2) => {
-            if (e2) { res.writeHead(404); res.end("not found"); }
-            else { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(d2); }
-          });
-          return;
-        }
-        res.writeHead(200, { "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream" });
-        res.end(data);
-      });
-    });
+    const srv = createStaticServer(DIST);
     srv.on("error", reject);
     srv.listen(port, "127.0.0.1", () => resolve(srv));
   });
 }
+
+// 主进程兜底：任何未捕获异常都不该让整个应用消失（历史上本地服务的 URIError 就能做到）。
+// 只记录，不退出；渲染进程仍有 ErrorBoundary 与 window.onerror 兜底。
+process.on("uncaughtException", (err) => {
+  console.error("[jmd-main] uncaughtException:", (err && err.stack) || err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[jmd-main] unhandledRejection:", reason);
+});
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

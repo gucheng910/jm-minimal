@@ -52,3 +52,20 @@ npm run build:compat && npm run e2e:compat    # 兼容包（老内核）自检�
 - 不要用 `getProcess(msedge).kill()` 之类按镜像名杀浏览器（会误杀用户正在用的浏览器）；
   本测试台只用 `--user-data-dir` 指向自己的 profile，并且只 kill 自己 spawn 的进程。
 - 本机访问 GitHub 资产域名可能被墙，与测试台无关；测试台只打本地 dev server。
+
+---
+
+## 深色模式颜色审计（2026-09-13 加）
+
+```powershell
+# 模拟系统深色 + 不预置主题（stub.js 默认会锁浅色，?e2edark= 用来跳过）
+$env:DRIVER='driver-color-audit.js'; $env:E2E_DARK='1'; $env:TEST_URL='http://127.0.0.1:5199/?e2edark=1'
+node tools/e2e/harness.mjs
+```
+
+它会把首页与详情页关键元素的**计算后颜色与真实对比度**打出来（逐级向上找不透明背景再算）。
+之所以需要它：`[data-theme="dark"] button { color: … }` 这类规则的权重是 (0,1,1)，
+会悄悄压过 `.link` / `.backtxt` / `.d-more` 这些 (0,1,0) 的类规则 ——
+2026-09-13 就是它把详情页作者/标签的蓝字染成了 #1C1B1A（1.04:1，等于看不见），
+而浅色模式完全看不出来（基类只有 (0,0,1)，输给类规则）。
+结构约束现已由 `src/core/themeCss.test.ts` 守住：主题规则不许把裸标签当主体。

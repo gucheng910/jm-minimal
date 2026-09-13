@@ -7,7 +7,30 @@ import { authorNames, parsePaid } from "../core/albumMeta";
 import { bookIdOf, isSeriesWork, mergeBookMeta } from "../core/series";
 import { saveHistory } from "../core/history";
 import { pushToast } from "../ui/toast";
-import type { AlbumDetail, ForumPayload, ReadPayload } from "../core/types";
+import type { AlbumDetail, ForumComment, ForumPayload, ReadPayload } from "../core/types";
+
+/**
+ * 评论分页合并（按 CID 去重后追加）。
+ *
+ * 为什么要去重：官方 `/forum?aid=` 每页固定 10 条（2026-09-13 实测：
+ * aid=283429 total=478，page=1/2/3 各 10 条且互不重复），
+ * 但对评论很少的专辑，请求超出范围的 page 会把第一页原样返回
+ * （aid=1472364 total=1 时 page=2、page=3 返回的仍是同一条 CID）。
+ * 不去重就会出现重复条目、而且 list.length 永远追不上 total。
+ */
+export function mergeCommentPage(prev: ForumPayload | null, next: ForumPayload): ForumPayload {
+  const seen = new Set<string>();
+  const list: ForumComment[] = [];
+  for (const c of [...(prev?.list || []), ...(next.list || [])]) {
+    const key = String(c.CID ?? c.id ?? "");
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    list.push(c);
+  }
+  return { ...next, list };
+}
 
 export interface AlbumDetailOptions {
   /** 详情数据变化（ContentView 用它同步搜索层背后的父详情） */
@@ -22,6 +45,12 @@ export interface AlbumDetailApi {
   detail: AlbumDetail | null;
   read: ReadPayload | null;
   comments: ForumPayload | null;
+  /** 官方返回的评论总数（不是已加载条数） */
+  commentsTotal: number;
+  /** 还有下一页没加载 */
+  commentsHasMore: boolean;
+  /** 正在加载下一页 */
+  commentsLoadingMore: boolean;
   commentText: string;
   busy: boolean;
   error: string;
@@ -29,6 +58,8 @@ export interface AlbumDetailApi {
   setRead: (r: ReadPayload | null) => void;
   setComments: (v: ForumPayload | null) => void;
   loadComments: (aid: number | string) => Promise<void>;
+  /** 加载下一页评论并追加（按 CID 去重） */
+  loadMoreComments: () => Promise<void>;
   /** 乐观快照落地（打开详情/切章第一步），返回本次请求序号 */
   begin: (snapshot: AlbumDetail) => number;
   /** 拉完整详情 + 评论；期间又 begin/leave 过则丢弃回包 */
@@ -52,11 +83,22 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [read, setRead] = useState<ReadPayload | null>(null);
+  /** 评论已加载到第几页（1 起）；换专辑 / 切话时重置 */
+  const [commentsPage, setCommentsPage] = useState(1);
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
   const reqIdRef = useRef(0);
   const detailRef = useRef<AlbumDetail | null>(null);
   detailRef.current = detail;
   const optsRef = useRef(opts);
   optsRef.current = opts;
+  const commentsRef = useRef<ForumPayload | null>(null);
+  commentsRef.current = comments;
+
+  /** 落地第一页（换专辑 / 切话 / 发完评论重拉）：整体替换并回到第 1 页 */
+  const applyFirstPage = useCallback((next: ForumPayload | null) => {
+    setComments(next);
+    setCommentsPage(1);
+  }, []);
 
   const applyDetail = useCallback((next: AlbumDetail | null) => {
     setDetailState(next);
@@ -79,10 +121,10 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
   const begin = useCallback((snapshot: AlbumDetail) => {
     const reqId = ++reqIdRef.current;
     applyDetail(snapshot);
-    setComments(null);
+    applyFirstPage(null);
     setError("");
     return reqId;
-  }, [applyDetail]);
+  }, [applyDetail, applyFirstPage]);
 
   /**
    * 拉详情（连载分两步）：先渲染话级回包（快），再用书级回包补作者/简介/标签/目录。
@@ -106,8 +148,8 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
       fetchDetail(id, reqId)
     ]);
     if (reqIdRef.current !== reqId) return; // 已离开/已切章
-    if (c.status === "fulfilled" && c.value) setComments(c.value);
-  }, [fetchDetail]);
+    if (c.status === "fulfilled" && c.value) applyFirstPage(c.value);
+  }, [fetchDetail, applyFirstPage]);
 
   const leave = useCallback(() => {
     reqIdRef.current++;
@@ -177,14 +219,48 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
         fetchDetail(id, reqId)
       ]);
       if (reqIdRef.current !== reqId) return; // 离开详情后忽略过期回包
-      if (c.status === "fulfilled" && c.value) setComments(c.value);
+      if (c.status === "fulfilled" && c.value) applyFirstPage(c.value);
     });
-  }, [applyDetail, fetchDetail, run]);
+  }, [applyDetail, fetchDetail, run, applyFirstPage]);
 
   const loadComments = useCallback(async (aid: number | string) => {
     const data = await run(() => client.getAlbumComments(aid, 1));
-    if (data) setComments(data);
-  }, [run]);
+    if (data) applyFirstPage(data);
+  }, [run, applyFirstPage]);
+
+  /**
+   * 加载下一页评论（追加）。
+   *
+   * 改之前详情页永远只请求 page=1：官方每页 10 条，
+   * 实测 aid=283429 有 478 条评论，用户只能看到 10 条（审查发现）。
+   */
+  const loadMoreComments = useCallback(async () => {
+    const cur = detailRef.current;
+    const loaded = commentsRef.current;
+    if (!cur || !loaded || commentsLoadingMore) return;
+    const total = Number(loaded.total || 0);
+    if (total > 0 && loaded.list.length >= total) return; // 已经到底
+    const nextPage = commentsPage + 1;
+    setCommentsLoadingMore(true);
+    try {
+      const next = await client.getAlbumComments(cur.id, nextPage);
+      if (!next) return;
+      const before = commentsRef.current?.list.length ?? 0;
+      const merged = mergeCommentPage(commentsRef.current, next);
+      setComments(merged);
+      setCommentsPage(nextPage);
+      // 评论很少时服务端会把第一页原样返回（实测 total=1 的专辑 page=2/3 都是同一条）：
+      // 再去重也拿不到新内容，直接把 total 收到实际条数，按钮随之消失，不会无限点下去。
+      if (merged.list.length === before) setComments({ ...merged, total: merged.list.length });
+    } catch (err) {
+      pushToast("评论加载失败：" + String(err).replace(/^Error: /, "").slice(0, 60), "err");
+    } finally {
+      setCommentsLoadingMore(false);
+    }
+  }, [commentsPage, commentsLoadingMore]);
+
+  const commentsTotal = Number(comments?.total || 0);
+  const commentsHasMore = Boolean(comments && comments.list.length > 0 && comments.list.length < commentsTotal);
 
   const submitComment = useCallback(async () => {
     const cur = detailRef.current;
@@ -238,9 +314,11 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
   }, []);
 
   return {
-    detail, read, comments, commentText, busy, error,
+    detail, read, comments, commentsTotal, commentsHasMore, commentsLoadingMore,
+    commentText, busy, error,
     setCommentText, setRead, setComments,
     begin, load, set: applyDetail, leave,
-    toggleFavorite, buy, switchChapter, submitComment, startRead, loadComments
+    toggleFavorite, buy, switchChapter, submitComment, startRead,
+    loadComments, loadMoreComments
   };
 }

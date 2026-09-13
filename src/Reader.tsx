@@ -14,14 +14,17 @@ import { pushToast } from "./ui/toast";
 import { SkeletonRows } from "./ui/SkeletonRows";
 import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
 import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
-import { NO_SEAM } from "./core/constants";
+import { resolveReaderScrollHost, scrollByHost, scrollToTopOf, scrollTopOf } from "./core/scrollHost";
+import { TAP_ZONES_CONTINUOUS, TAP_ZONES_SINGLE, loadTapInvert, resolveTapAction, saveTapInvert } from "./core/tapZones";
+import { NO_SEAM, UI_KEYS } from "./core/constants";
 import type { ReadPage } from "./core/types";
 import type { BookMeta } from "./core/offlineMeta";
 import { on } from "./core/bus";
 
 type ReaderMode = "continuous" | "single";
 
-const MODE_KEY = "jmclient.reader.mode";
+// 阅读模式的存储键统一走 UI_KEYS（原来这里和 core/constants.ts 各写了一份字面量）
+const MODE_KEY = UI_KEYS.readerMode;
 
 interface Props {
   albumId: number | string;
@@ -54,6 +57,12 @@ const SEAM_BAD_SCORE = 1.0;
 function jlog(...args: unknown[]) {
   try { console.log("[jmd]", ...args); } catch { /* ignore */ }
 }
+/**
+ * 调试日志去重用的 Set —— **必须有上限**。
+ * 原本只 add 不删：翻一部长篇会把整本书每一页的 URL 常驻内存（审查发现的无界增长）。
+ * 到顶就整体清空（比 LRU 简单，且这里只是日志去重，偶尔重复打一条无所谓）。
+ */
+const LOGGED_SRC_MAX = 300;
 const loggedSrc = new Set<string>();
 
 // 带 CORS 加载失败（个别图床不发 CORS 头）时，回退为普通加载——此时 canvas 会被污染，
@@ -140,9 +149,11 @@ function pumpSeam(): void {
 function applyScramble(img: HTMLImageElement, albumId: number | string, scrambleId?: number | string) {
   // 尚未解码完成先不动（交给 onLoad）；否则会把键写死，后续再也不会还原
   if (!img.complete || img.naturalWidth === 0) return;
-  const on = deseaOn();
+  // 变量名不要叫 `on`：会遮蔽从 core/bus 导入的事件订阅函数 on()（no-shadow），
+  // 一旦后面在这段作用域里写 on("jm:xxx", ...) 就会变成 "boolean is not a function"
+  const repairOn = deseaOn();
   // 键 = scrambleId + 开关状态 + 当前图源地址：图源切换、scrambleId 迟到/变化、开关切换都必须重绘
-  const key = String(scrambleId ?? "") + "|" + (on ? "fix" : "raw") + "|" + (img.currentSrc || img.src);
+  const key = String(scrambleId ?? "") + "|" + (repairOn ? "fix" : "raw") + "|" + (img.currentSrc || img.src);
   if (img.dataset.scrambleKey === key) return;
   // 图源/页面变化时允许对新图重新做一次接缝修复
   delete img.dataset.seamRepaired;
@@ -161,7 +172,7 @@ function applyScramble(img: HTMLImageElement, albumId: number | string, scramble
   img.style.display = "none";
   // 重排已完成（上面 9ms 的 drawUnscrambled）→ 去条纹排队，等进入视口 + 主线程空闲再做
   // NO_SEAM 构建里 !NO_SEAM 是编译期常量 false → 整块（含 observer/队列）会被摇掉
-  if (scrambleId && on && !NO_SEAM) {
+  if (scrambleId && repairOn && !NO_SEAM) {
     const pageName = pageNameOf(img);
     seamTasks.set(canvas, { pageName, parts: scrambleSliceCount(albumId, pageName) });
     const obs = ensureSeamObserver();
@@ -242,6 +253,11 @@ export default function ReaderPanel({
   // —— 去条纹：本地修复开关（持久化、全局生效、默认开启）——
   // 按钮亮 = 显示修复后效果；按钮灭 = 显示原图（点击即切换，无需长按）
   const [deseam, setDeseamState] = useState<boolean>(() => deseaOn());
+  /** 左右点击分区是否反转（左手 / 右起翻页），持久化 */
+  const [tapInvert, setTapInvert] = useState<boolean>(() => loadTapInvert());
+  // 「去条纹」的真值在 core/scramble 的模块状态里，订阅它的变化事件同步按钮态。
+  // 之前 jm:deseam 只发不收（半截契约），按钮态与真值一旦分头修改就会不一致。
+  useEffect(() => on("jm:deseam", (v) => setDeseamState(Boolean(v))), []);
   const currentRef = useRef(1);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -454,37 +470,15 @@ export default function ReaderPanel({
   // 章节内位置属于临时状态，退出重进从第一页开始。
   useEffect(() => {
     if (mode !== "continuous") return; // 单页模式页码由翻页/跳页控制，无需监听滚动
-    const figs = Array.from(document.querySelectorAll<HTMLElement>(".jm-figure"));
+    // 查询限定在本阅读器内：缓存中心那份离线阅读器可能同时挂载，
+    // 不限定范围会扫到它的 .jm-figure（页码、锚点、浮标都会算错）
+    const scope: ParentNode = rootRef.current || document;
+    const figs = Array.from(scope.querySelectorAll<HTMLElement>(".jm-figure"));
     if (figs.length === 0) return;
-    // 向上找最近的滚动容器（如 .cache-overlay）；找不到则按窗口滚动处理
-    let hostEl: HTMLElement | null = null;
-    let walk = figs[0].parentElement;
-    while (walk && walk !== document.body) {
-      const cs = window.getComputedStyle(walk);
-      if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && walk.scrollHeight > walk.clientHeight + 2) {
-        hostEl = walk;
-        break;
-      }
-      walk = walk.parentElement;
-    }
-    const isWin = hostEl === null;
-    // 不能只信 document.scrollingElement：小米 4W（Android 6 / WebView 57）上它返回 <body>，
-    // 而 body 自身不滚动（scrollHeight === clientHeight）→ 下面"布局未立起来"的守卫恒为真，
-    // 页码计数、浮标唤起、锚点补偿在老设备上全部失效（2026-09-12 真机定位）。
-    // 所以在候选里挑一个"真的能滚"的元素：嵌套宿主 → scrollingElement → documentElement → body。
-    const pickHost = (): HTMLElement => {
-      const list: HTMLElement[] = [];
-      if (hostEl) list.push(hostEl);
-      const se = document.scrollingElement as HTMLElement | null;
-      if (se) list.push(se);
-      list.push(document.documentElement);
-      if (document.body) list.push(document.body);
-      for (const el of list) {
-        if (el && el.scrollHeight > el.clientHeight + 2) return el;
-      }
-      return list[0] || document.documentElement;
-    };
-    const host = pickHost();
+    // 滚动宿主判定统一在 core/scrollHost.ts（判定条件只有一份，双宿主与老内核兜底都在那里）
+    const hostInfo = resolveReaderScrollHost(rootRef.current);
+    const host = hostInfo.measured;
+    const isWin = hostInfo.isWindow;
     const compute = () => {
       // 布局还没立起来时不要判定：图片未解码时每页 0 高 → scrollHeight≈0 会让下面的
       // "滚到底 ⇒ total" 条件第一帧就成立，计数器一进阅读器就跳到最后一页。
@@ -499,7 +493,7 @@ export default function ReaderPanel({
         cur = Number(f.dataset.page || String(f.id).replace(/^jm-pg-/, "") || 1);
       }
       // 已滚到底：最后一页可能不足以越过参考线
-      const st = isWin ? window.scrollY : host.scrollTop;
+      const st = scrollTopOf(hostInfo);
       if (st + host.clientHeight >= host.scrollHeight - 6) cur = total;
       setCurrent(cur);
       setJumpInput(String(cur));
@@ -700,13 +694,14 @@ export default function ReaderPanel({
     if (target.closest(".reader-sheet") || target.closest(".reader-rail")) return;
     if (target.closest("button, input, a, label")) return;
     if (chromeOn) { hideChrome(); return; }
+    // 分区判定收在 core/tapZones（归一化坐标 + 可反转，参考 Mihon 的 ViewerNavigation）
     const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
-    if (mode === "single" && (ratio < 1 / 3 || ratio > 2 / 3)) {
-      jumpTo(ratio > 2 / 3 ? current + 1 : current - 1);
-      showChrome();
-      return;
-    }
+    const x = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+    const y = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+    const zones = mode === "single" ? TAP_ZONES_SINGLE : TAP_ZONES_CONTINUOUS;
+    const action = resolveTapAction(zones, x, y, tapInvert);
+    if (action === "prev") { jumpTo(current - 1); showChrome(); return; }
+    if (action === "next") { jumpTo(current + 1); showChrome(); return; }
     showChrome();
   }
 
@@ -877,18 +872,6 @@ export default function ReaderPanel({
     });
   }
 
-  /** 阅读时的滚动宿主：缓存中心离线阅读是 overlay 容器内滚动，其余是窗口滚动（null = 窗口） */
-  function readerScrollHost(): HTMLElement | null {
-    const figs = rootRef.current?.querySelectorAll<HTMLElement>(".jm-figure");
-    let el: HTMLElement | null = figs && figs.length > 0 ? figs[0].parentElement : null;
-    while (el && el !== document.body) {
-      const cs = getComputedStyle(el);
-      if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && el.scrollHeight > el.clientHeight + 2) return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
-
   /**
    * 尺寸自校正的配套：改高度前后把滚动位置补回来。
    * 锚点取"视口里最上面那一页"——变化发生在它上方时它会被顶走同样的距离，补回去即可；
@@ -906,16 +889,12 @@ export default function ReaderPanel({
     if (!anchor) return;
     const delta = anchor.getBoundingClientRect().top - before;
     if (Math.abs(delta) < 0.5) return;
-    const host = readerScrollHost();
-    if (host) host.scrollTop += delta;
-    else window.scrollBy(0, delta);
+    scrollByHost(resolveReaderScrollHost(root), delta);
   }
 
   /** 换话/换源后回到顶部：窗口滚动与缓存中心 overlay 两种宿主都要处理 */
   function resetReaderScroll(): void {
-    const host = readerScrollHost();
-    if (host) host.scrollTop = 0;
-    else window.scrollTo(0, 0);
+    scrollToTopOf(resolveReaderScrollHost(rootRef.current), 0);
   }
 
   /** 记住这一页的真实比例：同话后续页的骨架直接用它（比例没变就什么都不做） */
@@ -951,6 +930,7 @@ export default function ReaderPanel({
     const src = p.image;
     const key = imageName(p) + "|" + src;
     if (!loggedSrc.has(key)) {
+      if (loggedSrc.size >= LOGGED_SRC_MAX) loggedSrc.clear(); // 容量上限：不随着阅读时长无界增长
       loggedSrc.add(key);
       jlog("pageSrc page=" + imageName(p) + " → " + src.split("//").slice(-1)[0].slice(0, 70));
     }
@@ -976,7 +956,7 @@ export default function ReaderPanel({
   function toggleDeseam() {
     const next = !deseam;
     jlog("toggle pressed →", next ? "ON（显示修复后）" : "OFF（显示原图）", "album=" + albumId, "pages=" + pageUrls.length, "scrambleId=" + String(scrambleId));
-    setDeseamState(next);
+    // 只写模块真值：它会派发 jm:deseam，上面的订阅再把按钮态同步过来（单一数据源）
     setDeseam(next);
     // 立即重绘已渲染页面：关闭 → 原图，开启 → 修复后效果
     document.querySelectorAll<HTMLImageElement>("img.jm-page, img.jm-single").forEach((im) => {
@@ -1132,6 +1112,32 @@ export default function ReaderPanel({
                 </button>
               )}
             </div>
+            {/* 翻页方向只对单页模式有意义：连续滚动是上下滚，没有左右分区。
+                所以只在 mode==="single" 时出现（原来无条件渲染，连续滚动下也显示，
+                而那儿它什么也不影响）。样式走 .seg-choice，不复用 .sheet-actions —— 见 index.css。 */}
+            {mode === "single" && (
+              <>
+                <p className="muted">翻页方向（点左右两侧时哪边是上一页）</p>
+                <div className="seg-choice" role="group" aria-label="翻页方向">
+                  <button
+                    className={tapInvert ? "" : "on"}
+                    aria-pressed={!tapInvert}
+                    onClick={() => { setTapInvert(false); saveTapInvert(false); }}
+                    title="左侧点一下上一页，右侧点一下下一页（默认）"
+                  >
+                    左←上一页
+                  </button>
+                  <button
+                    className={tapInvert ? "on" : ""}
+                    aria-pressed={tapInvert}
+                    onClick={() => { setTapInvert(true); saveTapInvert(true); }}
+                    title="左右反转：适合左手持机 / 从右往左翻的阅读习惯"
+                  >
+                    右←上一页
+                  </button>
+                </div>
+              </>
+            )}
             <p className="muted">跳到第几页</p>
             <div className="row sheet-actions settings-actions">
               <button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button>

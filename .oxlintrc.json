@@ -1,0 +1,52 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "import", "jsx-a11y"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "warn",
+    "react/memo-dependencies": "warn",
+    "react/purity": "warn",
+
+    "no-ex-assign": "error",
+    "no-shadow": "error",
+    "no-unused-vars": "warn",
+    "no-unused-expressions": "warn",
+    "no-unmodified-loop-condition": "warn",
+    "preserve-caught-error": "warn",
+
+    "react/react-in-jsx-scope": "off",
+    "react/refs": "off",
+    "react/set-state-in-effect": "off",
+    "react/exhaustive-effect-dependencies": "off",
+    "no-underscore-dangle": "off",
+    "import/no-unassigned-import": "off",
+    "jsx_a11y/click-events-have-key-events": "warn",
+    "jsx_a11y/no-static-element-interactions": "warn",
+    "jsx_a11y/no-noninteractive-element-interactions": "warn",
+    "jsx_a11y/prefer-tag-over-role": "warn",
+    "no-console": "off",
+    "no-empty": "off",
+    "unicorn/no-empty-file": "off",
+    "unicorn/prefer-code-point": "off"
+  },
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "dist-compat/**",
+    "dist-legacy/**",
+    "release/**",
+    "release-pc/**",
+    "_archive/**",
+    "reference/**",
+    "scripts/**",
+    "android/**",
+    "public/**",
+    "build/**",
+    "electron/dns-clean.cjs",
+    "electron/updater.cjs"
+  ]
+}

@@ -25,6 +25,7 @@ import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
 import { APP_VERSION, BUILD_VARIANT, FALLBACK_SHUNT_KEYS, LOCAL_VERSION, UI_KEYS } from "./core/constants";
 import { isLowFx, setLowFxManual } from "./core/lowfx";
+import { initialDark } from "./core/theme";
 import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
 import TagBlockSetting from "./ui/TagBlockSetting";
@@ -83,10 +84,9 @@ export default function App() {
   // 每次冷启动显示 18+ 确认（与自动测源同频）；确认期间后台完成测速与首屏预取
   const [ageGate, setAgeGate] = useState(true);
   const [gateBusy, setGateBusy] = useState(false);
-  // 暗色模式：跟随左侧菜单开关，持久化到 localStorage；阅读器区域本身就是深色不受影响
-  const [dark, setDark] = useState<boolean>(() => {
-    try { return localStorage.getItem(UI_KEYS.theme) === "dark"; } catch { return false; }
-  });
+  // 暗色模式：跟随左侧菜单开关，持久化到 localStorage；阅读器区域本身就是深色不受影响。
+  // 首次启动（没存过）跟随系统偏好，否则深色手机上一进来是一整屏白（见 core/theme.ts）。
+  const [dark, setDark] = useState<boolean>(() => initialDark());
   // 低配模式（老内核自动开）：抽屉里可手动覆盖，切换后立即改 <html data-lowfx> 生效
   const [lowFx, setLowFx] = useState<boolean>(() => isLowFx());
   // 顶栏滚动态：内容滚动出一定距离后加阴影/底边，分离层级

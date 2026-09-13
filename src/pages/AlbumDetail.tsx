@@ -17,6 +17,10 @@ interface Props {
   logged: boolean;
   busy: boolean;
   comments: ForumPayload | null;
+  /** 官方返回的评论总数（折叠行显示它，而不是"已加载条数"） */
+  commentTotal: number;
+  commentHasMore: boolean;
+  commentLoadingMore: boolean;
   commentText: string;
   backLabel: string;
   onBack: () => void;
@@ -33,6 +37,7 @@ interface Props {
   onRead: () => void;
   onCommentChange: (v: string) => void;
   onSubmitComment: () => void;
+  onLoadMoreComments: () => void;
 }
 
 export default function AlbumDetail({
@@ -40,6 +45,9 @@ export default function AlbumDetail({
   logged,
   busy,
   comments,
+  commentTotal,
+  commentHasMore,
+  commentLoadingMore,
   commentText,
   backLabel,
   onBack,
@@ -53,7 +61,8 @@ export default function AlbumDetail({
   onToggleFavorite,
   onRead,
   onCommentChange,
-  onSubmitComment
+  onSubmitComment,
+  onLoadMoreComments
 }: Props) {
   const [descOpen, setDescOpen] = useState(false);
   const [descClamped, setDescClamped] = useState(false);
@@ -91,7 +100,10 @@ export default function AlbumDetail({
   const related = Array.isArray(detail.related_list) ? detail.related_list : [];
   const series = Array.isArray(detail.series) ? detail.series : [];
   const desc = String(detail.description || "").trim();
-  const commentCount = comments && Array.isArray(comments.list) ? comments.list.length : 0;
+  // 折叠行显示的是**官方返回的总数**（原来用 comments.list.length = 已加载条数，
+  // 官方每页 10 条，478 条评论的漫画会显示成"评论 10"，看着像只有 10 条）
+  const commentLoaded = comments && Array.isArray(comments.list) ? comments.list.length : 0;
+  const commentCount = commentTotal > 0 ? commentTotal : commentLoaded;
 
   return (
     <div className="card detail-card">
@@ -218,11 +230,15 @@ export default function AlbumDetail({
       <Collapse open={commentsOpen}>
         <CommentList
           comments={comments}
+          total={commentCount}
+          hasMore={commentHasMore}
+          loadingMore={commentLoadingMore}
           text={commentText}
           busy={busy}
           logged={logged}
           onTextChange={onCommentChange}
           onSubmit={onSubmitComment}
+          onLoadMore={onLoadMoreComments}
         />
       </Collapse>
     </div>

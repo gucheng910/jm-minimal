@@ -6,7 +6,7 @@ export const HOST_KEY_SECRET = "diosfjckwpqpdfjkvnqQjsik";
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 /** 出包标识（诊断用，每次发布更新） */
-export const BUILD_TAG = "v20260912-2.1.0";
+export const BUILD_TAG = "v20260913-2.1.3";
 /**
  * 当前客户端版本号（由 UpdateSection / 侧边栏版本信息共用）。
  * 构建时由 vite.config.ts 的 define 从 package.json 注入 __APP_VERSION__，
@@ -51,7 +51,6 @@ export const STORAGE_KEYS = {
   memberInfo: "memberInfo",
   token: "jwttoken",
   lang: "lang",
-  langCode: "langCode",
   account: "memberAccount",
   authExpiry: "authExpiry"
 } as const;
@@ -79,6 +78,7 @@ export const UI_KEYS = {
   history: "jmclient.history",
   searchHistory: "jmclient.searchHistory",
   readerMode: "jmclient.reader.mode",
+  tapInvert: "jmclient.tapInvert",
   hostConfigCache: "jmclient.hostcfg.v1",
   autoSelectCache: "jmclient.autoSelect.v1",
   theme: "jmclient.theme"

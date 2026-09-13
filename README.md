@@ -18,10 +18,10 @@
 
 | 文件 | 适用 | 下载 |
 |---|---|---|
-| `jm-minimal-modern-2.1.0.apk` | Android 7.0+，**系统 WebView 80 以上**（绝大多数机型） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.0/jm-minimal-modern-2.1.0.apk) |
-| `jm-minimal-compat-2.1.0.apk` | **Android 6.0（API 23）及以上**，老内核 / 无法更新 WebView / 老安卓机型（WebView 57 以上；含 ES5 兼容产物，关动效、不含去条纹，一切为流畅让步） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.0/jm-minimal-compat-2.1.0.apk) |
-| `jm-minimal-portable-2.1.0.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.0/jm-minimal-portable-2.1.0.exe) |
-| `jm-minimal-setup-2.1.0.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.0/jm-minimal-setup-2.1.0.exe) |
+| `jm-minimal-modern-2.1.3.apk` | Android 7.0+，**系统 WebView 80 以上**（绝大多数机型） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.3/jm-minimal-modern-2.1.3.apk) |
+| `jm-minimal-compat-2.1.3.apk` | **Android 6.0（API 23）及以上**，老内核 / 无法更新 WebView / 老安卓机型（WebView 57 以上；含 ES5 兼容产物，关动效、不含去条纹，一切为流畅让步） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.3/jm-minimal-compat-2.1.3.apk) |
+| `jm-minimal-portable-2.1.3.exe` | Windows 7+ x64（免安装便携版） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.3/jm-minimal-portable-2.1.3.exe) |
+| `jm-minimal-setup-2.1.3.exe` | Windows 7+ x64（NSIS 安装包） | [下载](https://github.com/gucheng910/jm-minimal/releases/download/v2.1.3/jm-minimal-setup-2.1.3.exe) |
 
 > **系统要求（按包区分）**：
 > - **modern**：Android 7.0+，系统 WebView / Chromium **80+**；

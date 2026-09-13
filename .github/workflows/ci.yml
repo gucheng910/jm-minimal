@@ -1,6 +1,6 @@
 name: CI
 
-# 只做「能编译 + 单测通过」这一件事：打包（Android/Electron）耗时长且要签名密钥，不在 CI 跑。
+# 只做「能编译 + 能过 lint + 单测通过」这几件事：打包（Android/Electron）耗时长且要签名密钥，不在 CI 跑。
 on:
   push:
     branches: [main]
@@ -18,7 +18,11 @@ jobs:
           cache: npm
       - name: Install
         run: npm ci
-      - name: Unit tests
+      - name: Lint（0 error 才过；warning 只提示不拦）
+        run: npm run lint
+      - name: 对比度审计（令牌不达 WCAG AA 直接失败）
+        run: npm run contrast
+      - name: Unit tests（vitest + electron 静态服务）
         run: npm test
       - name: Type-check + build web
         run: npm run build

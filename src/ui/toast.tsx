@@ -65,15 +65,19 @@ export default function ToastHost() {
   if (items.length === 0) return null;
   return (
     <div className="toast-host" role="status" aria-live="polite">
-      {items.map((t) => (
-        <button key={t.id}
-          className={"toast " + t.kind + (t.action ? " toast-action" : "")}
-          data-entering={t.entering ? "" : undefined}
-          data-leaving={t.leaving ? "" : undefined}
-          onClick={() => onClick(t)}>
-          {t.text}{t.action ? " ›" : ""}
-        </button>
-      ))}
+      {items.map((t) => {
+        const cls = "toast " + t.kind + (t.action ? " toast-action" : "");
+        const props = {
+          className: cls,
+          "data-entering": t.entering ? "" : undefined,
+          "data-leaving": t.leaving ? "" : undefined
+        };
+        // 只有真的能点（带 action）的才用 <button>：否则读屏软件会把每条提示都播报成"按钮"。
+        // 容器已经是 role="status" aria-live="polite"，纯提示用普通元素即可。
+        return t.action
+          ? <button key={t.id} {...props} onClick={() => onClick(t)}>{t.text} ›</button>
+          : <div key={t.id} {...props}>{t.text}</div>;
+      })}
     </div>
   );
 }

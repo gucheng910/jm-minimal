@@ -47,6 +47,34 @@ export interface RequestOptions {
   cacheTtlMs?: number;
   /** 强制使用指定线路域名（解密失败自动换线 fallback 用） */
   host?: string;
+  /**
+   * 该请求是否可以安全重发（幂等）。
+   * 默认：GET = true，其它方法 = false。
+   *
+   * 为什么必须显式区分：POST 打到的是写接口（收藏 / 购买 / 签到 / 发评论 / 兑换）。
+   * 一次「失败」可能只是**响应**没回来，服务端其实已经受理并执行了；
+   * 此时自动重发就是重复扣币、重复提交。用户手动再点一次是可见的重试，
+   * 静默重发不是 —— 所以非幂等请求一律只发一次，除非调用方明确声明它幂等（如登录）。
+   */
+  idempotent?: boolean;
+}
+
+/** 请求失败原因分类。用属性标记而不是 Error 子类：`String(err)` 的文案必须保持不变（UI 直接展示它）。 */
+type JmErrorKind = "business" | "network" | "timeout" | "decrypt";
+type JmError = Error & { jmKind?: JmErrorKind };
+
+function markError(err: Error, kind: JmErrorKind): JmError {
+  (err as JmError).jmKind = kind;
+  return err as JmError;
+}
+
+function kindOf(err: unknown): JmErrorKind | undefined {
+  return err instanceof Error ? (err as JmError).jmKind : undefined;
+}
+
+/** 服务端已经答复（`code !== 200`）——请求确实到达并被执行过，任何情况下都不得自动重发。 */
+function businessError(env: ApiEnvelope): JmError {
+  return markError(new Error("api error code=" + env.code + (env.msg ? "：" + env.msg : "")), "business");
 }
 
 const AD_PATHS = ["ad_content_all", "advertise_all"];
@@ -303,7 +331,7 @@ export class JMClient {
         // try next key
       }
     }
-    throw new Error("api decrypt failed"); // 不再静默返回密文（调用方会误判为空）
+    throw markError(new Error("api decrypt failed"), "decrypt"); // 不再静默返回密文（调用方会误判为空）
   }
 
   private cleanQuery(params?: Query): Query {
@@ -332,7 +360,8 @@ export class JMClient {
       const data = await this.request<MemberInfo & { jwttoken?: string }>(
         API_PATHS.login,
         { username: account.username, password: account.password },
-        { method: "POST", noAuth: true, noRelogin: true }
+        // 登录是幂等的（重复登录只是再签发一次会话），允许重试：续期失败会让整个会话掉线
+        { method: "POST", noAuth: true, noRelogin: true, idempotent: true }
       );
       if (!data.jwttoken) return null;
       sessionStore.saveAuth(data.jwttoken, data as MemberInfo);
@@ -347,10 +376,14 @@ export class JMClient {
   async request<T>(apiPath: string, params?: Query, options: RequestOptions = {}): Promise<T> {
     if (!this.apiBase) throw new Error("API base 未初始化，请先调用 init()");
     const method = options.method || "GET";
-    const retries = Math.max(1, options.retries ?? 3);
+    /** 幂等请求才允许自动重发；非幂等（默认所有非 GET）只发一次 */
+    const idempotent = options.idempotent ?? method === "GET";
+    const maxAttempts = Math.max(1, options.retries ?? (idempotent ? 3 : 1));
     const timeoutMs = options.timeoutMs ?? 15000;
     const cacheTtl = method === "GET" ? options.cacheTtlMs || 0 : 0;
     let lastErr: unknown = null;
+    /** 401 续期后的重发次数：它是「换张证再试一次」，不消耗网络重试预算（否则预算=1 时会空手退出） */
+    let authReplayLeft = 1;
 
     // 内存缓存命中（只读、参数稳定的接口）
     if (cacheTtl > 0) {
@@ -361,7 +394,8 @@ export class JMClient {
     }
 
     const baseUrl = options.host ? "https://" + options.host + "/" : this.apiBase;
-    for (let attempt = 0; attempt < retries; attempt++) {
+    // attempt 只在「真正再赌一次网络」时自增（见下方 catch）；401 续期后的重发不占预算
+    for (let attempt = 0; attempt < maxAttempts;) {
       const ts = String(Math.floor(Date.now() / 1000));
       const url = new URL(apiPath, baseUrl);
       const headers = this.buildHeaders(ts, Boolean(options.noAuth));
@@ -402,12 +436,12 @@ export class JMClient {
           throw new Error("api parse failed: status=" + status + " body=" + (text.slice(0, 80) || "(empty)"));
         }
         if (env.code !== 200) {
-          // 自动续期：仅业务请求（非 noAuth/noRelogin）首个 attempt 触发一次
-          if (!options.noAuth && !options.noRelogin && attempt === 0 && env.code === 401) {
+          // 自动续期：仅业务请求（非 noAuth/noRelogin）触发一次，且**不消耗网络重试预算**
+          if (authReplayLeft > 0 && !options.noAuth && !options.noRelogin && env.code === 401) {
             const rel = await this.autoRelogin();
-            if (rel) continue; // 用新 token 重发
+            if (rel) { authReplayLeft -= 1; continue; } // 用新 token 重发，attempt 不变
           }
-          throw new Error("api error code=" + env.code + (env.msg ? "：" + env.msg : ""));
+          throw businessError(env);
         }
         const result = this.decryptPayload<T>(ts, apiPath, env);
         // 任意一话的 /album 都带回整本书的 series[]：顺手种入「话 → 书」映射（足迹/缓存合并用）
@@ -419,23 +453,29 @@ export class JMClient {
           setMemCache(makeKey(apiPath, q as Record<string, unknown>), result, cacheTtl);
         }
         return result;
-      } catch (err) {
-        // 网络错误打上 [network] 标记（区别于业务 api error），便于 UI 提示「检查网络或线路」
-        if (err instanceof TypeError && !(err instanceof DOMException)) {
-          err = new TypeError("[network] " + (err.message || "fetch failed"));
-        } else if (err instanceof DOMException && err.name === "AbortError") {
-          err = new DOMException("[timeout] 请求超时", "AbortError");
+      } catch (caught) {
+        // 网络错误打上 [network] 标记（区别于业务 api error），便于 UI 提示「检查网络或线路」。
+        // 注意不要给 catch 参数重新赋值（no-ex-assign）：另起一个局部量，语义更清楚。
+        let err: unknown = caught;
+        if (kindOf(err) === undefined && err instanceof TypeError && !(err instanceof DOMException)) {
+          err = markError(new TypeError("[network] " + (err.message || "fetch failed")), "network");
+        } else if (kindOf(err) === undefined && err instanceof DOMException && err.name === "AbortError") {
+          err = markError(new DOMException("[timeout] 请求超时", "AbortError"), "timeout");
         }
         lastErr = err;
-        const isDecrypt = err instanceof Error && err.message === "api decrypt failed";
+        const kind = kindOf(err);
         // 解密失败说明命中异常节点：跳出本线重试循环，交给线路级 fallback
-        if (isDecrypt) break;
-        const retryable = (err instanceof DOMException && err.name === "AbortError") || err instanceof TypeError;
-        // 网络类错误指数退避 + 抖动；业务错误若仍有剩余尝试也允许重试（与旧行为一致）
-        if (retryable && attempt < retries - 1) {
-          const delay = Math.min(500 * Math.pow(2, attempt), 5000) + Math.random() * 200;
-          await new Promise((r) => setTimeout(r, delay));
-        }
+        if (kind === "decrypt") break;
+        // 服务端已经答复过（业务错误码）：请求确实被执行了，绝不重发
+        if (kind === "business") break;
+        // 非幂等请求：网络层失败也不自动重发（见 RequestOptions.idempotent 的说明）
+        if (!idempotent) break;
+        const retryable = kind === "timeout" || kind === "network";
+        attempt += 1;
+        if (!retryable || attempt >= maxAttempts) break;
+        // 网络类错误指数退避 + 抖动
+        const delay = Math.min(500 * Math.pow(2, attempt - 1), 5000) + Math.random() * 200;
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
     // 线路级 fallback：当前线路节点异常时依次尝试其它官方线路
@@ -469,8 +509,12 @@ export class JMClient {
     return this.request<PaymentPayload>(API_PATHS.payment, {});
   }
 
-  postForm<T>(apiPath: string, params?: Query): Promise<T> {
-    return this.request<T>(apiPath, params, { method: "POST" });
+  /**
+   * POST 表单。**默认不重发**（写接口：收藏/购买/签到/评论/兑换）。
+   * 只有确认服务端重复执行无害时，调用方才传 `{ idempotent: true }`。
+   */
+  postForm<T>(apiPath: string, params?: Query, options: RequestOptions = {}): Promise<T> {
+    return this.request<T>(apiPath, params, { method: "POST", ...options });
   }
 
   getLatest(): Promise<AlbumSummary[]> {

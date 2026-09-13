@@ -63,6 +63,10 @@ export function useCategoryFeed(onStaleFail?: (msg: string) => void): CategoryFe
   orderRef.current = order;
   const rankRef = useRef("");
   rankRef.current = rank;
+  // 回调走 ref 镜像：load 的依赖必须保持 []，
+  // 否则调用方每次重渲都会拿到新函数，正在跑的请求守卫（reqIdRef）会失去意义。
+  const staleFailRef = useRef(onStaleFail);
+  staleFailRef.current = onStaleFail;
 
   const openCategories = useCallback(async () => {
     setBusy(true);
@@ -108,7 +112,7 @@ export function useCategoryFeed(onStaleFail?: (msg: string) => void): CategoryFe
           // 旧列表还能用：回滚并撤掉错误态，只提示一句（同 useHomeFeed 的处理）
           setItems(prev);
           setError("");
-          onStaleFail?.(replace ? "刷新失败，已保留当前内容" : "加载更多失败，请稍后重试");
+          staleFailRef.current?.(replace ? "刷新失败，已保留当前内容" : "加载更多失败，请稍后重试");
         } else {
           setError(String(err));
         }

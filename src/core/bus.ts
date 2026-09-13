@@ -17,7 +17,7 @@ export interface AppEvents {
   "jm:openAid": string;
   /** 沉浸模式开关（阅读器 / 离线阅读时隐藏顶栏底栏） */
   "jm:immersive": boolean;
-  /** 「去条纹」开关变化（当前没有监听者，保留契约） */
+  /** 「去条纹」开关变化（真值在 core/scramble 的模块状态里，阅读器订阅它同步按钮态） */
   "jm:deseam": boolean;
   /** 全局轻提示 */
   "jm:toast": { text?: string; kind?: ToastKind; action?: string };

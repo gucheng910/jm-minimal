@@ -75,6 +75,10 @@ async function main() {
   // hasTouch 必须开：否则 ontouchstart 不存在，React 不会挂触摸监听
   await send("Emulation.setDeviceMetricsOverride", { width: 420, height: 900, deviceScaleFactor: 2, mobile: true, hasTouch: true });
   await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  // E2E_DARK=1：模拟系统深色偏好（验证"首次启动跟随系统"以及暗色下的可点区/对比度）
+  if (process.env.E2E_DARK === "1") {
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
+  }
   await send("Page.addScriptToEvaluateOnNewDocument", { source: fs.readFileSync(path.join(HERE, "stub.js"), "utf8") });
   await send("Page.navigate", { url: URL_ });
   await sleep(2500);

@@ -278,6 +278,25 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageMode]);
 
+  /**
+   * 事件订阅类 effect 必须「只注册一次」：`jm:back` 是按**监听器注册顺序**派发的，
+   * 一旦因为依赖变化重新注册，顺序就会被打乱（真机踩过：父级先消费 → 直接退出阅读器）。
+   * 但它们要用到 home / cat / album 这些「每次渲染都是新对象」的 hook 返回值，
+   * 塞进依赖就等于每渲染重注册一次。用 ref 镜像最新的一份：
+   * 既不重注册，也不会读到过期闭包（这也是本项目在 App.tsx 里已经用过的写法）。
+   */
+  const homeRef = useRef(home);
+  homeRef.current = home;
+  const catRef = useRef(cat);
+  catRef.current = cat;
+  const albumRef = useRef(album);
+  albumRef.current = album;
+  /** openDetail 定义在下方（const + useCallback），依赖数组里直接引用会撞上 TDZ，所以也走 ref */
+  const openDetailRef = useRef<(a: AlbumSummary, from?: "list" | "search") => void>(() => { /* 挂载后立即被覆盖 */ });
+  /** openWeek 是函数声明（会提升），可以直接镜像 */
+  const openWeekRef = useRef(openWeek);
+  openWeekRef.current = openWeek;
+
   useEffect(() => {
     const handler = (action: string) => {
       if (action === "categories") {
@@ -285,13 +304,13 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         (async () => {
           try {
             if (!client.apiBase) await client.init();
-            await cat.openCategories();
-            await cat.load("", "", 1, true, "");
+            await catRef.current.openCategories();
+            await catRef.current.load("", "", 1, true, "");
           } catch { /* useCategoryFeed 内部已记录错误 */ }
         })();
       }
-      if (action === "latest") { void home.loadLatest(); }
-      if (action === "ranking") { openWeek(); }
+      if (action === "latest") { void homeRef.current.loadLatest(); }
+      if (action === "ranking") { openWeekRef.current(); }
       if (action === "search") {
         setMode("home");
         window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
@@ -305,13 +324,13 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     if (pageMode !== "home") return;
     const handler = () => {
       // 底部“首页”再次点击：从详情/阅读退回列表并刷新首页推荐
-      album.setRead(null);
-      album.set(null);
+      albumRef.current.setRead(null);
+      albumRef.current.set(null);
       clearSearchLayer();
-      album.setComments(null);
+      albumRef.current.setComments(null);
       setMode("home");
       window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
-      void home.loadRandom();
+      void homeRef.current.loadRandom();
     };
     return on("jm:refreshHome", handler);
   }, [pageMode]);
@@ -320,7 +339,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     return on("jm:openAid", (raw) => {
       const aid = String(raw || "");
       if (!aid || pageMode !== "home") return;
-      openDetail({ id: aid } as AlbumSummary);
+      openDetailRef.current({ id: aid } as AlbumSummary);
     });
   }, [pageMode]);
 
@@ -333,7 +352,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         if (!client.apiBase) await client.init();
         if (initialAction === "categories") {
           try { await client.getSetting(); } catch { /* 不阻塞分类加载 */ }
-          await cat.openCategories();
+          await catRef.current.openCategories();
           return;
         }
         if (initialAction === "search") {
@@ -374,29 +393,31 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
             if (alive && Array.isArray(r2)) list = r2 as AlbumSummary[];
           }
           if (alive && list) {
-            home.setError("");
-            home.show(list, "latest", false, 1);
-          } else if (alive && !home.hasItems()) {
+            homeRef.current.setError("");
+            homeRef.current.show(list, "latest", false, 1);
+          } else if (alive && !homeRef.current.hasItems()) {
             // 已经有内容在屏上（最优记忆/后台刷新先到了）就不再占用整屏错误态，否则会出现"内容明明在却报网络错误"
-            home.setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
+            homeRef.current.setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
             pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
           }
         }
         if (aid) {
           const d = await client.getAlbumFull(aid);
           if (alive && d) {
-            album.set(d);
+            albumRef.current.set(d);
             setMode("detail");
-            album.setComments(null);
-            void album.loadComments(d.id);
+            albumRef.current.setComments(null);
+            void albumRef.current.loadComments(d.id);
           }
         }
       } catch (err) {
-        if (alive && !home.hasItems()) home.setError(String(err));
+        if (alive && !homeRef.current.hasItems()) homeRef.current.setError(String(err));
       }
     })();
     return () => { alive = false; };
-  }, []);
+    // initialAction / pageMode 在本组件的生命周期内是常量（App 按 tab 传不同的 key，切 tab 即重新挂载），
+    // 放进依赖只是为了让"依赖完整"，不会造成重复执行。
+  }, [initialAction, pageMode]);
 
   /** 打开周榜：数据与分页都在 useWeekRank 内，这里只负责记滚动位置与切页 */
   async function openWeek() {
@@ -449,6 +470,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     await album.load(item.id, reqId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 让上面那几个「只注册一次」的事件订阅拿到最新的 openDetail（openDetail 本身是 useCallback([])，
+  // 这里同步镜像只是为了绕开 TDZ，不改变它的稳定性）
+  openDetailRef.current = openDetail;
 
   /** 搜索结果页里的卡片点击 → 详情页（背后保留搜索页） */
   const openAlbumFromSearch = useCallback((a: AlbumSummary) => { void openDetail(a, "search"); }, [openDetail]);
@@ -525,6 +549,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         logged={logged}
         busy={album.busy}
         comments={album.comments}
+        commentTotal={album.commentsTotal}
+        commentHasMore={album.commentsHasMore}
+        commentLoadingMore={album.commentsLoadingMore}
         commentText={album.commentText}
         backLabel={detailFrom === "search" && sr ? "返回搜索结果" : "返回列表"}
         onBack={detailBack}
@@ -539,6 +566,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         onRead={() => { album.startRead(); setMode("reader"); }}
         onCommentChange={album.setCommentText}
         onSubmitComment={() => { void album.submitComment(); }}
+        onLoadMoreComments={() => { void album.loadMoreComments(); }}
       />
       </div>
       {searchLayer}

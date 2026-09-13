@@ -1,7 +1,8 @@
 # JM极简版 · 发布与开发工作流手册（BUILDING）
 
-> 更新：2026-09-10 · 覆盖 **v1.8.1（versionCode 48，线上 Latest）**
-> 当前实况：源码/Android = **1.8.1**；协议对齐官方 **2.1.6**（`src/core/constants.ts APP_VERSION`）。
+> 更新：2026-09-13 · 覆盖 **v2.1.0（versionCode 64）**
+> 当前实况：源码/Android = **2.1.0**；协议对齐官方 **2.1.6**（`src/core/constants.ts APP_VERSION`）。
+> ⚠️ 版本号以 §2 的表格为准 —— 本行与 §2 曾各自写着不同的版本，改版时容易只改一处。
 > 发版已脚本化：`node tools/release.mjs <x.y.z> [--publish]`（见 §1/§7.2），手写步骤仅作排障参考。
 > 近期记录：docs/28（同书多话合并/离线详情页）、29（阅读器弹窗）、30（1.7.2 回归修复）、31（真机压测）。
 > 用途：给"下次开发/发版"的人看——怎么打 PC 包、怎么打 Android 包、往 GitHub 传什么、怎么传、本机常用命令、以及踩过的坑。
@@ -62,10 +63,12 @@
 
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
-| PC + 前端 | package.json → version | 2.1.0 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 2.1.0 / versionCode 64 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| PC + 前端 | package.json → version | 2.1.3 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
+| Android | android/app/build.gradle → defaultConfig | versionName 2.1.3 / versionCode 67 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
-> ⚠️ 现值 = **1.8.1 / versionCode 48**（线上 Latest = v1.8.1）。
+> ⚠️ **现值以本表为准**：package.json `2.1.0` / build.gradle `2.1.0` + `versionCode 64`。
+> （2026-09-13 修正：这里原来残留着 "现值 = 1.8.1 / versionCode 48"，与正上方的表格自相矛盾，
+> 是上一次发版只更新了表格、没更新这句话造成的。改版本号时**这两处一起改**。）
 > `tools/release.mjs` 会一次性同步 **6 处**：package.json、package-lock.json、android/app/build.gradle（versionName + versionCode）、
 > BUILDING.md 本表、README.md 下载表与链接、`src/core/constants.ts` 的 `BUILD_TAG`。手动发版务必逐处核对。
 
