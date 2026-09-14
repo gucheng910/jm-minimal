@@ -244,8 +244,33 @@ export default function App() {
     return on("jm:coinChanged", handler);
   }, []);
 
-  // 整屏浮层（侧边抽屉 / 缓存中心 / 收藏足迹 / 换源抽屉）打开时锁住底层页面滚动
-  useBodyScrollLock(menuOpen || showCache || libPanel !== null || showSource);
+  // 整屏浮层（侧边抽屉 / 缓存中心 / 收藏足迹 / 换源抽屉）打开时锁住底层页面滚动。
+  // 注意 libBehind：收藏/足迹浮层被详情页盖住时**仍然挂载**（列表与滚动位置要留着），
+  // 但它这时候不该再锁 body —— 否则详情页与阅读器都滚不动（body.jm-scroll-lock 是 overflow:hidden，
+  // 而这个锁是引用计数，浮层不卸载就永远不会释放）。
+  useBodyScrollLock(menuOpen || showCache || (libPanel !== null && !libBehind) || showSource);
+
+  /**
+   * 把底栏的**真实高度**写回 --nav-h。
+   * --nav-h 是写死的 60px，而 .bottom-nav 的高度由内容决定（图标 + 文字 + padding），
+   * 实测已经 67px；系统字体/文字缩放调大后还会更高。所有按 --nav-h 预留的位置
+   * （.app 下边距、.toast-host/.back-hint 的 bottom、.sr-body 下边距）都会因此少留一截，
+   * 长页面滚到底时最后一段就会被底栏压住。
+   * 沉浸模式下底栏 display:none（高度 0），此时跳过，保持上一次的值。
+   */
+  useEffect(() => {
+    const el = document.querySelector<HTMLElement>(".bottom-nav");
+    if (!el) return;
+    const apply = () => {
+      const h = el.offsetHeight;
+      if (h > 0) document.documentElement.style.setProperty("--nav-h", h + "px");
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return; // 老内核：量一次够用（底栏高度不会自己变）
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => { ro.disconnect(); document.documentElement.style.removeProperty("--nav-h"); };
+  }, []);
 
   // 缓存中心 / 收藏足迹：整屏浮层也给个出场淡出（原来只淡入，关掉时硬切）
   const cacheAnim = useSheetTransition(showCache, 200);
