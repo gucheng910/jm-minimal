@@ -76,13 +76,20 @@ async function main() {
       E2E_PORT: String(Number(PORT) + 4)
     });
 
+    console.log("\n==== 付费漫画购买闭环 ====");
+    const paid = await runNode("harness.mjs", {
+      DRIVER: "driver-paid.js",
+      TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "e2epaid=1",
+      E2E_PORT: String(Number(PORT) + 5)
+    });
+
     let ptrCode = 0;
     if (!process.env.E2E_SKIP_PTR) {
       console.log("\n==== 下拉刷新（CDP 原生触摸）====");
       ptrCode = await runNode("ptr.mjs", { E2E_PORT: String(Number(PORT) + 1) });
     }
-    if (nav || auth || cache || hist || reader || ptrCode) process.exitCode = 1;
-    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
+    if (nav || auth || cache || hist || reader || paid || ptrCode) process.exitCode = 1;
+    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，付费购买 " + (paid ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
   } finally {
     if (server) { try { server.kill(); } catch (e) { /* 忽略 */ } }
   }

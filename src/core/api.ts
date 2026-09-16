@@ -3,7 +3,7 @@ import { aesEcbDecrypt, md5Hex } from "./crypto";
 import { API_PATHS } from "./endpoints";
 import { measureAll, measureImages, pickFastestSource } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
-import { getMemCache, makeKey, setMemCache } from "./requestCache";
+import { getMemCache, invalidatePath, makeKey, setMemCache } from "./requestCache";
 import { bookIdOf, mergeBookMeta, rememberSeries } from "./series";
 import { emit } from "./bus";
 import { sessionStore } from "./storage";
@@ -540,6 +540,19 @@ export class JMClient {
   getAlbum(id: number | string): Promise<AlbumDetail> {
     // 短期内存缓存（30s）：同漫画反复进出详情页无需重复请求
     return this.request<AlbumDetail>(API_PATHS.album, { id }, { cacheTtlMs: 30_000 });
+  }
+
+  /**
+   * 购买后强制重取详情（绕过 30s 内存缓存）。
+   *
+   * 为什么必须强制：`/album` 有 30s 内存缓存，购买成功那一刻缓存里还是**购买前**的快照
+   * （purchased = 未购形态）。直接重拉会命中它，UI 于是永远切不到"已解锁"，
+   * 重进详情只要还在 30s 内也一样 —— 真机反馈的"付款后按钮不变、从列表重进依旧"就是这个。
+   * 先失效再取，语义上等于"这次我要服务端的当前真相"。
+   */
+  async refreshAlbum(id: number | string): Promise<AlbumDetail | null> {
+    invalidatePath(API_PATHS.album);
+    return this.getAlbumFull(id).catch(() => null);
   }
 
   /**

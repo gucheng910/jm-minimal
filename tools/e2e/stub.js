@@ -7,6 +7,12 @@
     // 主题默认锁浅色：e2e 断言都基于浅色。
     // ?e2edark=<任意值> 时不写，让 App 走「首次启动跟随系统偏好」那条路径（配合 harness 的 E2E_DARK=1）。
     if (!/[?&]e2edark=/.test(location.search)) localStorage.setItem("jmclient.theme", "light");
+    // ?e2epaid=1：种一个已登录会话，用于验证付费购买闭环（购买入口只在登录后出现）
+    if (location.search.includes("e2epaid=1")) {
+      localStorage.setItem("jwttoken", JSON.stringify("paid-token"));
+      localStorage.setItem("memberInfo", JSON.stringify({ uid: 9, username: "tester", coin: 9999, level: 3, exp: 100 }));
+      localStorage.setItem("authExpiry", String(Date.now() + 3600000));
+    }
     // ?e2eauth=1：种一个「有 token 但本地有效期已过」的会话，用于验证登录态判据一致性
     if (location.search.includes("e2eauth=1")) {
       localStorage.setItem("jwttoken", JSON.stringify("stale-token"));
@@ -46,6 +52,9 @@
   };
   // 简介故意给长文：窄屏下会被 -webkit-line-clamp:2 截断，用来验证「展开/收起」真的出现且能展开
   const LONG_DESC = "简介文本" + "这是一段足够长的简介，用来验证详情页在窄屏下会把简介折叠成两行，并且提供展开入口；如果按字符数猜阈值，四十到六十字之间的简介会被静默截断，所以这里用真实溢出检测。".repeat(2);
+  // 付费专辑桩：详情页必须显示应付金额；购买成功后按钮要让位给「立即阅读」
+  const PAID_AID = "70001";
+  const PAID_PRICE = 30;
   const detail = (id) => ({ id, name: "详情" + id, author: ["作者甲", "作者乙"], tags: ["巨乳", "無修正", "中文"], actors: ["登场甲", "登场乙"], related_list: mk("REL", 3, "作者甲"), total_photos: 42, description: LONG_DESC, series: [], price: "", purchased: false });
   const json = (data) => new Response(JSON.stringify({ code: 200, data }), { status: 200, headers: { "content-type": "application/json" } });
   // 1x1 PNG：缓存中心/阅读器会真实 fetch 图片，桩必须给回可缓存响应（cachePage 要求 resp.ok）
@@ -181,7 +190,22 @@
       const d = isSeriesId(id) ? seriesDetail(id) : detail(id);
       // 收藏态由 /favorite 的开关驱动，便于 e2e 验证「收藏 → 取消收藏」往返
       d.is_favorite = Boolean(window.__fav && window.__fav.has(String(id)));
+      // 付费桩（aid=70001）：购买前 purchased 为假值，购买后返回**非空字符串 "0"** ——
+      // 这正是官方语义里"已购"的形态之一（官方 Detail.tsx:200 `purchased || purchased === ""`），
+      // 用来守住「买完按钮要变成阅读、且重进详情依旧」这条回归。
+      if (String(id) === PAID_AID) {
+        d.price = String(PAID_PRICE);
+        d.purchased = window.__paid ? "0" : false;
+      }
       return json(d);
+    }
+    // 购买付费漫画：真实接口是 POST /coin_buy_comics {id}，成功回 {status:"ok", msg}
+    if (p === "coin_buy_comics") {
+      window.__reqs.push({ path: p, method, id: fields.id });
+      if (String(fields.id) !== PAID_AID) return json({ status: "fail", msg: "商品不存在" });
+      if (window.__paid) return json({ status: "fail", msg: "您已經購買過了" });
+      window.__paid = true;
+      return json({ status: "ok", msg: "購買成功" });
     }
     if (p === "comic_read") { window.__reqs.push({ path: p, id: u.searchParams.get("id") }); return json({ id: u.searchParams.get("id"), name: "读取测试", scramble_id: 0, images: [{ page: 1, image: "https://mock.jm.local/1.jpg", name: "001" }, { page: 2, image: "https://mock.jm.local/2.jpg", name: "002" }] }); }
     // 评论：按真实接口的形状分页 —— 每页 10 条，total 是总数（实测 aid=283429 为 478）。

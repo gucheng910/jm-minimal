@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { authorNames, albumTags, parsePaid } from "./albumMeta";
+import { authorNames, albumTags, isPurchased, parsePaid, priceOf } from "./albumMeta";
 import type { AlbumDetail } from "./types";
 
 const d = (patch: Partial<AlbumDetail>): AlbumDetail => ({ id: 1, name: "x", ...patch });
@@ -28,20 +28,51 @@ describe("albumTags", () => {
   });
 });
 
-describe("parsePaid", () => {
-  it("无价格 / 价格非法 → 未付费限制", () => {
+describe("parsePaid / isPurchased（判据必须与官方 Detail.tsx:200 一致）", () => {
+  it("无价格 / 价格非法 → 非付费内容，谈不上购买", () => {
     expect(parsePaid(d({ price: "" }))).toBe(false);
     expect(parsePaid(d({ price: "0" }))).toBe(false);
     expect(parsePaid(d({ price: "abc" }))).toBe(false);
   });
-  it("有价格且未购买 → 需要购买", () => {
-    expect(parsePaid(d({ price: "5" }))).toBe(true);
-    expect(parsePaid(d({ price: "5", purchased: "0" }))).toBe(true);
-    expect(parsePaid(d({ price: "5", purchased: false }))).toBe(true);
-  });
-  it("已购买（各种真值形态）→ 不再限制", () => {
-    expect(parsePaid(d({ price: "5", purchased: true }))).toBe(false);
+
+  it("官方真值表：非空字符串（含 \"0\"/\"false\"）与空串都算已购", () => {
+    // 官方 isPurchased = purchased || purchased === ""，以下全部为真值 → 不应再要钱
+    expect(parsePaid(d({ price: "5", purchased: "" }))).toBe(false);
+    expect(parsePaid(d({ price: "5", purchased: "0" }))).toBe(false);
+    expect(parsePaid(d({ price: "5", purchased: "false" }))).toBe(false);
     expect(parsePaid(d({ price: "5", purchased: "1" }))).toBe(false);
     expect(parsePaid(d({ price: "5", purchased: "true" }))).toBe(false);
+    expect(parsePaid(d({ price: "5", purchased: "xxx" }))).toBe(false);
+    expect(parsePaid(d({ price: "5", purchased: 1 }))).toBe(false);
+    expect(parsePaid(d({ price: "5", purchased: true }))).toBe(false);
+  });
+
+  it("只有「假值且非空串」才算未购", () => {
+    expect(parsePaid(d({ price: "5" }))).toBe(true);
+    expect(parsePaid(d({ price: "5", purchased: undefined }))).toBe(true);
+    expect(parsePaid(d({ price: "5", purchased: null }))).toBe(true);
+    expect(parsePaid(d({ price: "5", purchased: 0 }))).toBe(true);
+    expect(parsePaid(d({ price: "5", purchased: false }))).toBe(true);
+  });
+
+  it("isPurchased 对空串与缺失的区分（官方特判分支）", () => {
+    expect(isPurchased(d({ purchased: "" }))).toBe(true);
+    expect(isPurchased(d({ purchased: "0" }))).toBe(true);
+    expect(isPurchased(d({ purchased: undefined }))).toBe(false);
+    expect(isPurchased(null)).toBe(false);
+  });
+});
+
+describe("priceOf（只用于展示应付金额）", () => {
+  it("有效金额返回数值", () => {
+    expect(priceOf(d({ price: "5" }))).toBe(5);
+    expect(priceOf(d({ price: 30 as unknown as string }))).toBe(30);
+  });
+  it("缺失 / 非法 / 非正数一律 0", () => {
+    expect(priceOf(d({ price: "" }))).toBe(0);
+    expect(priceOf(d({ price: "0" }))).toBe(0);
+    expect(priceOf(d({ price: "-3" }))).toBe(0);
+    expect(priceOf(d({ price: "abc" }))).toBe(0);
+    expect(priceOf(null)).toBe(0);
   });
 });

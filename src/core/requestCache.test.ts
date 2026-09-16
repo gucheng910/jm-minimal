@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { makeKey, getMemCache, setMemCache, invalidateCache } from "./requestCache";
+import { makeKey, getMemCache, setMemCache, invalidateCache, invalidatePath } from "./requestCache";
 
 describe("makeKey", () => {
   it("参数按 key 排序，顺序不同也命中同一条缓存", () => {
@@ -43,6 +43,30 @@ describe("内存缓存 TTL", () => {
     setMemCache("t1-inv", "v", 60_000);
     invalidateCache("t1-inv");
     expect(getMemCache("t1-inv")).toBeNull();
+  });
+
+  /**
+   * 购买后必须能强制重取详情：/album 有 30s 缓存，写操作后若不清它，
+   * 紧接着的重拉会命中"购买前"的快照 → UI 永远切不到已解锁态（真机反馈）。
+   */
+  it("invalidatePath 按路径前缀清掉该接口的全部缓存（含带参 key）", () => {
+    setMemCache(makeKey("album", { id: 70001 }), { purchased: false }, 30_000);
+    setMemCache(makeKey("album", { id: 70002 }), { purchased: true }, 30_000);
+    expect(invalidatePath("album")).toBe(2);
+    expect(getMemCache(makeKey("album", { id: 70001 }))).toBeNull();
+    expect(getMemCache(makeKey("album", { id: 70002 }))).toBeNull();
+  });
+
+  it("invalidatePath 不做模糊匹配，避免误伤同前缀的其它接口", () => {
+    setMemCache(makeKey("albumDownload", { id: 1 }), "keep", 30_000);
+    setMemCache("albumExtra", "keep", 30_000);
+    expect(invalidatePath("album")).toBe(0);
+    expect(getMemCache(makeKey("albumDownload", { id: 1 }))).toBe("keep");
+    expect(getMemCache("albumExtra")).toBe("keep");
+  });
+
+  it("invalidatePath 对不存在的路径返回 0（不抛错）", () => {
+    expect(invalidatePath("nothing-here")).toBe(0);
   });
 
   it("超过 50 条时淘汰最早写入的一条（独立模块实例）", async () => {

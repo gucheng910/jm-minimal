@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { client } from "../core/api";
 import { emit } from "../core/bus";
-import { authorNames, parsePaid } from "../core/albumMeta";
+import { authorNames } from "../core/albumMeta";
 import { bookIdOf, isSeriesWork, mergeBookMeta } from "../core/series";
 import { saveHistory } from "../core/history";
 import { pushToast } from "../ui/toast";
@@ -172,6 +172,18 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     pushToast(removed ? "已取消收藏" : "已加入官方收藏", "ok");
   }, [run, applyDetail]);
 
+  /**
+   * 购买（官方 JCoin 结算）：POST /coin_buy_comics {id}。
+   *
+   * 流程对齐官方（`pages/Comic/Detail.tsx:187-193`）：
+   *   1) 跑接口 → 看返回的 **status === "ok"** 作为成功依据；
+   *   2) 成功则**无条件重拉详情**，让 UI 自己收敛到"已购"态。
+   *
+   * 为什么不能用本地 parsePaid 来验收：那是**用被测对象验证自己**。
+   * 旧实现在这里判 `!parsePaid(fresh)`，一旦判据有偏差（服务端已购后返回的形态
+   * 与本地预期不符），钱已扣、权益已生效，却仍走"已提交购买，请稍后刷新确认"分支，
+   * 按钮永远不消失 —— 真机反馈的根因之一。判据已在 core/albumMeta 修正，这里同时解耦。
+   */
   const buy = useCallback(async () => {
     const cur = detailRef.current;
     if (!cur) return;
@@ -182,24 +194,22 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
       pushToast("购买失败：" + String(err).replace(/^Error: /, "").slice(0, 120), "err");
       return;
     }
-    // 官方业务结果兼容解析（可能 200 但 status/msg 表示失败，如 JCoin 不足）
-    const r = result as { status?: unknown; msg?: string } | null;
+    // 官方只认 status；msg 原样作为提示文案透传（兼容不同时期的响应形态）
+    const r = (typeof result === "string" ? { msg: result } : result) as { status?: unknown; msg?: string } | null;
     const rawMsg = String((r && r.msg) || "");
-    const bad = r && (r.status === 0 || r.status === "0" || r.status === false || r.status === "false" || /失败|不足|错误|已购买|重复|余额/i.test(rawMsg));
-    if (bad) {
+    const ok = Boolean(r) && String(r!.status ?? "").toLowerCase() === "ok";
+    // 非 ok：服务端明确答复过（可能 200 但余额不足 / 重复购买）→ 原样告知，不改本地态
+    if (!ok) {
       pushToast(rawMsg || "购买未成功，请确认 JCoin 余额", "err");
       return;
     }
-    // 成功：立即重新拉取详情确认真实解锁状态，避免误报（getAlbumFull 保留书级作者/简介）
-    const fresh = await client.getAlbumFull(cur.id).catch(() => null);
-    if (fresh && !parsePaid(fresh)) {
-      applyDetail(fresh);
-      pushToast("购买成功，已解锁，可立即阅读", "ok");
-      emit("jm:coinChanged");
-    } else {
-      if (fresh) applyDetail(fresh);
-      pushToast(rawMsg || "已提交购买，请稍后刷新确认", "info");
-    }
+    // 成功：强制重取详情（refreshAlbum 会先失效 /album 的 30s 内存缓存）。
+    // 不能直接用 getAlbumFull —— 它会命中购买**之前**那份快照，purchased 还是未购形态，
+    // UI 于是永远切不到"已解锁"（这正是"付款后按钮不变、重进依旧"的直接原因）。
+    const fresh = await client.refreshAlbum(cur.id);
+    if (fresh) applyDetail(fresh);
+    pushToast(rawMsg || "购买成功，已解锁，可立即阅读", "ok");
+    emit("jm:coinChanged");
   }, [applyDetail]);
 
   const switchChapter = useCallback(async (id: number | string) => {

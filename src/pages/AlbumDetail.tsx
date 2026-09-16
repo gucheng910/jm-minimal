@@ -8,7 +8,7 @@ import { useSheetTransition } from "../hooks/useSheetTransition";
 import CommentList from "../ui/CommentList";
 import { AlbumGrid } from "../ui/AlbumGrid";
 import { HeartIcon } from "../ui/icons";
-import { albumTags, authorNames, parsePaid } from "../core/albumMeta";
+import { albumTags, authorNames, parsePaid, priceOf } from "../core/albumMeta";
 import { isSeriesWork } from "../core/series";
 import type { AlbumDetail as AlbumDetailData, AlbumSummary, ForumPayload } from "../core/types";
 
@@ -94,6 +94,8 @@ export default function AlbumDetail({
   }
 
   const locked = parsePaid(detail);
+  /** 应付 JCoin（仅展示用；已购判断只看 purchased，见 core/albumMeta.isPurchased） */
+  const price = priceOf(detail);
   const authors = authorNames(detail);
   const tags = albumTags(detail);
   const actors = Array.isArray(detail.actors) ? detail.actors.filter(Boolean).map((x) => String(x)) : [];
@@ -168,10 +170,16 @@ export default function AlbumDetail({
 
       {locked && logged ? (
         <div className="actrow">
-          <button className="btn primary" disabled={busy} onClick={onBuy}>使用官方 JCoin 购买</button>
+          {/* 明确写出应付金额：官方花 JCoin 是真扣费，按钮上不标价等于让用户盲点 */}
+          <button className="btn primary" disabled={busy} onClick={onBuy}>
+            使用官方 JCoin 购买{price > 0 ? "（" + price + " JCoin）" : ""}
+          </button>
         </div>
       ) : (
         <div className="actrow">
+          {/* 已购/免费内容走同一条正常详情页动作行：立即阅读 + 收藏。
+              购买成功后详情被强制重取，purchased 变为已购态 → locked=false → 自动落到这里，
+              与普通作品完全一致（不为"刚买完"造一套特殊文案）。 */}
           <button className="btn primary" disabled={busy} onClick={onRead}>立即阅读</button>
           {logged && (
             <button

@@ -32,13 +32,15 @@ npm run build:compat && npm run e2e:compat    # 兼容包（老内核）自检�
 | `driver-cache.js` | 缓存中心/离线详情页：同书多话合并成一行、目录缓存徽标、未缓存话联网读、返回后目录仍在、已缓存话离线读（`?e2ecache=1` 预置 IDB + Cache API 数据）。**空 cache 必须判为「未缓存」**（stub 故意给第3话留了个空 cache，模拟历史版本 `caches.open` 副作用） |
 | `driver-history.js` | 连载详情补全书级作者/简介、足迹按「书」合并成一条、点足迹回到最后阅读的一话 |
 | `driver-reader.js` | 阅读器内弹窗：「更快的源」自动测速且弹窗不关闭、换话（标题/请求/按钮同步）、选话缓存（默认只选当前话 + 全选/反选 + 已缓存徽标 + 确认入队）；整本缓存后工具栏按钮变「已缓存」且 disabled |
+| `driver-paid.js` | 付费漫画购买闭环：购买前显示应付 JCoin、点购买发 `POST /coin_buy_comics`、**购买成功后动作行刷新为正常详情页（`立即阅读` + `收藏`）**、返回列表重进依旧已解锁。桩 `aid=70001`：购买前 `purchased=false`、购买后 `purchased="0"`（官方语义里"已购"的形态，见 docs/32） |
 | `driver-legacy.js` | 兼容包自检：断言 `System` 已加载、`__vite_is_modern_browser` 未置位、React 已挂载、首页列表渲染出来 |
 | `compat.mjs` | `npm run e2e:compat` 的编排：改造 dist-compat → 起静态服务器 → 跑 driver-legacy → 清理 |
 | `harness.mjs` | CDP 外壳：起浏览器、注入桩、执行 driver、打印结构化日志；收尾按本次 profile 路径杀浏览器进程树（防残留） |
 | `ptr.mjs` | 下拉刷新专项：用 CDP 原生触摸（合成 DOM TouchEvent 在无触摸环境下 React 不挂监听） |
 | `run.mjs` | 编排：起 dev server → 跑全部用例 → 关 server |
 
-桩数据开关（拼在 URL 上）：`?e2eauth=1` 过期会话、`?e2ecache=1` 预置「已缓存 2 话的连载书」；
+桩数据开关（拼在 URL 上）：`?e2eauth=1` 过期会话、`?e2ecache=1` 预置「已缓存 2 话的连载书」、
+`?e2epaid=1` 种已登录会话（付费购买用例需要登录才会出现购买入口）；
 连载桩 `/album?id=90000{1,2,3}` 刻意复刻真实形状——**话级 payload 的 author/description 为空**，
 用来验证书级补全逻辑。
 

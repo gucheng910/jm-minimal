@@ -36,3 +36,29 @@ export function setMemCache<T>(key: string, data: T, ttlMs: number): void {
 export function invalidateCache(key: string): void {
   memCache.delete(key);
 }
+
+/**
+ * 按路径前缀失效（如传 "album" 可清掉 "album?id=123"）。
+ *
+ * 用途：**写操作之后必须让相关只读缓存失效**，否则紧接着的重新拉取会命中旧值。
+ * 实例（真机反馈的"购买成功但按钮不变"）：
+ *   /album 有 30s 内存缓存，POST /coin_buy_comics 成功后立刻 getAlbumFull() 重拉，
+ *   命中购买**之前**的快照（purchased 仍是未购形态）→ UI 永远切不到已解锁态，
+ *   且重进详情只要还在 30s 内也一样 —— 看起来像"购买没生效"，其实数据根本没重新取。
+ * 前缀匹配用 path 起点 + "?" 或全等，避免 "album" 误伤 "albumDownload" 这类同前缀路径。
+ */
+export function invalidatePath(prefix: string): number {
+  let n = 0;
+  for (const key of memCache.keys()) {
+    if (key === prefix || key.startsWith(prefix + "?")) {
+      memCache.delete(key);
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/** 仅测试用：清空全部内存缓存 */
+export function clearMemCache(): void {
+  memCache.clear();
+}
