@@ -261,15 +261,28 @@ export default function App() {
   useEffect(() => {
     const el = document.querySelector<HTMLElement>(".bottom-nav");
     if (!el) return;
+    // 只在数值真的变了才写。--nav-h 会改 .app / .sr-body 的 padding，进而可能让滚动条出现/消失；
+    // 而 .bottom-nav 是 width:100%，宽度跟着变就会被它自己的 ResizeObserver 再通知一次。
+    let last = -1;
     const apply = () => {
       const h = el.offsetHeight;
-      if (h > 0) document.documentElement.style.setProperty("--nav-h", h + "px");
+      if (h > 0 && h !== last) {
+        last = h;
+        document.documentElement.style.setProperty("--nav-h", h + "px");
+      }
     };
     apply();
     if (typeof ResizeObserver === "undefined") return; // 老内核：量一次够用（底栏高度不会自己变）
-    const ro = new ResizeObserver(apply);
+    // 布局写入必须推迟到下一帧：在 RO 回调里同步改样式会当场再产生一次尺寸通知，
+    // 浏览器随即抛 "ResizeObserver loop completed with undelivered notifications"（底部红条的来源之一）。
+    let raf = 0;
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(apply); });
     ro.observe(el);
-    return () => { ro.disconnect(); document.documentElement.style.removeProperty("--nav-h"); };
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      document.documentElement.style.removeProperty("--nav-h");
+    };
   }, []);
 
   // 缓存中心 / 收藏足迹：整屏浮层也给个出场淡出（原来只淡入，关掉时硬切）

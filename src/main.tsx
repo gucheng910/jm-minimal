@@ -40,9 +40,21 @@ function showFatal(msg: string) {
     if ((el.textContent || "").length < 1200) el.textContent = (el.textContent ? el.textContent + "\n" : "") + msg;
   } catch { /* ignore */ }
 }
+/**
+ * 良性告警白名单：浏览器会把 ResizeObserver 的「本轮通知没送完」当作 script error 抛出来，
+ * 它无害（浏览器下一帧会重发，页面不受影响），但以前会把底部红条刷出来吓人一跳。
+ * 已知来源：底栏 --nav-h 尺寸观察、Collapse 高度观察（两处都已改成推迟一帧写入，这里是第二道保险）。
+ * 只忽略这一条，其余错误照旧贴红条。
+ */
+const BENIGN_JS_ERROR = /ResizeObserver loop (?:limit exceeded|completed with undelivered notifications)/i;
 window.addEventListener("error", (e) => {
+  const msg = e.message || String(e.error);
+  if (BENIGN_JS_ERROR.test(msg)) {
+    console.debug("[jmd] 已忽略良性告警:", msg);
+    return;
+  }
   const src = String(e.filename || "").split("/").pop() || "";
-  showFatal("JS错误: " + (e.message || String(e.error)) + (src ? " @" + src + ":" + e.lineno : ""));
+  showFatal("JS错误: " + msg + (src ? " @" + src + ":" + e.lineno : ""));
 });
 window.addEventListener("unhandledrejection", (e) => {
   const r = e.reason as { message?: string } | undefined;

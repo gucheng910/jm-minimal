@@ -28,9 +28,13 @@ export default function Collapse({ open, children, className }: Props) {
     const measure = () => setH(el.offsetHeight);
     measure();
     if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(measure);
+      // RO 回调里同步 setState 会立刻改外层 .collapse 的高度，可能在同一帧再产生一次尺寸通知，
+      // 浏览器随即抛 "ResizeObserver loop completed with undelivered notifications"（底部红条来源之一）。
+      // 推迟一帧执行，把布局写入挪出通知投递过程。
+      let raf = 0;
+      const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); });
       ro.observe(el);
-      return () => ro.disconnect();
+      return () => { ro.disconnect(); cancelAnimationFrame(raf); };
     }
     // 老内核没有 ResizeObserver（Chrome 64 才引入，而 compat 包要跑到 WebView 57）：
     // 高度只在「展开这一瞬」量一次，之后封面图加载完、评论异步到达都会把内容撑高，
