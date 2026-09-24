@@ -3,8 +3,9 @@
 //   - 搜索词不可修改，只能返回；仅结果卡片可点击进入详情页；
 //   - 由父级通过 open 控制进出场，组件保持挂载以保留滚动位置与已加载分页；
 //   - 栈里每一层都是独立实例（各自保有滚动与分页），只有栈顶那层 open；
-//   - 进入用 CSS keyframes（施加即播，方向由 data-nav 决定），退出用 transition 向右滑出。
-import { memo, useEffect, useRef } from "react";
+//   - 进出场都用 transition（**可被打断**：手快时从当前位移继续滑），
+//     方向由 data-nav 决定"关闭位在右还是左"，见下方 phase 说明。
+import { memo, useEffect, useRef, useState } from "react";
 import { AlbumGrid } from "./AlbumGrid";
 import { scrollToTop } from "../core/dom";
 import { SkeletonGrid } from "./SkeletonGrid";
@@ -68,6 +69,25 @@ export const SearchResultPage = memo(function SearchResultPage({
   const loadMoreRef = useRef(onLoadMore);
   loadMoreRef.current = onLoadMore;
 
+  /**
+   * 进出场相位（**不用 keyframes**，实测动画被移除时会瞬间回到底位 → 301px 硬跳）：
+   *   closed     → 关闭位（由 data-nav 决定在右还是左）
+   *   positioned → 关闭位 + 禁用过渡：把元素瞬间摆到该方向的关闭位（此时在屏幕外、不可见）
+   *   open       → 挂 .open，靠 transition 从关闭位滑到位；退出就是去掉 .open，同一属性反向过渡
+   * 用 transition 而非 animation 的关键理由：transition 可被打断并**从当前位移继续**，
+   * 所以"入场还没播完就返回"不会硬跳，而是从当前位置平滑滑出。
+   */
+  const [phase, setPhase] = useState<"closed" | "positioned" | "open">("closed");
+  useEffect(() => {
+    if (!open) { setPhase("closed"); return; }
+    setPhase("positioned");
+    // 双 rAF：第一帧让浏览器按 data-nav 把关闭位真正绘制出来，第二帧再加 .open 触发过渡
+    // （单 rAF 时 React 会在同一帧内完成摆位+改类，过渡不会触发）
+    let id2 = 0;
+    const id1 = requestAnimationFrame(() => { id2 = requestAnimationFrame(() => setPhase("open")); });
+    return () => { cancelAnimationFrame(id1); if (id2) cancelAnimationFrame(id2); };
+  }, [open]);
+
   // 换搜索词/首次挂载：回到顶部
   // 走 scrollToTop：老内核（WebView < 61）连 Element.scrollTo 方法都没有，直接调会抛错冒到错误边界
   useEffect(() => { scrollToTop(bodyRef.current); }, [resetKey]);
@@ -89,7 +109,7 @@ export const SearchResultPage = memo(function SearchResultPage({
 
   return (
     <section
-      className={"sr-layer" + (open ? " open" : "")}
+      className={"sr-layer" + (phase === "positioned" ? " sr-positioning" : "") + (phase === "open" ? " open" : "")}
       data-nav={navDir}
       style={zIndex != null ? { zIndex } : undefined}
       aria-hidden={!open}

@@ -2056,7 +2056,7 @@ html[data-nav] .page-scrim {
    （innerWidth 420→441…）→ inset:0 的搜索层跟着变宽 → 网格列宽变大、卡片等比变大，
    而且视口变宽又让这个 +24% 更大，形成自我放大（2026-09-24 真机"卡片越来越大、每次跳一下"）。
    向左退则不会：LTR 下左侧溢出不计入 scrollWidth。
-   「返回」的方向感由搜索层自己从左侧归位（jmSrInLeft）承担。 */
+   「返回」的方向感由搜索层自己从左侧归位（.sr-layer[data-nav="pop"] 的关闭位在左）承担。 */
 .page-scrim {
   position: fixed;
   inset: 0;
@@ -2089,18 +2089,10 @@ body.jm-scroll-lock { overflow: hidden; }
 }
 
 /* 搜索结果层（自身是滚动容器，与详情页的 window 滚动互不干扰） */
-/* 入场用 keyframes（施加即播）：push=从右拉入 / pop=从左归位（从搜索层里的详情返回时用，
-   是进入动效的反方向）。之所以不用"先把关闭位摆到某一侧、下一帧再加 .open"的 transition 时序技巧：
-   那种做法依赖元素上一帧的计算值，会被上一次尚未播完的关闭过渡干扰，方向不稳。
-   fill 用 backwards（不是 both）：动画结束后交回 .open 的 transform:none，退出仍是干净的 transition。 */
-@keyframes jmSrInRight {
-  from { transform: translateX(100%); }
-  to { transform: none; }
-}
-@keyframes jmSrInLeft {
-  from { transform: translateX(-100%); }
-  to { transform: none; }
-}
+/* 进出场都用 transition，**不用 keyframes**：动画一旦被移除，元素会立刻回到底位（实测手快时
+   入场播到一半就返回 → 301px 硬跳）；而 transition 可被打断、从当前位移继续过渡。
+   「方向」靠关闭位实现：push 关闭位在右（从右侧拉入）/ pop 关闭位在左（返回时从左归位）。
+   摆位由 .sr-positioning 先瞬间完成（此时元素在屏幕外、不可见），再挂 .open 触发过渡。 */
 .sr-layer {
   position: fixed;
   inset: 0;
@@ -2115,14 +2107,22 @@ body.jm-scroll-lock { overflow: hidden; }
   pointer-events: none;
   transition: transform var(--t-page) var(--ease-emph), visibility 0s linear var(--t-page);
 }
+/* 摆位相位：禁用过渡，让元素瞬间落到该方向的关闭位（在屏幕外，不可见） */
+.sr-layer.sr-positioning {
+  transition: none !important;
+}
+/* 返回方向（从搜索层里的详情返回时）：关闭位改到左侧 → 从左侧滑入，是进入动效的反方向。
+   必须排在 .sr-layer.open 之前：两者特异度相同，靠顺序让 .open 的 transform:none 胜出
+   （打开期间 data-nav 换向不会有任何视觉副作用）。 */
+.sr-layer[data-nav="pop"] {
+  transform: translateX(-100%);
+}
 .sr-layer.open {
   transform: none;
   visibility: visible;
   pointer-events: auto;
   transition: transform var(--t-page) var(--ease-emph), visibility 0s;
 }
-.sr-layer.open[data-nav="push"] { animation: jmSrInRight var(--t-page) var(--ease-emph) backwards; }
-.sr-layer.open[data-nav="pop"] { animation: jmSrInLeft var(--t-page) var(--ease-emph) backwards; }
 .sr-head {
   display: flex;
   align-items: center;
