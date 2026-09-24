@@ -33,6 +33,7 @@ npm run build:compat && npm run e2e:compat    # 兼容包（老内核）自检�
 | `driver-history.js` | 连载详情补全书级作者/简介、足迹按「书」合并成一条、点足迹回到最后阅读的一话 |
 | `driver-reader.js` | 阅读器内弹窗：「更快的源」自动测速且弹窗不关闭、换话（标题/请求/按钮同步）、选话缓存（默认只选当前话 + 全选/反选 + 已缓存徽标 + 确认入队）；整本缓存后工具栏按钮变「已缓存」且 disabled |
 | `driver-paid.js` | 付费漫画购买闭环：购买前显示应付 JCoin、点购买发 `POST /coin_buy_comics`、**购买成功后动作行刷新为正常详情页（`立即阅读` + `收藏`）**、返回列表重进依旧已解锁。桩 `aid=70001`：购买前 `purchased=false`、购买后 `purchased="0"`（官方语义里"已购"的形态，见 docs/32） |
+| `driver-entry.js` | 进入详情页的转场：① 搜索层 → 详情时，搜索层与详情页必须在 VT 期间**瞬间到位**（否则 VT 的"新快照"抓到"搜索层仍盖着屏幕"的中间态 → 读者看不到详情推入，观感"不丝滑"）；② 在搜索层**连点两张卡片**后只按一次返回必须回到搜索层（否则等于多压了一层详情 → "点多了错乱"）；顺带记录 rAF 帧耗时会话值（>32ms 帧数） |
 | `driver-legacy.js` | 兼容包自检：断言 `System` 已加载、`__vite_is_modern_browser` 未置位、React 已挂载、首页列表渲染出来 |
 | `driver-srloop.js` | 搜索层列表稳定性：反复「点同一个漫画 → 返回」后，文档不许出现横向溢出（`scrollWidth ≤ clientWidth`）、视口宽度与卡片宽度不许漂移。守的是 2026-09-24 真机那个"卡片越来越大、每次跳一下"：返回时给详情页加 `translateX(+24%)` 会让非 fixed 元素向右伸出视口 → `scrollWidth` 变大 → 移动端视口被撑宽 → `inset:0` 的搜索层跟着变宽 → 卡片等比变大（自我放大） |
 | `compat.mjs` | `npm run e2e:compat` 的编排：改造 dist-compat → 起静态服务器 → 跑 driver-legacy → 清理 |

@@ -56,6 +56,12 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const navIdRef = useRef(0);
   const leavingTimerRef = useRef(0);
   /**
+   * 连点保护：一次进入动画只有 ~320ms，没播完就再点一下会「连着压两层」——
+   * 在搜索层的结果里连点两张卡片会压两层详情层，返回时先退回上一部漫画（真机"点多了还错乱"）。
+   * 从列表进入是整栈替换（幂等），不需要锁；只有「压栈」类导航用这个短锁。
+   */
+  const navLockRef = useRef(0);
+  /**
    * 活着的层 id 集合，**在派发时就同步维护**（不是渲染期镜像）。
    * 异步回包只认它：搜索层刚压入、React 还没重渲时，它的 id 已经在里面了，
    * 因此"命中缓存的秒回包"不会被误判成过期丢掉（上一版正是这里出问题 → 空骨架/内容串了）。
@@ -209,6 +215,14 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     liveIdsRef.current = new Set(st.map((s) => s.id));
   }
 
+  /** 连点保护：距上次「压栈类导航」不足 350ms 就忽略这一下（见 navLockRef 的说明） */
+  function tapLocked(): boolean {
+    const now = Date.now();
+    if (now - navLockRef.current < 350) return true;
+    navLockRef.current = now;
+    return false;
+  }
+
   /**
    * 把详情页同步到栈里「最靠上的详情层」：内容 + 评论 + 滚动位置。
    * 只有真的换了一部才动（同一部不重复拉评论），避免返回时出现"内容串了"。
@@ -287,6 +301,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   function openSpecialSearch(kind: SRKind, text: string) {
     const q = text.trim();
     if (!q) return;
+    if (tapLocked()) return; // 连点同一处标签不重复压层
     const id = ++navIdRef.current;
     const scr: SearchScreen = {
       k: "search", id, srKind: kind, text: q,
@@ -556,6 +571,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   // from="list"：从任意列表进入（整栈重置）；from="search"：从搜索层的结果点进（详情层压在搜索层之上）
   const openDetail = useCallback(async (item: AlbumSummary, from: "list" | "search" = "list") => {
+    // 从搜索层点进是「压栈」：连点两张卡片会压两层，返回时先退回上一部（错乱）。这里挡掉连点。
+    // from="list" 是整栈替换（幂等），不加锁，避免影响正常快速操作。
+    if (from === "search" && tapLocked()) return;
     if (from === "list") saveScrollTarget(window.scrollY); // 记住进入详情前列表位置
     // 乐观渲染：用列表页已有摘要立刻展示详情页，不等 API
     const snapshot = { ...item, name: item.name || "" } as unknown as AlbumDetail;

@@ -1995,6 +1995,17 @@ html[data-nav="push"]::view-transition-new(root) { animation-name: jmNavInRight;
 html[data-nav="pop"]::view-transition-old(root) { animation-name: jmNavOutRight; }
 html[data-nav="pop"]::view-transition-new(root) { animation-name: jmNavInLeft; }
 
+/* 🚨 根级 View Transition 在跑时，本应用自己的过渡必须让位（2026-09-24 真机"进入详情不丝滑"的根因）：
+   VT 的"新快照"是在 DOM 更新后立刻抓的。若此刻搜索层还在退场途中（translateX 0→100%）、
+   详情页还在回位途中（.pushed -24% → 0），新快照抓到的就是"搜索层仍盖着屏幕、详情还被压低"的中间态，
+   于是新旧两张截图几乎一样 —— 读者看不到详情推入，等 VT 结束详情才跳出来。
+   让这些元素在 VT 期间瞬间到位，动画只由 VT 承担。 */
+html[data-nav] .sr-layer,
+html[data-nav] .page-push,
+html[data-nav] .page-scrim {
+  transition: none !important;
+}
+
 /* 顶栏 / 底栏 固定在原地，不参与推拉 */
 .top-bar { view-transition-name: jm-topbar; }
 .bottom-nav { view-transition-name: jm-navbar; }

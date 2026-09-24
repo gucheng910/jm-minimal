@@ -57,6 +57,12 @@ async function main() {
       E2E_PORT: String(Number(PORT) + 6)
     });
 
+    console.log("\n==== 进入详情页的转场（快照一致性与连点）====");
+    const entry = await runNode("harness.mjs", {
+      DRIVER: "driver-entry.js",
+      E2E_PORT: String(Number(PORT) + 7)
+    });
+
     console.log("\n==== 登录态一致性（会员页 vs 详情页）====");
     const auth = await runNode("harness.mjs", {
       DRIVER: "driver-auth.js",
@@ -94,8 +100,8 @@ async function main() {
       console.log("\n==== 下拉刷新（CDP 原生触摸）====");
       ptrCode = await runNode("ptr.mjs", { E2E_PORT: String(Number(PORT) + 1) });
     }
-    if (nav || srloop || auth || cache || hist || reader || paid || ptrCode) process.exitCode = 1;
-    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，搜索层列表不溢出 " + (srloop ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，付费购买 " + (paid ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
+    if (nav || srloop || entry || auth || cache || hist || reader || paid || ptrCode) process.exitCode = 1;
+    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，搜索层列表不溢出 " + (srloop ? "✗" : "✓") + "，详情转场一致性/连点 " + (entry ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，付费购买 " + (paid ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
   } finally {
     if (server) { try { server.kill(); } catch (e) { /* 忽略 */ } }
   }
