@@ -28,40 +28,58 @@ import { hasOpenSheet } from "./core/uiLocks";
 import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
 import { bookMetaFromDetail, chapterLabel } from "./core/offlineMeta";
 import type { AlbumDetail, AlbumSummary } from "./core/types";
+import { isSearch, lastDetail, patchScreen, popScreen, pushScreen, topScreen } from "./core/navStack";
+import type { Screen, SearchScreen } from "./core/navStack";
 
 type Mode = "home" | "detail" | "reader" | "week";
 
-
-/** 特殊搜索结果层（详情页作者/标签 → 只读搜索页）的完整状态 */
-interface SRState {
-  kind: SRKind;
-  text: string;
-  items: AlbumSummary[];
-  page: number;
-  hasMore: boolean;
-  busy: boolean;
-  error: string;
-}
+/** 搜索层退场动画时长：与 --t-page 一致（弹栈后要留它挂一拍才能播完"向右滑出"） */
+const SR_EXIT_MS = 340;
 
 interface ContentViewProps { initialAction?: string }
 
 export default function ContentView({ initialAction = "" }: ContentViewProps = {}) {
   const pageMode = initialAction === "categories" ? "categories" : initialAction === "search" ? "search" : "home";
   const [mode, setMode] = useState<Mode>("home");
-  // ---- 特殊搜索结果层（页面栈语义）----
-  // 栈最多同时存在「详情页 + 搜索页」两层：
-  //   列表 → 详情A → 搜索X → 详情B，此时 B 直接返回回到 X，再返回回到 A；
-  //   但若在 B 上又点了作者/标签，则丢弃 A 与 X（相当于杀后台），栈变成「详情B + 搜索Y」。
-  const [sr, setSr] = useState<SRState | null>(null);
-  const [srOpen, setSrOpen] = useState(false);
-  const [srParent, setSrParent] = useState<AlbumDetail | null>(null);
-  const [detailFrom, setDetailFrom] = useState<"list" | "search">("list");
-  const srReqIdRef = useRef(0);
-  const srParentScrollRef = useRef(0);
+  // ---- 页面栈（导航的唯一真相）----
+  // 详情层与搜索层放进同一个栈，栈顶 = 当前屏幕，返回 = 弹一层：
+  //   列表 → 详情A → 搜索X → 详情B → 搜索Y
+  //   返回：       A  ←  X  ←  B  ←  Y        （每弹一层正好是链路上的前一屏）
+  // 因为"返回该回哪里"由栈本身回答，这里不再需要 detailFrom / srParent / srOpen 这些互相牵制的状态
+  // （上一版就是因为它们会不一致，导致真机"回错页面、搜索页内容串了"）。
+  // 纯函数与不变量见 core/navStack.ts（有单元测试守着那条返回链）。
+  const [screens, setScreens] = useState<Screen[]>([]);
+  /** 正在退场的搜索层：弹栈后还要挂一拍，才能播完"向右滑出"的退出动画 */
+  const [leaving, setLeaving] = useState<SearchScreen | null>(null);
+  /** 这次露出的方向：push=新层从右拉入 / pop=被露出的层从左归位（进入动效的反方向） */
+  const [srNavDir, setSrNavDir] = useState<"push" | "pop">("push");
+  const navIdRef = useRef(0);
+  const leavingTimerRef = useRef(0);
+  /**
+   * 活着的层 id 集合，**在派发时就同步维护**（不是渲染期镜像）。
+   * 异步回包只认它：搜索层刚压入、React 还没重渲时，它的 id 已经在里面了，
+   * 因此"命中缓存的秒回包"不会被误判成过期丢掉（上一版正是这里出问题 → 空骨架/内容串了）。
+   */
+  const liveIdsRef = useRef<Set<number>>(new Set());
+  /** 最新栈的只读镜像：只用于事件处理器里"读当前栈" */
+  const screensRef = useRef<Screen[]>([]);
+  screensRef.current = screens;
+  const top = topScreen(screens);
+  /** 顶层是搜索层 → 覆盖层开着（详情页被压在背后） */
+  const srOpen = isSearch(top);
+  const openSearchId = srOpen ? top.id : 0;
+  /** 当前该渲染的那一屏详情（栈里最靠上的详情层） */
+  const shownDetail = lastDetail(screens);
   // 详情页数据与动作：详情/评论/收藏/购买/切章/阅读器数据
   const album = useAlbumDetail({
-    // 搜索层背后的父详情若是同一部，一并刷新（避免返回时拿到旧快照）
-    onDetailChanged: (next) => setSrParent((p) => (p && next && String(p.id) === String(next.id) ? next : p)),
+    // 栈里那层详情的快照一并刷新（避免返回时拿到旧数据）
+    onDetailChanged: (next) => {
+      if (!next) return;
+      setScreens((s) => {
+        const hit = s.find((x) => x.k === "detail" && String(x.snap.id) === String(next.id));
+        return hit ? patchScreen(s, hit.id, { snap: next }) : s;
+      });
+    },
     isReaderActive: () => modeRef.current === "reader",
     onReadFail: () => setMode("detail")
   });
@@ -92,6 +110,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   // 搜索页在前台时锁住底层详情页的滚动（搜索页自带滚动容器）
   useBodyScrollLock(srOpen);
+  // 兜底：把"活层 id 集合"对齐到已提交的栈（真正的时效性靠派发时的 markLive，
+  // 这里只负责兜住冷启动 / 直接 setScreens 这类没走 markLive 的路径）
+  useEffect(() => {
+    liveIdsRef.current = new Set(screens.map((s) => s.id));
+  }, [screens]);
 
   // setting/图床配置迟到时刷新封面（例如测速兜底后才拿到 img_host）
   const [settingTick, setSettingTick] = useState(0);
@@ -159,23 +182,12 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     };
   }, [mode]);
 
-  /** 清空搜索结果层与栈记忆（离开详情页 / 回首页时调用） */
-  function clearSearchLayer() {
-    srReqIdRef.current++;
-    setSr(null);
-    setSrOpen(false);
-    setSrParent(null);
-    setDetailFrom("list");
-  }
-
-  function exitDetailToHome() {
-    // 详情 → 列表：反向推拉（详情页右移滑出，列表页回到原位并恢复滚动）
-    navTransition("pop", () => {
-      album.set(null);
-      album.leave(); // 作废仍在执行的详情请求（防止回包干扰滚动恢复）
-      clearSearchLayer();
-      setMode("home");
-    });
+  /** 清空整条页面栈（离开详情页 / 回首页 / 切到别的 tab 时调用） */
+  function clearNav() {
+    markLive([]);
+    if (leavingTimerRef.current) { window.clearTimeout(leavingTimerRef.current); leavingTimerRef.current = 0; }
+    setLeaving(null);
+    setScreens([]);
   }
 
   function exitReaderToDetail() {
@@ -192,92 +204,169 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     pushToast("JM号已复制", "ok");
   }
 
-  /** 详情页返回：父级是搜索页就先回搜索页，否则回列表 */
-  function detailBack() {
-    if (detailFrom === "search" && sr) {
-      setSrOpen(true);
-      return;
-    }
-    exitDetailToHome();
+  /** 用「接下来还在栈里的层」重建活层 id 集合（派发时同步调用；异步回包守卫只认它） */
+  function markLive(st: Screen[]) {
+    liveIdsRef.current = new Set(st.map((s) => s.id));
   }
 
-  /** 详情页作者/标签 → 打开只读搜索结果页：只保留当前详情一层，其余栈丢弃（防无限套娃） */
+  /**
+   * 把详情页同步到栈里「最靠上的详情层」：内容 + 评论 + 滚动位置。
+   * 只有真的换了一部才动（同一部不重复拉评论），避免返回时出现"内容串了"。
+   */
+  function syncDetailTo(st: Screen[]) {
+    const d = lastDetail(st);
+    if (!d) return;
+    const cur = album.detail;
+    if (cur && String(cur.id) === String(d.snap.id)) return;
+    const reqId = ++commentReqIdRef.current;
+    album.set(d.snap);
+    album.setComments(null);
+    client.getAlbumComments(d.snap.id, 1)
+      .then((c) => { if (commentReqIdRef.current === reqId) album.setComments(c); })
+      .catch(() => { /* 评论拉取失败不影响详情页 */ });
+    const y = d.scroll;
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }
+
+  /**
+   * 返回「已记回当前详情层滚动位置」的栈。
+   * 必须和随后的压栈合成**一次** setScreens：分两次派发时后一次是整数组覆盖，前一次的记录会被丢掉。
+   */
+  function withDetailScrollSaved(st: Screen[]): Screen[] {
+    if (modeRef.current !== "detail") return st;
+    const cur = lastDetail(st);
+    if (!cur) return st;
+    const y = window.scrollY;
+    return y === cur.scroll ? st : patchScreen(st, cur.id, { scroll: y });
+  }
+
+  /**
+   * 返回：弹掉栈顶一层 —— 全应用唯一的"后退"入口（返回键、详情页返回、搜索页返回都走它）。
+   *   · 弹掉详情层 → 露出下层（搜索层或列表）；
+   *   · 弹掉搜索层 → 它向右滑出（留一拍播完动画），露出它背后的详情层。
+   * 露出搜索层时方向置 pop：让它从左归位，是"进入"的反方向，而不是再"从右拉入"一次。
+   */
+  function goBack() {
+    const st = screensRef.current;
+    if (!st.length) return;
+    const { rest, popped } = popScreen(st);
+    if (!popped) return;
+
+    if (popped.k === "search") {
+      if (leavingTimerRef.current) window.clearTimeout(leavingTimerRef.current);
+      setLeaving(popped); // 挂一拍，播完"向右滑出"
+      leavingTimerRef.current = window.setTimeout(() => { setLeaving(null); leavingTimerRef.current = 0; }, SR_EXIT_MS);
+      setSrNavDir("push");
+    } else {
+      setSrNavDir("pop");
+    }
+
+    markLive(rest);
+    setScreens(rest);
+
+    if (rest.length === 0) {
+      // 栈空 = 回到底层列表
+      if (lastDetail(st) || modeRef.current === "detail") {
+        // 之前展示的是详情 → 整屏反向推拉（详情页右移滑出，列表页回到原位并恢复滚动）
+        navTransition("pop", () => {
+          album.set(null);
+          album.leave(); // 作废仍在执行的详情请求（防止回包干扰滚动恢复）
+          setMode("home");
+        });
+        setSrNavDir("push");
+      } else {
+        // 底层本来就是列表（分类页/搜索 tab 点标签打开搜索层的场景）：只让搜索层自己滑出，不叠加整屏转场
+        setMode("home");
+      }
+      return;
+    }
+    syncDetailTo(rest);
+  }
+
+  /** 详情页作者/标签 → 压入一层只读搜索结果页（压在当前详情之上） */
   function openSpecialSearch(kind: SRKind, text: string) {
     const q = text.trim();
     if (!q) return;
-    srParentScrollRef.current = window.scrollY;
-    setSrParent(album.detail);
-    setDetailFrom("list"); // 杀后台：背后详情页的父级改为主页（再返回即回首页）
-    const reqId = ++srReqIdRef.current;
-    setSr({ kind, text: q, items: [], page: 1, hasMore: false, busy: true, error: "" });
-    setSrOpen(true);
-    void loadSRPage(q, kind, 1, reqId);
+    const id = ++navIdRef.current;
+    const scr: SearchScreen = {
+      k: "search", id, srKind: kind, text: q,
+      items: [], page: 1, hasMore: false, busy: true, error: ""
+    };
+    const next = pushScreen(withDetailScrollSaved(screensRef.current), scr);
+    markLive(next); // 先登记 id 再发请求：命中缓存的秒回包不会被误判成过期
+    setScreens(next);
+    setSrNavDir("push");
+    void loadSrPage(id, q, kind, 1);
   }
 
-  async function loadSRPage(q: string, kind: SRKind, p: number, reqId = srReqIdRef.current) {
+  /**
+   * 回填某一层搜索结果。守卫用 liveIdsRef（**派发时**登记，不依赖渲染时机）：
+   * 该层已被弹掉/被深度裁掉 → 回包丢弃，绝不串到别的层。
+   */
+  async function loadSrPage(id: number, q: string, kind: SRKind, p: number) {
     if (!client.apiBase) {
       try { await client.init(); } catch { /* 静默：详情页摘要仍可看 */ }
     }
+    if (!liveIdsRef.current.has(id)) return;
     try {
       const r = await client.search(q, p, 0, KIND_META[kind].searchType);
-      if (srReqIdRef.current !== reqId) return; // 已换词/已关闭，丢弃过期回包
+      if (!liveIdsRef.current.has(id)) return;
       const content = r.content || [];
       const total = Number(r.total || 0);
-      setSr((s) => {
-        if (!s) return s;
-        const items = p > 1 ? [...s.items, ...content] : content;
+      setScreens((s) => {
+        const cur = s.find((x) => x.id === id);
+        if (!cur || cur.k !== "search") return s;
+        const items = p > 1 ? [...cur.items, ...content] : content;
         // content 为空即到底：避免服务端重复返回同一页时无限滚动打转
         const hasMore = content.length > 0 && items.length < total;
-        return { ...s, items, page: p, hasMore, busy: false, error: "" };
+        return patchScreen(s, id, { items, page: p, hasMore, busy: false, error: "" });
       });
     } catch (err) {
-      if (srReqIdRef.current !== reqId) return;
+      if (!liveIdsRef.current.has(id)) return;
       const msg = String(err).slice(0, 140);
-      setSr((s) => (s ? { ...s, busy: false, error: msg } : s));
+      setScreens((s) => patchScreen(s, id, { busy: false, error: msg }));
     }
   }
 
-  function loadMoreSR() {
-    if (!sr || sr.busy || !sr.hasMore) return;
-    setSr((s) => (s ? { ...s, busy: true } : s));
-    void loadSRPage(sr.text, sr.kind, sr.page + 1);
+  /** 某一层滚到底：续它自己的下一页 */
+  function loadMoreSr(id: number) {
+    const cur = screensRef.current.find((s) => s.id === id);
+    if (!cur || cur.k !== "search" || cur.busy || !cur.hasMore) return;
+    setScreens((s) => patchScreen(s, id, { busy: true }));
+    void loadSrPage(id, cur.text, cur.srKind, cur.page + 1);
   }
 
-  /** 关闭搜索页 → 回到它背后的详情页；若中途从结果点进过别的详情，恢复原来那部并刷新评论 */
-  function closeSearch() {
-    setSrOpen(false);
-    const back = srParent;
-    if (back && (!album.detail || String(back.id) !== String(album.detail.id))) {
-      const reqId = ++commentReqIdRef.current;
-      album.set(back);
-      album.setComments(null);
-      client.getAlbumComments(back.id, 1)
-        .then((c) => { if (commentReqIdRef.current === reqId) album.setComments(c); })
-        .catch(() => { /* 评论拉取失败不影响详情页 */ });
-      const y = srParentScrollRef.current;
-      requestAnimationFrame(() => window.scrollTo(0, y));
-    }
-    setDetailFrom("list");
-  }
+  // 返回键处理器要"只注册一次"，因此它的三个动作走 ref 镜像（见下方注释）
+  const goBackRef = useRef(goBack);
+  goBackRef.current = goBack;
+  const exitReaderRef = useRef(exitReaderToDetail);
+  exitReaderRef.current = exitReaderToDetail;
+  const weekRef = useRef(week);
+  weekRef.current = week;
 
+  /**
+   * 返回键：**只注册一次**（依赖为空）。
+   * 本文件开头那段注释写明 `jm:back` 是按监听器注册顺序派发的，一旦因依赖变化重注册，顺序就会乱
+   * （真机踩过：父级先消费 → 直接退出阅读器）。上一版把栈塞进了依赖，等于每次压/弹层都重注册，
+   * 正是"返回时回错页面"的来源之一。所以这里全部通过 ref 读最新状态。
+   */
   useBackHandler(() => {
     // 阅读器内弹窗开着时不要消费返回键（由阅读器自己关弹窗）
     if (hasOpenSheet()) return false;
-    if (srOpen) {
-      closeSearch();
-    } else if (mode === "reader") {
+    const m = modeRef.current;
+    if (m === "reader") {
       client.finishFastTrack();
-      exitReaderToDetail();
-    } else if (mode === "detail") {
-      detailBack();
-    } else if (mode === "week") {
-      week.reset();
+      exitReaderRef.current();
+    } else if (m === "week") {
+      weekRef.current.reset();
       setMode("home");
+    } else if (screensRef.current.length > 0) {
+      goBackRef.current(); // 返回 = 弹一层，全应用唯一入口
     } else {
       // home 等其他模式不消费返回键，让 App.tsx 处理两次返回退出
       return false;
     }
-  }, [mode, srOpen, detailFrom, sr, srParent, album.detail]);
+  }, []);
 
   // 搜索 tab 挂载时：读搜索记录 + 拉热词（逻辑在 useSearchFeed 内）
   useEffect(() => {
@@ -334,7 +423,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       // 底部“首页”再次点击：从详情/阅读退回列表并刷新首页推荐
       albumRef.current.setRead(null);
       albumRef.current.set(null);
-      clearSearchLayer();
+      clearNav();
       albumRef.current.setComments(null);
       setMode("home");
       window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
@@ -427,6 +516,9 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         if (aid) {
           const d = await client.getAlbumFull(aid);
           if (alive && d) {
+            const id = ++navIdRef.current;
+            liveIdsRef.current = new Set([id]);
+            setScreens([{ k: "detail", id, snap: d, scroll: 0 }]);
             albumRef.current.set(d);
             setMode("detail");
             albumRef.current.setComments(null);
@@ -452,7 +544,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     // 与底部导航点击「首页」时的刷新逻辑完全一致（复用 jm:refreshHome 事件）
     album.setRead(null);
     album.set(null);
-    clearSearchLayer();
+    clearNav();
     album.setComments(null);
     setMode("home");
     window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
@@ -462,7 +554,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     else void home.loadRandom();
   }
 
-  // from="list"：从任意列表进入（重置页面栈）；from="search"：从搜索结果页点进（背后保留搜索页）
+  // from="list"：从任意列表进入（整栈重置）；from="search"：从搜索层的结果点进（详情层压在搜索层之上）
   const openDetail = useCallback(async (item: AlbumSummary, from: "list" | "search" = "list") => {
     if (from === "list") saveScrollTarget(window.scrollY); // 记住进入详情前列表位置
     // 乐观渲染：用列表页已有摘要立刻展示详情页，不等 API
@@ -470,17 +562,19 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     let reqId = 0;
     const enterDetail = () => {
       reqId = album.begin(snapshot); // 乐观快照 + 作废旧请求
-      setDetailFrom(from);
+      const scr: Screen = { k: "detail", id: ++navIdRef.current, snap: snapshot, scroll: 0 };
       if (from === "list") {
-        // 从列表进入 = 页面栈重置，搜索结果层作废
-        srReqIdRef.current++;
-        setSr(null);
-        setSrOpen(false);
-        setSrParent(null);
+        // 从列表进入 = 整栈重置为这一屏详情
+        markLive([scr]);
+        setLeaving(null);
+        setScreens([scr]);
       } else {
-        // 从搜索结果页点进：关闭搜索层（滑出动画）
-        setSrOpen(false);
+        // 从搜索层的结果点进：详情层压上去，返回先回到那个搜索层（它仍在栈里）
+        const next = pushScreen(withDetailScrollSaved(screensRef.current), scr);
+        markLive(next);
+        setScreens(next);
       }
+      setSrNavDir("push");
       setMode("detail");
       // 详情页真正渲染出来的这一刻通知外壳：可以把收藏/足迹浮层藏到后面了。
       // 不能在点击瞬间就藏 —— 那 120ms 里详情还没出来，中间会先露一下主页。
@@ -519,27 +613,34 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
 
   /**
    * 只读搜索层：详情页的作者/标签/登场人物、分类页「更多分类」里点的词，都走它。
-   * 固定定位（.sr-layer 是 fixed），所以可以盖在任何页面之上——不再只挂在详情页分支里。
+   * 栈里**每一层都挂载**（各自保有滚动位置与已加载分页，返回时不丢位置），只有栈顶那层是 open；
+   * 正在退场的那层（leaving）也挂一拍，用来播完"向右滑出"。层级按栈序用 z-index 递增。
    */
+  const overlays: SearchScreen[] = [];
+  for (const s of screens) if (s.k === "search") overlays.push(s);
+  if (leaving) overlays.push(leaving);
   const searchLayer = (
     <>
       <div className={"page-scrim" + (srOpen ? " on" : "")} aria-hidden="true" />
-      {sr && (
+      {overlays.map((s, i) => (
         <SearchResultPage
-          open={srOpen}
-          kind={sr.kind}
-          text={sr.text}
-          items={sr.items}
-          busy={sr.busy}
-          error={sr.error}
-          hasMore={sr.hasMore}
-          resetKey={sr.kind + ":" + sr.text}
+          key={"sr" + s.id}
+          open={s.id === openSearchId}
+          navDir={srNavDir}
+          zIndex={200 + i}
+          kind={s.srKind}
+          text={s.text}
+          items={s.items}
+          busy={s.busy}
+          error={s.error}
+          hasMore={s.hasMore}
+          resetKey={s.srKind + ":" + s.text + ":" + s.id}
           coverTick={settingTick}
-          onBack={closeSearch}
+          onBack={goBack}
           onOpenAlbum={openAlbumFromSearch}
-          onLoadMore={loadMoreSR}
+          onLoadMore={() => loadMoreSr(s.id)}
         />
-      )}
+      ))}
     </>
   );
 
@@ -565,12 +666,12 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     );
   }
 
-  if (mode === "detail" && album.detail) {
+  if (mode === "detail" && shownDetail && album.detail) {
     return (
       <>
       {/* key 必须固定：否则 React 会把首页列表的 DOM 节点（含下拉刷新指示器）复用成本卡片，
           下拉刷新遗留的 180ms 定时器随后把 display:none 打到详情页上 → 白屏 */}
-      <div key="detail-page" className={"page-push" + (srOpen ? " pushed" : "")} aria-hidden={srOpen}>
+      <div key="detail-page" className={"page-push" + (srOpen ? (srNavDir === "pop" ? " pushed-pop" : " pushed") : "")} aria-hidden={srOpen}>
       <AlbumDetailPage
         detail={album.detail}
         logged={logged}
@@ -580,8 +681,8 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         commentHasMore={album.commentsHasMore}
         commentLoadingMore={album.commentsLoadingMore}
         commentText={album.commentText}
-        backLabel={detailFrom === "search" && sr ? "返回搜索结果" : "返回列表"}
-        onBack={detailBack}
+        backLabel={isSearch(screens[screens.length - 2] ?? null) ? "返回搜索结果" : "返回列表"}
+        onBack={goBack}
         onCopyId={copyJmId}
         onOpenAuthor={(a) => openSpecialSearch("author", a)}
         onOpenTag={(t) => openSpecialSearch("tag", t)}

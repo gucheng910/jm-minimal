@@ -2040,6 +2040,13 @@ html[data-nav="pop"]::view-transition-new(root) { animation-name: jmNavInLeft; }
   opacity: 0.55;
   pointer-events: none;
 }
+/* 返回时（露出下层搜索层）：详情页向**右**退，与"搜索层从左归位"一起构成进入动效的完整镜像。
+   进入时是详情页向左退 + 搜索层从右来；返回时两者方向同时反过来，读者看到的才是"返回"。 */
+.page-push.pushed-pop {
+  transform: translateX(24%);
+  opacity: 0.55;
+  pointer-events: none;
+}
 .page-scrim {
   position: fixed;
   inset: 0;
@@ -2072,6 +2079,18 @@ body.jm-scroll-lock { overflow: hidden; }
 }
 
 /* 搜索结果层（自身是滚动容器，与详情页的 window 滚动互不干扰） */
+/* 入场用 keyframes（施加即播）：push=从右拉入 / pop=从左归位（从搜索层里的详情返回时用，
+   是进入动效的反方向）。之所以不用"先把关闭位摆到某一侧、下一帧再加 .open"的 transition 时序技巧：
+   那种做法依赖元素上一帧的计算值，会被上一次尚未播完的关闭过渡干扰，方向不稳。
+   fill 用 backwards（不是 both）：动画结束后交回 .open 的 transform:none，退出仍是干净的 transition。 */
+@keyframes jmSrInRight {
+  from { transform: translateX(100%); }
+  to { transform: none; }
+}
+@keyframes jmSrInLeft {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}
 .sr-layer {
   position: fixed;
   inset: 0;
@@ -2092,6 +2111,8 @@ body.jm-scroll-lock { overflow: hidden; }
   pointer-events: auto;
   transition: transform var(--t-page) var(--ease-emph), visibility 0s;
 }
+.sr-layer.open[data-nav="push"] { animation: jmSrInRight var(--t-page) var(--ease-emph) backwards; }
+.sr-layer.open[data-nav="pop"] { animation: jmSrInLeft var(--t-page) var(--ease-emph) backwards; }
 .sr-head {
   display: flex;
   align-items: center;

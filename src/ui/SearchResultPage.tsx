@@ -2,8 +2,9 @@
 // 设计约束（与 ContentView 的页面栈配套）：
 //   - 搜索词不可修改，只能返回；仅结果卡片可点击进入详情页；
 //   - 由父级通过 open 控制进出场，组件保持挂载以保留滚动位置与已加载分页；
-//   - 翻页用无限滚动（IntersectionObserver + 自身滚动容器）。
-import { memo, useEffect, useRef, useState } from "react";
+//   - 栈里每一层都是独立实例（各自保有滚动与分页），只有栈顶那层 open；
+//   - 进入用 CSS keyframes（施加即播，方向由 data-nav 决定），退出用 transition 向右滑出。
+import { memo, useEffect, useRef } from "react";
 import { AlbumGrid } from "./AlbumGrid";
 import { scrollToTop } from "../core/dom";
 import { SkeletonGrid } from "./SkeletonGrid";
@@ -21,6 +22,16 @@ export const KIND_META: Record<SRKind, { label: string; searchType: string }> = 
 interface Props {
   /** 是否在前台（false 时保持在 DOM 中但不可见/不可点，用于出场动画与滚动位置保留） */
   open: boolean;
+  /**
+   * 这次「进入」的方向，只决定入场动画：
+   *   · "push"（默认）：从右侧拉入（由详情/列表进入搜索层）；
+   *   · "pop"：从左侧归位 —— 从搜索层里的详情返回时用，是进入动效的**反方向**，
+   *     读者看到的才是"返回"，而不是"又被从右边拉进来一次"。
+   * 退出一律向右滑出（关闭这个面板的方向），由 CSS transition 负责。
+   */
+  navDir?: "push" | "pop";
+  /** 层叠顺序：栈里越靠上的搜索层给的越大（都是 fixed 定位，靠它排先后） */
+  zIndex?: number;
   kind: SRKind;
   text: string;
   items: AlbumSummary[];
@@ -38,6 +49,8 @@ interface Props {
 
 export const SearchResultPage = memo(function SearchResultPage({
   open,
+  navDir = "push",
+  zIndex,
   kind,
   text,
   items,
@@ -50,23 +63,12 @@ export const SearchResultPage = memo(function SearchResultPage({
   onOpenAlbum,
   onLoadMore
 }: Props) {
-  // 进场：先以「关闭态」挂载，下一帧加 .open 触发从右侧滑入（React 挂载即带 .open 不会播动画）
-  const [entered, setEntered] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const loadMoreRef = useRef(onLoadMore);
   loadMoreRef.current = onLoadMore;
 
-  useEffect(() => {
-    if (!open) { setEntered(false); return; }
-    // 双 rAF：第一帧让浏览器把「关闭态（translateX(100%)）」真正绘制出来，
-    // 第二帧再加 .open —— 单 rAF 时 React 会在同一帧内完成挂载+改类，过渡不会触发（表现为"没有动画"）。
-    let id2 = 0;
-    const id1 = requestAnimationFrame(() => { id2 = requestAnimationFrame(() => setEntered(true)); });
-    return () => { cancelAnimationFrame(id1); if (id2) cancelAnimationFrame(id2); };
-  }, [open]);
-
-  // 换搜索词：回到顶部（同一个组件实例复用，不会重新挂载）
+  // 换搜索词/首次挂载：回到顶部
   // 走 scrollToTop：老内核（WebView < 61）连 Element.scrollTo 方法都没有，直接调会抛错冒到错误边界
   useEffect(() => { scrollToTop(bodyRef.current); }, [resetKey]);
 
@@ -86,7 +88,12 @@ export const SearchResultPage = memo(function SearchResultPage({
   const label = KIND_META[kind].label;
 
   return (
-    <section className={"sr-layer" + (entered ? " open" : "")} aria-hidden={!open}>
+    <section
+      className={"sr-layer" + (open ? " open" : "")}
+      data-nav={navDir}
+      style={zIndex != null ? { zIndex } : undefined}
+      aria-hidden={!open}
+    >
       <header className="sr-head">
         <button className="sr-back" aria-label="返回" onClick={onBack}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

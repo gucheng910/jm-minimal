@@ -256,6 +256,7 @@
   await waitFor(".page-push .card h2");
   await sleep(500);
   snap("detailA");
+  const titleA = (q(".page-push h2") || {}).textContent || "";
   log.push({ step: "links", texts: qa(".page-push .link").map((l) => l.textContent) });
 
   clickLink("巨乳");
@@ -269,23 +270,56 @@
   await sleep(600);
   snap("detailB");
 
-  back(); await sleep(700); snap("backToSearchX");
-  back(); await sleep(800); snap("backToDetailA");
-  back(); await sleep(700); snap("backToHome");
+  back(); await sleep(700);
+  if (!q(".sr-layer.open") || ((q(".sr-title h2") || {}).textContent || "").indexOf("巨乳") === -1) {
+    throw new Error("从搜索层里的详情返回，没有回到那个搜索层：" + JSON.stringify((q(".sr-title h2") || {}).textContent || ""));
+  }
+  snap("backToSearchX");
+  back(); await sleep(800);
+  if (!q(".page-push") || ((q(".page-push h2") || {}).textContent || "") !== titleA) {
+    throw new Error("从搜索层返回没有回到原来的详情：" + JSON.stringify((q(".page-push h2") || {}).textContent || ""));
+  }
+  snap("backToDetailA");
+  back(); await sleep(700);
+  if (q(".page-push") || q(".sr-layer.open")) throw new Error("详情页返回没有回到列表");
+  snap("backToHome");
 
+  // ---- 第二次搜索：真·页面栈（不再是"杀后台"）----
+  // 列表 → 详情A → 搜索X(巨乳) → 详情B → 搜索Y(無修正)
+  // 返回链必须是：Y → B → X → A → 列表（上一版在这里会回错页面/内容串了，故这里必须断言）
   q(".list-item").click();
   await waitFor(".page-push .card h2"); await sleep(400);
+  const titleA2 = (q(".page-push h2") || {}).textContent || "";
   clickLink("巨乳");
   await waitFor(".sr-layer.open"); await sleep(500);
   qa(".sr-body .list-item")[0].click();
-  await waitFor(".page-push .card h2"); await sleep(500);
+  await waitFor(".page-push .card h2"); await sleep(600);
+  const titleB = (q(".page-push h2") || {}).textContent || "";
   snap("detailB2");
   clickLink("無修正");
   await waitFor(".sr-layer.open"); await sleep(600);
-  snap("searchY_kill");
-  log.push({ step: "req-after-kill", last: window.__reqs[window.__reqs.length - 1] });
-  back(); await sleep(700); snap("backToDetailB");
-  back(); await sleep(700); snap("backToHome2");
+  snap("searchY_stack");
+  log.push({ step: "req-after-second-tag", last: window.__reqs[window.__reqs.length - 1] });
+
+  const srTitleNow = () => ((q(".sr-layer.open .sr-title h2") || {}).textContent || "");
+  const detailTitleNow = () => ((q(".page-push h2") || {}).textContent || "");
+  const expectSearch = (want, where) => {
+    const t = srTitleNow();
+    if (t.indexOf(want) === -1) throw new Error("返回落点不对（" + where + "）：期望搜索页含「" + want + "」，实际 " + JSON.stringify(t));
+  };
+  const expectDetail = (want, where) => {
+    if (!q(".page-push")) throw new Error("返回落点不对（" + where + "）：期望详情页，实际不在详情页");
+    const t = detailTitleNow();
+    if (want && t !== want) throw new Error("返回落点不对（" + where + "）：期望详情「" + want + "」，实际 " + JSON.stringify(t));
+  };
+  if (srTitleNow().indexOf("無修正") === -1) throw new Error("第二次标签搜索没有打开新搜索层：" + JSON.stringify(srTitleNow()));
+
+  back(); await sleep(800); expectDetail(titleB, "Y→B"); snap("backToDetailB");
+  back(); await sleep(800); expectSearch("巨乳", "B→X"); snap("backToSearchX2");
+  back(); await sleep(800); expectDetail(titleA2, "X→A"); snap("backToDetailA2");
+  back(); await sleep(900);
+  if (q(".page-push") || q(".sr-layer.open")) throw new Error("最后一次返回没有回到列表（仍在 " + (q(".page-push") ? "详情" : "搜索层") + "）");
+  snap("backToHome2");
 
   // ---- 阅读器：详情 → 立即阅读 → 返回详情（startRead 已迁入 useAlbumDetail）----
   q(".list-item").click();
