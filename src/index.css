@@ -2040,13 +2040,12 @@ html[data-nav="pop"]::view-transition-new(root) { animation-name: jmNavInLeft; }
   opacity: 0.55;
   pointer-events: none;
 }
-/* 返回时（露出下层搜索层）：详情页向**右**退，与"搜索层从左归位"一起构成进入动效的完整镜像。
-   进入时是详情页向左退 + 搜索层从右来；返回时两者方向同时反过来，读者看到的才是"返回"。 */
-.page-push.pushed-pop {
-  transform: translateX(24%);
-  opacity: 0.55;
-  pointer-events: none;
-}
+/* 注意：这里**不能**给返回方向做"详情页向右退"（translateX(+24%)）。
+   详情页是非 fixed 元素，向右伸出视口会增加文档的横向 scrollWidth → 移动端视口被撑宽
+   （innerWidth 420→441…）→ inset:0 的搜索层跟着变宽 → 网格列宽变大、卡片等比变大，
+   而且视口变宽又让这个 +24% 更大，形成自我放大（2026-09-24 真机"卡片越来越大、每次跳一下"）。
+   向左退则不会：LTR 下左侧溢出不计入 scrollWidth。
+   「返回」的方向感由搜索层自己从左侧归位（jmSrInLeft）承担。 */
 .page-scrim {
   position: fixed;
   inset: 0;

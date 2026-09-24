@@ -671,7 +671,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
       <>
       {/* key 必须固定：否则 React 会把首页列表的 DOM 节点（含下拉刷新指示器）复用成本卡片，
           下拉刷新遗留的 180ms 定时器随后把 display:none 打到详情页上 → 白屏 */}
-      <div key="detail-page" className={"page-push" + (srOpen ? (srNavDir === "pop" ? " pushed-pop" : " pushed") : "")} aria-hidden={srOpen}>
+      <div key="detail-page" className={"page-push" + (srOpen ? " pushed" : "")} aria-hidden={srOpen}>
       <AlbumDetailPage
         detail={album.detail}
         logged={logged}
