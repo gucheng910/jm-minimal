@@ -574,7 +574,14 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
     // 从搜索层点进是「压栈」：连点两张卡片会压两层，返回时先退回上一部（错乱）。这里挡掉连点。
     // from="list" 是整栈替换（幂等），不加锁，避免影响正常快速操作。
     if (from === "search" && tapLocked()) return;
-    if (from === "list") saveScrollTarget(window.scrollY); // 记住进入详情前列表位置
+    // 记住"进入详情前列表停在哪"，返回时恢复。
+    // 🚨 必须判 mode === "home"：from="list" 只说明"这次不做压栈叠加"，
+    // 并不代表此刻屏幕上就是列表 —— 详情页的「相关漫画」(ContentView 的 onOpenRelated) 也走 from="list"，
+    // 那一刻的 window.scrollY 是**详情页**的滚动量；若存进去，返回列表时就会把列表滚到那个值
+    // （真机表现："进入详情后返回，外面的列表自己滚动/跳位"，2026-09-24 用 driver-scrollleak 复现）。
+    // mode === "home" 恰好等价于"底部那个基础列表分支正在显示"（首页 / 分类 / 搜索 tab 都是 home），
+    // 同时也排除了周榜页（mode === "week"）这个同类污染源。
+    if (from === "list" && modeRef.current === "home") saveScrollTarget(window.scrollY);
     // 乐观渲染：用列表页已有摘要立刻展示详情页，不等 API
     const snapshot = { ...item, name: item.name || "" } as unknown as AlbumDetail;
     let reqId = 0;
