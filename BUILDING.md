@@ -63,8 +63,8 @@
 
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
-| PC + 前端 | package.json → version | 2.2.4 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 2.2.4 / versionCode 72 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| PC + 前端 | package.json → version | 2.2.5 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
+| Android | android/app/build.gradle → defaultConfig | versionName 2.2.5 / versionCode 73 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
 > ⚠️ **现值以本表为准**：package.json `2.1.0` / build.gradle `2.1.0` + `versionCode 64`。
 > （2026-09-13 修正：这里原来残留着 "现值 = 1.8.1 / versionCode 48"，与正上方的表格自相矛盾，
