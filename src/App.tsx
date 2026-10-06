@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { FormEvent } from "react";
 import { App as CapApp } from "@capacitor/app";
+import type { PluginListenerHandle } from "@capacitor/core";
+import { isAndroid, isNativeApp, hasPlugin, DNS_HINT, BACK_GESTURE, isBackSwipe } from "./core/platform";
+import type { TouchPoint } from "./core/platform";
 import { client } from "./core/api";
 import { sessionStore } from "./core/storage";
 import { BookIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, SearchIcon, UserIcon } from "./ui/icons";
@@ -41,10 +44,10 @@ interface DemoState {
   msg: string;
 }
 
-/** 把原始错误字符串转成用户友好提示；网络类错误附加"去配 DNS"建议 */
+/** 把原始错误字符串转成用户友好提示；网络类错误附加"去配 DNS"建议（分平台文案，见 core/platform） */
 function friendlyError(raw: string): string {
   if (/[network]|[timeout]|fetch failed|Failed to fetch|network/i.test(raw)) {
-    return "网络连接失败 · 请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS，配置后需删除后台重新进入 App 使设置生效，再重试（若仍失败可尝试切换线路）";
+    return "网络连接失败 · " + DNS_HINT;
   }
   return raw;
 }
@@ -108,7 +111,7 @@ export default function App() {
     setGateBusy(false);
     setAgeGate(false);
     if (!speedOk) {
-      pushToast("线路/DNS 连接失败，建议到会员页「DNS 加速」配置 DoT，配置后删除后台重进生效", "err", "goto-dns");
+      pushToast("线路/DNS 连接失败，" + DNS_HINT, "err", "goto-dns");
     }
   }
   const [showSource, setShowSource] = useState(false);
@@ -296,28 +299,100 @@ export default function App() {
     setMenuOpen(false);
   }, []);
 
-  useEffect(() => {
-    const sub = CapApp.addListener("backButton", async () => {
-      console.log("jm back native pressed");
-      const back = { consumed: false };
-      emit("jm:back", back);
-      if (back.consumed) return;
-      if (tab !== "home") {
-        setTab("home");
-        window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
-        return;
-      }
-      const now = Date.now();
-      if (now - lastBackRef.current < 2500) {
-        await CapApp.exitApp();
+  /**
+   * 返回动作的唯一实现：Android 的硬件/手势返回键 与 左缘侧滑 都走这里。
+   * 逻辑与重构前逐字一致（先派发 jm:back 让上层消费 → 非首页回首页 → 2500ms 内二次返回才退出）。
+   */
+  const handleBack = useCallback(async () => {
+    const back = { consumed: false };
+    emit("jm:back", back);
+    if (back.consumed) return;
+    if (tab !== "home") {
+      setTab("home");
+      window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
+      return;
+    }
+    const now = Date.now();
+    if (now - lastBackRef.current < 2500) {
+      // 能不能"退出 App"由**插件有没有实现**决定，不按平台名判断：
+      // exitApp 在 Android / iOS 都有实现，Web 没有（调用会 reject）。
+      // 这样又多消掉一处 isAndroid()/isIos() 分叉（分叉越少越不容易出现两端行为不一致）。
+      if (hasPlugin("App")) {
+        try {
+          await CapApp.exitApp();
+        } catch { /* 无实现：当普通 Web 处理 */ }
       } else {
-        lastBackRef.current = now;
-        setBackHint(true);
-        setTimeout(() => setBackHint(false), 2200);
+        lastBackRef.current = 0;
+        setBackHint(false);
       }
-    });
-    return () => { sub.then((l) => l.remove()); };
+    } else {
+      lastBackRef.current = now;
+      setBackHint(true);
+      setTimeout(() => setBackHint(false), 2200);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  useEffect(() => {
+    // 🚨 只在 Android 注册：@capacitor/app 的 **iOS 实现里根本没有 backButton 事件**
+    // （AppPlugin.swift 只有 exitApp/getInfo/getAppLanguage/getLaunchUrl/getState/minimizeApp/
+    //   toggleBackButtonHandler）。在 iOS 上注册它会 reject("not implemented")，
+    // 而 main.tsx 的全局 unhandledrejection 兜底会把它渲染成页面底部的红色「Promise错误」条幅 ——
+    // 每次进出 App 一次。iOS 本来也没有硬件返回键（返回交互见下面的左缘侧滑）。
+    if (!isAndroid() || !hasPlugin("App")) return;
+    let handle: PluginListenerHandle | null = null;
+    let alive = true;
+    const removed = new Set<unknown>();
+    const safeRemove = (h: unknown) => {
+      if (!alive || !h || removed.has(h)) return;
+      removed.add(h);
+      try { void Promise.resolve((h as { remove?: () => Promise<void> }).remove?.()).catch(() => { /* 无实现：静默 */ }); }
+      catch { /* 同步抛出：静默 */ }
+    };
+    CapApp.addListener("backButton", () => { void handleBack(); })
+      .then((h) => { if (!alive) safeRemove(h); else handle = h; })
+      .catch(() => { /* 平台无实现：忽略 */ });
+    return () => {
+      alive = false;
+      safeRemove(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleBack]);
+
+  /**
+   * 左缘侧滑返回。为什么必须自己实现（并且不该只在 iOS 上跑）：
+   *   · iOS 没有硬件返回键；WKWebView 的 history 侧滑只对 pushState 栈有效，而本项目是
+   *     单页 + 自绘抽屉/浮层（navStack 自管），系统侧滑不会触发任何东西；
+   *   · 抽屉/阅读器/CacheCenter 都靠 jm:back 逐层消费，没有手势 = 用户只能杀 App。
+   * **Android 也挂同一套**（它有硬件返回键，这个手势只是顺带；两边同一份规则可以避免
+   * "只在某一端生效"的分叉）。判定逻辑抽在 core/platform 的 isBackSwipe 里，有单测覆盖。
+   */
+  useEffect(() => {
+    if (!isNativeApp()) return; // 浏览器里左缘拖拽是系统手势（返回上一页），别抢
+    let start: TouchPoint | null = null;
+    const onStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      // 起手不在左缘就丢弃（后续的判定也兜一层，见 isBackSwipe）
+      start = t && t.clientX <= BACK_GESTURE.edgePx ? { clientX: t.clientX, clientY: t.clientY } : null;
+    };
+    const onEnd = (e: TouchEvent) => {
+      const from = start;
+      start = null;
+      const t = e.changedTouches[0];
+      if (!from || !t) return;
+      if (isBackSwipe(from, { clientX: t.clientX, clientY: t.clientY })) void handleBack();
+    };
+    const onCancel = () => { start = null; };
+    document.addEventListener("touchstart", onStart, { passive: true, capture: true });
+    document.addEventListener("touchend", onEnd, { passive: true, capture: true });
+    document.addEventListener("touchcancel", onCancel, { passive: true, capture: true });
+    return () => {
+      document.removeEventListener("touchstart", onStart, { capture: true });
+      document.removeEventListener("touchend", onEnd, { capture: true });
+      document.removeEventListener("touchcancel", onCancel, { capture: true });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleBack]);
 
   function patch(p: Partial<DemoState>) { setState((s) => ({ ...s, ...p })); }
 

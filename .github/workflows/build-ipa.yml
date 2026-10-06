@@ -1,0 +1,164 @@
+name: Build iOS (unsigned IPA)
+
+# iOS 出包必须在 macOS + Xcode 上做（Capacitor 8 要求 Xcode ≥ 26），Windows 上连
+# `npx cap add ios` 生成的工程都编不出包。公开仓库的 macOS runner 是**免费**的（没有倍率），
+# 所以这里用 workflow_dispatch 手动触发，出 unsigned IPA。
+#
+# ⚠ 版本号规则（很重要，别绕）：
+#   ipa 里写进去的版本号 = 触发这次构建时 package.json 的 version。
+#   而 iOS 侧的"检查更新"是按 GitHub Release 的 tag 比大小的，所以
+#   **tag 的版本号必须与 package.json 一致**，否则会出现"App 里有新版但检查不到"或反之。
+#   正常流程：tools/release.mjs <ver> 会先同步版本号并推送 tag → 再手动跑本 workflow 选那个 tag。
+#
+# 产物命名 jm-minimal-ios-<ver>.ipa —— 与 tools/release.mjs 的资产命名约定（jm-minimal-<平台>-<版本>）
+# 保持一致，README 的下载表也按这个加行。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "挂到哪个 Release（留空=用 package.json 的版本自动拼 v<ver>，不存在则新建）"
+        required: false
+        default: ""
+      skip_release:
+        description: "只当 CI 产物（不传 GitHub Release）"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    # Capacitor 8 要 Xcode ≥ 26；macos-26 镜像自带 Xcode 26.6 / Node 24 / SPM
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: 解析版本号与 tag
+        id: meta
+        run: |
+          set -euo pipefail
+          VER=$(node -p "require('./package.json').version")
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="v$VER"; fi
+          case "$TAG" in v*) TV="${TAG#v}";; *) TV="$TAG";; esac
+          if [ "$TV" != "$VER" ]; then
+            echo "::error::tag 版本（$TV）与 package.json（$VER）不一致 —— ipa 内嵌版本会与 tag 对不上，App 内的检查更新会错。先把 package.json 升到 $TV 再构建。"
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Web 构建（iOS 用现代包，不用 compat）
+        run: npm run build
+
+      - name: 生成 iOS 工程（若仓库里还没有 ios/）
+        run: |
+          set -euo pipefail
+          # ios/ 目录不入库（Capacitor 的官方建议：原生工程由 cap add/sync 生成），所以 CI 里现生成
+          if [ ! -d ios ]; then
+            echo "ios/ 不存在 → npx cap add ios（Capacitor 8 默认 SPM 依赖管理）"
+            npx cap add ios
+          fi
+          npx cap sync ios
+
+      # 必须在 cap sync 之后：sync 会把 Info.plist 的 WebView 段刷新，但不会碰 CFBundleDisplayName；
+      # 放在这里是为了让"改了显示名"这件事在每次构建都可复现，而不是依赖某次手改。
+      - name: 设定最低 iOS 版本 / 显示名 / 构建号
+        run: |
+          set -euo pipefail
+          PBX=ios/App/App.xcodeproj/project.pbxproj
+          INFOPLIST=ios/App/App/Info.plist
+          VER="${{ steps.meta.outputs.version }}"
+          # 最低 iOS 16（需求：16/17）——模板默认 14，必须改，否则老 API 保护形同虚设
+          before=$(grep -c 'IPHONEOS_DEPLOYMENT_TARGET = ' "$PBX" || true)
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 16.0/g' "$PBX"
+          after=$(grep -c 'IPHONEOS_DEPLOYMENT_TARGET = 16.0' "$PBX" || true)
+          if [ "$after" -lt 1 ]; then echo "::error::没改到 IPHONEOS_DEPLOYMENT_TARGET"; exit 1; fi
+          echo "IPHONEOS_DEPLOYMENT_TARGET：$before 处 → $after 处已是 16.0"
+          # 桌面图标下的名字
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName JM极简版" "$INFOPLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string JM极简版" "$INFOPLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$INFOPLIST"
+          # 版本号写进产物（同时也用 xcodebuild 的参数兜一层，见构建步骤）
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VER" "$INFOPLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VER" "$INFOPLIST"
+
+      - name: 生成 App 图标（沿用 build/icon.png，去 alpha）
+        run: node tools/gen-ios-icons.mjs --src build/icon.png --out ios/App/App/Assets.xcassets/AppIcon.appiconset
+
+      - name: Archive（关闭签名）→ 打 unsigned IPA
+        run: |
+          set -euo pipefail
+          VER="${{ steps.meta.outputs.version }}"
+          xcodebuild -version
+          # 关掉签名：我们要的是 SideStore/TrollStore 能自签的裸包，不是 App Store 包。
+          # 注意没有任何 codesign 步骤 —— 出来就该是没有 _CodeSignature 的形态。
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$PWD/build/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_STYLE=Manual CODE_SIGN_ENTITLEMENTS="" DEVELOPMENT_TEAM="" \
+            MARKETING_VERSION="$VER" CURRENT_PROJECT_VERSION=1 \
+            clean archive
+
+          APP=$(find build/App.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -print -quit)
+          [ -n "$APP" ] || { echo "::error::归档里找不到 .app"; exit 1; }
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist"
+          # 内置的 web 产物 + 16 个源都要真在包里（对不上说明 cap sync 没生效）
+          test -f "$APP/public/index.html" || { echo "::error::包里没有 web 产物"; exit 1; }
+          ls -la "$APP/public/assets" | head -20
+
+          # 打 IPA
+          rm -rf build/Payload build/jm-minimal-ios.ipa
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          rm -rf build/Payload/*.app/_CodeSignature
+          (cd build && zip -qry "jm-minimal-ios-$VER.ipa" Payload)
+
+          # 自检：未签名（没有 _CodeSignature 目录）+ 包结构正确
+          unzip -l "build/jm-minimal-ios-$VER.ipa" | head -5
+          if unzip -l "build/jm-minimal-ios-$VER.ipa" | grep -q '_CodeSignature'; then
+            echo "::error::ipa 里出现了 _CodeSignature —— 说明签名没关干净，SideStore 装上会失败"
+            exit 1
+          fi
+          echo "✓ 未签名 ipa 就绪：build/jm-minimal-ios-$VER.ipa"
+          ls -la build/*.ipa
+
+      - name: 上传 artifact（无论是否发 Release 都留一份）
+        uses: actions/upload-artifact@v4
+        with:
+          name: jm-minimal-ios-ipa
+          path: build/jm-minimal-ios-*.ipa
+          if-no-files-found: error
+
+      - name: 挂到 Release
+        if: ${{ !inputs.skip_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${{ steps.meta.outputs.version }}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          IPA="build/jm-minimal-ios-$VER.ipa"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$IPA" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            echo "Release $TAG 不存在 → 新建（草稿=false）"
+            gh release create "$TAG" "$IPA" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --notes "iOS 未签名 ipa（$VER）—— 用 SideStore / 自签工具安装。"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | select(.name|test("ios")) | "\(.name)  \(.size) bytes"'

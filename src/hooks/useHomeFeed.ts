@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from "react";
 import { client } from "../core/api";
 import { PAGE_SIZE } from "../core/constants";
 import { prefetchCovers } from "../ui/AlbumCard";
+import { DNS_HINT } from "../core/platform";
 import type { AlbumSummary } from "../core/types";
 
 export type FeedKind = "latest" | null;
@@ -98,7 +99,7 @@ export function useHomeFeed(opts: HomeFeedOptions = {}): HomeFeedApi {
       return;
     }
     // 完全没内容可展示：才给整屏错误 + DNS 引导（run() 已置 error，这里换成可操作的文案）
-    setError("网络连接失败，推荐内容加载不出来。先去会员页「DNS 加速」配置 DoT 公共 DNS（可解决大多数运营商 DNS 污染）；配置后需删除后台重新进入 App 使设置生效，再重试；仍失败再尝试魔法或切换线路。");
+    setError("网络连接失败，推荐内容加载不出来。" + DNS_HINT + "；仍失败再尝试魔法或切换线路。");
     optsRef.current.onRandomFail?.();
   }, [run, show]);
 

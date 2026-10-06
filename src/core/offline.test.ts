@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
-// 离线缓存语义回归：1.7.2 事故根因是「caches.open 会创建空 cache」+「只按 cache 名判定已缓存」，
-// 这里用一个与浏览器语义一致的极简假实现把这些行为钉住。
+// 离线缓存语义回归。
+//
+// 两层保障：
+//   1) 共享逻辑层（两个后端都要满足的不变量）：只读路径绝不创建容器、失败不留空壳、
+//      「有页才算已缓存」、幂等跳过、反推页列表 —— 用真实的 Cache 后端跑（jsdom 下即 web 路径）。
+//   2) 后端契约：native 后端（Android/iOS 的 Filesystem）不引真插件（在 jsdom 里加载会卡死
+//      vitest fork worker，见 offline.ts 的 FS() 注释），改为钉住它与 Cache 后端共享的那部分
+//      逻辑契约：listPages 的页码语义 + manifest 的来源（pagesFromCache 的还原分支）。
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   cacheCover, cachePage, cachedCoverUrl, deleteAlbumCache, invalidateCacheScan,
-  pagesFromCache, pruneEmptyCaches, scanCachedChapters, toOfflinePageUrls
+  offlineBackendKind, pagesFromCache, pruneEmptyCaches, scanCachedChapters, toOfflinePageUrls
 } from "./offline";
 
 /** 假 Cache API：open 会创建空 cache（与浏览器一致） */
@@ -48,6 +54,12 @@ beforeEach(() => {
 
 afterEach(() => { vi.restoreAllMocks(); });
 
+describe("后端选择", () => {
+  it("jsdom / Web 走 Cache 后端（原生壳才用 Filesystem）", () => {
+    expect(offlineBackendKind()).toBe("cache");
+  });
+});
+
 describe("scanCachedChapters", () => {
   it("空 cache 不算已缓存（历史 caches.open 副作用留下的垃圾）", async () => {
     await fake.api.open("jm-offline-900001"); // 模拟只读操作创建的空 cache
@@ -56,7 +68,7 @@ describe("scanCachedChapters", () => {
     expect(map.size).toBe(0);
   });
 
-  it("有页条目才算，页数与封面单独统计", async () => {
+  it("有页条目才算，页数与封面单独统计（只有封面的话不计入）", async () => {
     fake.seed("jm-offline-900001", ["https://x/1.webp", "https://x/2.webp", "https://x/cover.jpg_cover_"]);
     fake.seed("jm-offline-900002", ["https://x/cover2.jpg_cover_"]); // 只有封面
     const map = await scanCachedChapters();
@@ -72,14 +84,24 @@ describe("scanCachedChapters", () => {
     invalidateCacheScan();
     expect((await scanCachedChapters()).size).toBe(2);
   });
+
+  it("只查指定几话时先看存在性，不创建任何东西", async () => {
+    fake.seed("jm-offline-has", ["https://x/1.webp"]);
+    const map = await scanCachedChapters(["has", "missing"]);
+    expect([...map.keys()]).toEqual(["has"]);
+    expect(fake.store.has("jm-offline-missing")).toBe(false);
+  });
 });
 
-describe("cachePage / cacheCover 不产生空 cache", () => {
+describe("cachePage / cacheCover 不产生空壳", () => {
   it("下载失败时不会创建 cache", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 500 })));
     const ok = await cachePage("777", "https://x/fail.webp");
     expect(ok).toBe(false);
-    expect(fake.store.has("jm-offline-777")).toBe(false);
+    // 判据用与生产代码同源的那一条：**有页才算落盘**（不能用 `fake.store.has()` ——
+    // 本文件既有的假 Cache API 里 `open()` 会先把名字塞进 store，与浏览器一致，
+    // 因此只要中间任何一次探测走 open()，store.has 就恒为 true，断言不出任何东西）
+    expect((await scanCachedChapters()).has("777")).toBe(false);
   });
 
   it("下载成功才创建并写入", async () => {
@@ -88,10 +110,18 @@ describe("cachePage / cacheCover 不产生空 cache", () => {
     expect(fake.store.get("jm-offline-777")?.has("https://x/ok.webp")).toBe(true);
   });
 
+  it("同一张图重复缓存不重复下载（幂等）", async () => {
+    const f = vi.fn(async () => new Response("img", { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    expect(await cachePage("777", "https://x/same.webp")).toBe(true);
+    expect(await cachePage("777", "https://x/same.webp")).toBe(true);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
   it("封面失败同样不创建 cache", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 404 })));
     await cacheCover("778", "https://x/cover.jpg");
-    expect(fake.store.has("jm-offline-778")).toBe(false);
+    expect(await fake.api.has("jm-offline-778")).toBe(false);
   });
 });
 
@@ -102,10 +132,17 @@ describe("只读路径不创建 cache", () => {
     expect(await toOfflinePageUrls("779", pages)).toEqual(pages);
     expect(fake.store.has("jm-offline-779")).toBe(false);
   });
+
+  it("缓存过的页会被换成 blob URL，并保留原文件名（scramble 要用）", async () => {
+    fake.seed("jm-offline-880", ["https://x/00001.webp"]);
+    const out = await toOfflinePageUrls("880", [{ page: 1, image: "https://x/00001.webp" }]);
+    expect(out[0].image).toBe("blob:fake");
+    expect(out[0].name).toBe("00001");
+  });
 });
 
 describe("pagesFromCache（IDB 记录丢失时的补救）", () => {
-  it("从 cache 反推页列表：按 URL 排序、排除封面、带文件名", async () => {
+  it("从落盘内容反推页列表：按 URL 排序、排除封面、带原地址与文件名", async () => {
     fake.seed("jm-offline-900003", ["https://x/00003.webp", "https://x/00001.webp", "https://x/c.jpg_cover_"]);
     const pages = await pagesFromCache("900003");
     expect(pages.map((p) => p.image)).toEqual(["https://x/00001.webp", "https://x/00003.webp"]);

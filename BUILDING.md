@@ -63,12 +63,15 @@
 
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
-| PC + 前端 | package.json → version | 2.2.5 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 2.2.5 / versionCode 73 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| PC + 前端 | package.json → version | 2.2.6 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
+| Android | android/app/build.gradle → defaultConfig | versionName 2.2.6 / versionCode 74 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
-> ⚠️ **现值以本表为准**：package.json `2.1.0` / build.gradle `2.1.0` + `versionCode 64`。
+> ⚠️ **现值以本表为准**：package.json `2.2.6` / build.gradle `2.2.6` + `versionCode 74`。
 > （2026-09-13 修正：这里原来残留着 "现值 = 1.8.1 / versionCode 48"，与正上方的表格自相矛盾，
-> 是上一次发版只更新了表格、没更新这句话造成的。改版本号时**这两处一起改**。）
+> 是上一次发版只更新了表格、没更新这句话造成的。2026-10-06 又发现它停在 `2.1.0 / 64` 没跟着走，
+> 已按当前值改写：改版本号时**这两处一起改**。）
+> ⚠️ **README.md 下载表在 2.2.6 这一版仍是 2.2.5**：那四行是指向已发布 Release 的下载链接，
+> 提前改成 2.2.6 会变成 404；由发版时的 `tools/release.mjs` 与 Release 一起更新。
 > `tools/release.mjs` 会一次性同步 **6 处**：package.json、package-lock.json、android/app/build.gradle（versionName + versionCode）、
 > BUILDING.md 本表、README.md 下载表与链接、`src/core/constants.ts` 的 `BUILD_TAG`。手动发版务必逐处核对。
 
@@ -208,6 +211,72 @@ pwsh -NoProfile -File tools\build-compat-apk.ps1 -Version 2.1.0
 - **低配模式**：`src/core/lowfx.ts` 判定（flex gap / inset / aspect-ratio 三缺即低配）→ `<html data-lowfx="1">`，
   关动效与按压反馈、只留加载动画；抽屉里可手动覆盖。
 - 完整踩坑记录（9 个真坑 + 支持矩阵 + 诊断脚本清单 + 移植检查清单）见本机文档 `docs/老内核适配经验.md`（`docs/` 不入库）。
+
+---
+
+## 4.5 iOS 端打包（unsigned IPA，走 GitHub Actions）
+
+iOS **没有**本地出包路径：Capacitor 8 要求 macOS + Xcode ≥ 26，Windows 上 `npx cap add ios`
+生成的工程编不出包（Theos/xcrun 那套移植缺 codesign 与完整工具链）。公开仓库的 `macos-*` runner
+**免费且无倍率**（私有仓库才是 ×10），所以出包固定走 `.github/workflows/build-ipa.yml`。
+
+```bash
+# 1) 先在本地把版本号同步好并发布 Android/PC（tools/release.mjs 会改 package.json 并推 tag）
+node tools/release.mjs 2.3.0 --publish --notes <说明文件>
+# 2) GitHub → Actions → "Build iOS (unsigned IPA)" → Run workflow
+#    tag 留空 = 自动用 v<package.json 的 version>；产物：jm-minimal-ios-<ver>.ipa（未签名）
+#    只想要 CI 产物不发 Release：勾 skip_release
+```
+
+**workflow 里做的五件事**（顺序不能乱，理由都写在 yml 注释里）：
+
+| 步骤 | 关键点 |
+|---|---|
+| `cap add ios` + `cap sync ios` | `ios/` **不入库**（Capacitor 官方建议：原生工程由 cap 生成），所以 CI 每次现生成 |
+| `IPHONEOS_DEPLOYMENT_TARGET = 16.0` | 模板默认 14，用 `sed` 全量替换后断言"至少改到 1 处"，改不到直接 fail |
+| `CFBundleDisplayName = JM极简版` | 桌面图标下的名字。`appName` 只在 `cap add` 那次用过，之后改 `capacitor.config.ts` 不会同步到已有工程 |
+| `node tools/gen-ios-icons.mjs` | 用 `build/icon.png`（512×512 RGBA）生成全套 AppIcon；**必须去 alpha**（iOS 图标不接受透明），1024 那档是升采样 |
+| `xcodebuild archive` + `zip` | `CODE_SIGNING_ALLOWED=NO` 等全关；打完**断言 ipa 里没有 `_CodeSignature`** —— 有就说明签名没关干净，SideStore 会装不上 |
+
+⚠️ **版本号铁律**：ipa 内嵌的版本来自构建那一刻的 `package.json`，而 iOS 的"检查更新"是按 Release tag
+比大小的。所以 **tag 的版本号必须与 package.json 一致**，workflow 里已加硬校验（不一致直接 fail）。
+
+**iOS 与 Android 的分叉只有两处**（都按平台判过，别当 bug 改回去；**刻意压到这个数量**——
+分叉越少越不容易出现"两端行为不一致"的 bug，每次要加新分支前先想能不能合并）：
+
+| 分叉 | 为什么合并不了 | 合掉了什么 |
+|---|---|---|
+| `UpdateSection`：iOS 变成"查版本 → 浏览器下载 ipa" | 无越狱的 iOS **没有任何 API 允许 App 安装另一个 App** —— 所以做不到 Android 那种"下载完直接调系统安装器"。但**跳浏览器下载是能做的**（见下） | 用 `hasPlugin("AppUpdater")` 守卫插件注册，非 Android 拿到 `null`，绝不会去调不存在的实现；挑 ipa 的逻辑抽成 `pickIpaAsset`（有单测） |
+| `DnsGuide`：iOS 的"怎么配"章节 | iOS 设置里**没有**「私人 DNS」入口（Android 7+ 才有） | 把「一键检测」整段提到分叉外面共用；只有指引文案分叉 |
+
+> 📥 **iOS 上的更新路径（不是"没辙"，是"换一种"）**：`UpdateSection` 从 Release 里挑出
+> `jm-minimal-ios-<ver>.ipa` 的**直链**交给系统浏览器（`openExternal` → SFSafariViewController）。
+> Safari 下完的 .ipa 进「下载」列表／「文件」App，**用户点它，iOS 会把 SideStore 列为可选打开方式**
+> —— 依据是 SideStore 自己的 `Info.plist`：`CFBundleDocumentTypes` 注册了 `com.apple.itunes.ipa`，
+> `UTImportedTypeDeclarations` 声明了 `public.filename-extension = ipa`（`LSHandlerRank = Alternate`），
+> 由 SideStore 完成签名安装（前提：LocalDevVPN 开着）。
+> Release 里没有 ipa 时自动退化成"打开 Release 页"，不会让用户卡死。
+> ⚠️ **这套流程只在文档层面核实过（读 SideStore 源码），真机上没人走过**。
+
+**已经合并掉的分叉**（曾是三处 iOS 专属，现在两端同一份代码）：
+
+- **返回键**：`@capacitor/app` 的 `backButton` 在 iOS 上不存在（`AppPlugin.swift` 里没有这个事件），注册会 reject
+  → 被 `main.tsx` 的全局兜底渲染成底部红条。现在只用 `if (!isAndroid() || !hasPlugin("App")) return` 决定
+  **要不要订阅系统事件**；返回动作本身是同一个 `handleBack()`，**左缘侧滑在 Android 上也挂同一套**
+  （判定抽到 `core/platform.ts` 的 `isBackSwipe`，纯函数、有单测）。
+- **能不能"退出 App"**：原来是 `if (isAndroid()) exitApp()`，现在按 **`hasPlugin("App")`**（有没有实现）判断，
+  不按平台名判断 —— Web 没有实现就当普通浏览器处理。
+- **离线库**：iOS 与 Android **共用同一个 Filesystem 后端**（只有 web/PWA 还走 Cache API）。iOS 必须换后端的原因：
+  `capacitor://localhost` 不是 http/https，Service Worker 无法注册、CacheStorage 没有保证
+  （旧实现那套 `if (!("caches" in window)) return` 会让 iOS 上整个离线库**静默不落盘**）。
+  ⚠️ 后端选择是**惰性**解析的（`backend()`），不能在模块求值时定死：`getPlatform()` 读的是原生桥，
+  万一求值那刻桥还没注入，Android 也会被判成 web 且永远纠不回来。
+
+⚠️ **未验证清单（截至改完那一刻，本机拿不到 iPhone 也编不了 iOS）**：以上全部是"编译通过 + 逻辑对齐 + 单测覆盖"级别，
+**iOS 上的运行时行为一次都没看过**。真机第一轮必须盯：① 进出 App 是否还有底部红条；② 左缘侧滑能否逐层返回；
+③ **离线库先确认能扫到已缓存的话**（`readdir` 返回的 `type` 必须是 `"directory"`，否则 `allIds()` 会把所有话题过滤掉、
+整个离线库全空 —— 这个坑我在单测脚手架里踩过一次）；④ 杀掉 App 再进，漫画是否还在（Filesystem 是否真落盘）；
+⑤ 阅读器 canvas 重排/去条纹是否正常（跨域污染会静默跳过）；⑥ 首页能否出内容（DNS 污染环境下 iOS 没有系统级 DoT 入口）。
 
 ---
 

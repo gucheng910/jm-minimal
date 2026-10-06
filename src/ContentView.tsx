@@ -30,6 +30,7 @@ import { bookMetaFromDetail, chapterLabel } from "./core/offlineMeta";
 import type { AlbumDetail, AlbumSummary } from "./core/types";
 import { isSearch, lastDetail, patchScreen, popScreen, pushScreen, topScreen } from "./core/navStack";
 import type { Screen, SearchScreen } from "./core/navStack";
+import { DNS_HINT } from "./core/platform";
 
 type Mode = "home" | "detail" | "reader" | "week";
 
@@ -489,26 +490,32 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         }
         const aid = new URLSearchParams(window.location.search).get("aid");
         if (pageMode === "home" && !aid) {
-          // 每次冷启动都自动测速并应用最快线路/图源（18+ 确认页期间后台完成）
-          // 启动顺序（老设备实测结论）：先恢复 6h 内的最优记忆——它是一次本地读 + 一次探测，
-          // 远快于完整测速，能避免"冷启动十几秒白封面"；随后完整测速在后台跑一遍做纠正/自愈。
-          // 记忆不可用（过期 / 图床已死 / 无记忆）才阻塞等测速结果。
+          // 每次冷启动都自动选优（18+ 确认页期间后台完成）
+          // 启动顺序（实测结论）：
+          //  1) 先恢复记忆里的最优（一次本地读 + 一次正文图探测），远快于完整测速；
+          //  2) 记忆不可用时**不再阻塞首屏**等完整测速 —— 那是 15 次业务请求 + N 次图床探测，
+          //     弱网下要好几秒。先用 setting 给的默认图床把首屏画出来，测速在后台跑完再静默换源
+          //     （换源后 getSetting 会发 jm:setting，列表按新图床重新出封面）。
+          //  3) 记忆可用时也在后台纠正一次（线路会随时段劣化）。
           let speedOk = false;
           try { speedOk = await client.restoreBestSelection(); } catch { speedOk = false; }
           if (!speedOk) {
-            try { speedOk = await client.autoSelectBest(); } catch { speedOk = false; }
-            // 老设备/弱网冷启动第一次常常全超时：10 秒后再试一次（成功后 getSetting 会发 jm:setting，
-            // 列表按新图床重新出封面）。
-            if (!speedOk) window.setTimeout(() => { void client.autoSelectBest().catch(() => false); }, 10000);
+            if (!client.setting) {
+              try { await client.getSetting(); } catch { /* 尽力而为：封面图床域名 */ }
+            }
+            speedOk = Boolean(client.setting);
+            window.setTimeout(() => { void client.autoSelectBest().catch(() => false); }, 800);
+            // 老设备/弱网冷启动第一次常常全超时：10 秒后再试一次
+            window.setTimeout(() => { void client.autoSelectBest().catch(() => false); }, 10000);
           } else {
             // 记忆可用：后台刷新一次，换到更快的线路/图源（同样由 jm:setting 驱动封面刷新）
             window.setTimeout(() => { void client.autoSelectBest().catch(() => false); }, 1500);
           }
-          // 兜底：setting 未就绪时补一次（封面图床域名）
+          // 兜底：setting 仍未就绪时补一次（封面图床域名）
           if (!client.setting) {
             try { await client.getSetting(); } catch { /* 尽力而为 */ }
           }
-          // 通知 18+ 门：测速阶段结束（成功或全部失败），可以放行
+          // 通知 18+ 门：启动阶段结束（有可用图床/线路即放行），不再按"测速是否完成"卡首屏
           announceStartupReady({ speedOk });
           let list: AlbumSummary[] | null = null;
           const r1 = await client.getRandomRecommend().catch(() => null);
@@ -524,7 +531,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
             homeRef.current.show(list, "latest", false, 1);
           } else if (alive && !homeRef.current.hasItems()) {
             // 已经有内容在屏上（最优记忆/后台刷新先到了）就不再占用整屏错误态，否则会出现"内容明明在却报网络错误"
-            homeRef.current.setError("网络连接失败，推荐内容加载不出来。请先到会员页「DNS 加速」按指引配置 DoT 公共 DNS（大多可解决）；配置后需删除后台重新进入 App 使设置生效，再点“重试”；若仍失败再考虑使用魔法。");
+            homeRef.current.setError("网络连接失败，推荐内容加载不出来。" + DNS_HINT + "；若仍失败再考虑使用魔法。");
             pushToast("内容加载失败，建议先配 DNS，配置后删除后台重进生效", "err", "goto-dns");
           }
         }
@@ -744,6 +751,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         bookMeta={readerBookMeta}
         chapterName={chapterLabel(chapter)}
         chapterSort={chapter ? Number(chapter.sort) || undefined : undefined}
+        onChapterChange={album.setCurrentChapter}
       />
     );
   }

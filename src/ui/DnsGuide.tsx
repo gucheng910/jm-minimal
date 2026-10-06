@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { pushToast } from "./toast";
 import { client } from "../core/api";
 import { isDesktop, jmDns, dnsCleanPrefEnabled, setDnsCleanPref, type DnsCleanState } from "../core/dnsClean";
+import { isIos } from "../core/platform";
 import { on } from "../core/bus";
 import { fetchWithTimeout } from "../core/fetchTimeout";
 
@@ -27,6 +28,8 @@ async function probeApi(path: string) {
 }
 
 export default function DnsGuide() {
+  /** 平台判定一次即可（每次 render 重复调用 getPlatform 没必要） */
+  const ios = isIos();
   const [open, setOpen] = useState(true); // 默认展开，拒绝用户 dismiss
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; ms: number } | null>(null);
@@ -93,18 +96,93 @@ export default function DnsGuide() {
   return (
     <div id="dns-guide-card" className="card dns-card">
       <div className="dns-header" onClick={() => setOpen(o => !o)}>
-        <h2 style={{ margin: 0 }}>{isDesktop ? "DNS 清洗（内置）" : "DNS 加速（可选）"}</h2>
+        <h2 style={{ margin: 0 }}>{isDesktop ? "DNS 清洗（内置）" : ios ? "DNS 加速（iOS）" : "DNS 加速（可选）"}</h2>
         <span className="dns-arrow">{open ? "▾" : "▸"}</span>
       </div>
       <p className="muted dns-summary" onClick={() => setOpen(o => !o)}>
         {isDesktop
           ? "内置 DoH 清洗：拦截运营商 DNS 污染，无需在系统配置 DoT。"
-          : "设为公共 DoT 可防止运营商 DNS 污染，提升解析速度。"}
+          : ios
+            ? "iOS 设置里没有「私人 DNS」这个入口，需要用 DNS/代理类 App 或描述文件来做加密解析。"
+            : "设为公共 DoT 可防止运营商 DNS 污染，提升解析速度。"}
       </p>
 
       {open && (
         <div className="dns-body">
-          {isDesktop ? (
+          {/* 「一键检测」这一行 iOS 与 Android 完全一致 —— 提到分叉外面，别复制两份 */}
+          <div className="dns-section">
+            <div className="row">
+              <button disabled={testing || !client.apiBase} onClick={runProbe}>
+                {testing ? "检测中…" : client.apiBase ? "一键检测" : "请先初始化"}
+              </button>
+              {result && (
+                <span className={"muted " + (result.ok ? "dns-ok" : "dns-err")}>
+                  {result.ok ? "✔ 连接正常" : ios ? "✘ 连接异常，可按下面任一种方式处理" : "✘ 连接异常"}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {ios ? (
+            <>
+              <div className="dns-section">
+                <h3>先搞清楚一件事</h3>
+                <p className="muted">
+                  Android 的「设置 → 私人 DNS」在 iOS 上<b>没有对应入口</b>，App 也无法修改系统 DNS。
+                  所以 iOS 上防 DNS 污染只有下面几条路，按「省事 → 彻底」排：
+                </p>
+              </div>
+
+              <div className="dns-section">
+                <h3>方式一：装一个 DNS App（最省事）</h3>
+                <ol className="dns-steps">
+                  <li>App Store 搜并安装（任选其一）：<b>1.1.1.1</b>（Cloudflare）、<b>AdGuard</b>、<b>DNSecure</b></li>
+                  <li>打开那个 App，启用「加密 DNS / DNS 保护」</li>
+                  <li>按提示允许添加 VPN 配置（它只是一个本地 DNS 通道，不走流量中转）</li>
+                  <li>回到本页点「一键检测」，应变成 ✔ 连接正常</li>
+                </ol>
+                <p className="muted dns-restart-note">
+                  <b>⚠️ 提示</b>改完建议<b>彻底退出 App（上滑关掉）再重进</b>，让之前的解析结果作废
+                </p>
+              </div>
+
+              <div className="dns-section">
+                <h3>方式二：用带 DNS 分流的代理工具（最彻底）</h3>
+                <p className="muted">
+                  如果你本来就装了 Shadowrocket / Quantumult X / Stash / Surge 这类工具，把 DNS 设为
+                  DoH/DoT（如 <code>https://dns.alidns.com/dns-query</code> 或 <code>223.5.5.5</code>）并开启
+                  「DNS 分流 / 强制使用本工具的 DNS」，效果最好、也最稳。下方地址可点「复制」。
+                </p>
+                <div className="dns-servers">
+                  {DOH_SERVERS.map(s => (
+                    <div key={s.dot} className="dns-server-item">
+                      <span className="dns-server-name">{s.name}</span>
+                      <code className="dns-server-addr">{s.dot}</code>
+                      {s.note && <span className="muted dns-server-note">{s.note}</span>}
+                      <button className="ghost dns-copy-btn" onClick={() => copyDoT(s.dot)}>
+                        {copied === s.dot ? "✔ 已复制" : "复制"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="dns-section">
+                <details>
+                  <summary className="dns-steps-summary">方式三：只改当前 Wi-Fi 的 DNS（有限）</summary>
+                  <ol className="dns-steps">
+                    <li>设置 → 无线局域网 → 点当前 Wi-Fi 右边的 ⓘ</li>
+                    <li>「配置 DNS」→ 手动 → 添加服务器（如 223.5.5.5、119.29.29.29）</li>
+                    <li>回本页点「一键检测」</li>
+                  </ol>
+                  <p className="muted dns-restart-note">
+                    <b>⚠️ 局限</b>这只改了「明文 UDP DNS 的服务器地址」，<b>挡不住针对域名的污染投毒</b>，
+                    也只在当前 Wi-Fi 生效（切到蜂窝网络就失效）。能用就用，不行请回到方式一/二。
+                  </p>
+                </details>
+              </div>
+            </>
+          ) : isDesktop ? (
             <>
               <div className="dns-section">
                 <div className="row">
@@ -151,19 +229,6 @@ export default function DnsGuide() {
             </>
           ) : (
             <>
-              <div className="dns-section">
-                <div className="row">
-                  <button disabled={testing || !client.apiBase} onClick={runProbe}>
-                    {testing ? "检测中…" : client.apiBase ? "一键检测" : "请先初始化"}
-                  </button>
-                  {result && (
-                    <span className={"muted " + (result.ok ? "dns-ok" : "dns-err")}>
-                      {result.ok ? "✔ 连接正常" : "✘ 连接异常"}
-                    </span>
-                  )}
-                </div>
-              </div>
-
               <div className="dns-section">
                 <h3>公共 DoT 地址</h3>
                 <p className="muted">点击复制，进入手机设置的「私人 DNS」粘贴即可。</p>

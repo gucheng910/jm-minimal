@@ -6,7 +6,7 @@ export const HOST_KEY_SECRET = "diosfjckwpqpdfjkvnqQjsik";
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 /** 出包标识（诊断用，每次发布更新） */
-export const BUILD_TAG = "v20260924-2.2.5";
+export const BUILD_TAG = "v20261006-2.2.6";
 /**
  * 当前客户端版本号（由 UpdateSection / 侧边栏版本信息共用）。
  * 构建时由 vite.config.ts 的 define 从 package.json 注入 __APP_VERSION__，
@@ -84,8 +84,27 @@ export const UI_KEYS = {
   theme: "jmclient.theme"
 } as const;
 
-/** 最优线路/图源记忆有效期：期间冷启动直连上次最优，跳过启动测速 */
-export const AUTO_SELECT_TTL_MS = 6 * 60 * 60 * 1000;
+/**
+ * 最优线路/图源记忆有效期：期间冷启动直连上次最优，跳过启动测速。
+ *
+ * 从 6h 收到 45min：启动测速是**单次采样**，实测选对率只有 30%（20 轮模拟），
+ * 而抽错的代价就是这个 TTL —— 6h 会把一次抖动放大成"一整个下午都卡"。
+ * 缩短后每条线路的错误最多背 45 分钟，配合 api.ts 的劣化自愈还能更早纠回来。
+ */
+export const AUTO_SELECT_TTL_MS = 45 * 60 * 1000;
+
+/**
+ * 线路测速每线跑几轮取中位数。
+ * 单次采样在 ±200ms 抖动面前就是抽签：实测 p50 只差 37ms 的两条线路，
+ * 单轮差值可以在 4~132ms 之间来回翻，选出的"最优"有 70% 是错的。
+ */
+export const LINE_PROBE_ROUNDS = 3;
+
+/** 连续多少次网络层失败判定"当前线路劣化"，触发一次后台重测（业务错误码不算） */
+export const LINE_FAIL_STREAK = 4;
+
+/** 劣化自愈的最小间隔：弱网下避免反复重测把带宽吃光 */
+export const HEAL_COOLDOWN_MS = 5 * 60 * 1000;
 
 /**
  * 官方图源 key 兜底表。

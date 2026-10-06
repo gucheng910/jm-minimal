@@ -17,6 +17,7 @@ import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceC
 import { resolveReaderScrollHost, scrollByHost, scrollToTopOf, scrollTopOf } from "./core/scrollHost";
 import { TAP_ZONES_CONTINUOUS, TAP_ZONES_SINGLE, loadTapInvert, resolveTapAction, saveTapInvert } from "./core/tapZones";
 import { NO_SEAM, UI_KEYS } from "./core/constants";
+import { isLowFx } from "./core/lowfx";
 import type { ReadPage } from "./core/types";
 import type { BookMeta } from "./core/offlineMeta";
 import { on } from "./core/bus";
@@ -25,6 +26,11 @@ type ReaderMode = "continuous" | "single";
 
 // 阅读模式的存储键统一走 UI_KEYS（原来这里和 core/constants.ts 各写了一份字面量）
 const MODE_KEY = UI_KEYS.readerMode;
+
+/** 翻页预取页数（非低配机）；低配机由 isLowFx() 降到 1 页 */
+const PRELOAD_AHEAD_PAGES = 3;
+/** 预取防抖：停下翻页 60ms 后再发请求（原来是 180ms，快速连翻时等于没预取） */
+const PRELOAD_DEBOUNCE_MS = 60;
 
 interface Props {
   albumId: number | string;
@@ -38,6 +44,11 @@ interface Props {
   /** 当前话名称（"第12话"）与序号 */
   chapterName?: string;
   chapterSort?: number;
+  /**
+   * 在阅读器内换了话：把新话回写给外层（详情页同步"当前话"）。
+   * 不接这个回调就会出现"阅读器里翻了好几话，退回详情页还停在进入时那一话"。
+   */
+  onChapterChange?: (id: string, label: string, sort?: number) => void;
   /** 离线阅读模式：隐藏图源测速/切换等在线功能 */
   offline?: boolean;
 }
@@ -68,20 +79,108 @@ const loggedSrc = new Set<string>();
 // 带 CORS 加载失败（个别图床不发 CORS 头）时，回退为普通加载——此时 canvas 会被污染，
 // 评分/平滑会自动跳过（见 measureSeamScore 的 try/catch），不影响阅读
 let expressHintShown = false;
-function onImgError(e: React.SyntheticEvent<HTMLImageElement>) {
+
+/**
+ * 正文页失败后的重试节奏（毫秒）。
+ *
+ * 为什么必须有：这里以前只重试 **一次**（去 crossorigin 再拉一遍），失败就把该页永久钉死
+ * —— 2026-10-06 用无头 Chromium 复现过：把 /media/photos/* 断 6 秒再放开，
+ * 页面 15 秒后依然是 77 张全失败、0 张成功，永远不会自己恢复。
+ * 用户看到的就是"首次进阅读器正文加载不出来"，只能靠「换源」把 <img> 重挂一遍才好
+ * （这也解释了"更快的源选中的依然是当前源，却能加载出正文"——起作用的是重挂，不是换源）。
+ *
+ * 节奏：先用快速退避打掉瞬时抖动（首次连接被 reset / 图床抽风），再放慢继续试。
+ * 与列表封面（ui/AlbumCard 的 Cover）同一套思路，封面能自愈、正文也必须能。
+ */
+const PAGE_RETRY_DELAYS = [700, 1500, 3000, 8000, 20000];
+/**
+ * 快速退避用尽后的慢速恢复间隔：这时页面已经亮出"点按重试"，
+ * 但我们仍然每隔 30s 自己再试一次 —— 否则"断网/图床抽风几十秒后恢复"的场景，
+ * 还得让用户一页一页手点（原来连一次重试都没有，只能整本换源）。
+ */
+const PAGE_RETRY_SLOW_MS = 30000;
+/** 快速 5 次 + 慢速 8 次（≈4 分钟）后彻底放弃，避免死图床一直空跑 */
+const PAGE_RETRY_MAX = PAGE_RETRY_DELAYS.length + 8;
+/** 同一话内累计这么多页彻底失败就自动换源一次 */
+const PAGE_FAIL_HEAL_MIN = 3;
+/** 一话最多自动换源几次 / 两次之间至少隔多久 */
+const PAGE_HEAL_MAX = 2;
+const PAGE_HEAL_COOLDOWN_MS = 60 * 1000;
+
+/** 重试用的独立 URL：换 URL 才能绕开浏览器里那条失败的缓存记录（同 Cover 的 retry=N 招数） */
+function retryUrl(src: string, n: number): string {
+  const clean = src.replace(/[?&]retry=\d+/g, "");
+  return clean + (clean.includes("?") ? "&" : "?") + "retry=" + n;
+}
+
+function pageBoxOf(im: HTMLImageElement): HTMLElement | null {
+  return im.closest<HTMLElement>(".jm-figure, .jm-single-wrap");
+}
+
+/** 定时器挂在元素上，翻页/卸载时能清掉，避免离场元素还去发请求 */
+const pageRetryTimers = new Map<HTMLImageElement, number>();
+function clearPageRetry(im: HTMLImageElement): void {
+  const t = pageRetryTimers.get(im);
+  if (t) { window.clearTimeout(t); pageRetryTimers.delete(im); }
+}
+
+/**
+ * 页图加载失败的统一处理：CORS 回退 → 退避重试 → 彻底失败时标记 + 通知阅读器自愈。
+ * 模块级是因为它只碰 DOM 与定时器；需要"上报失败"时通过 ctx 回调交给组件（组件才拿得到状态）。
+ */
+function handlePageImgError(e: React.SyntheticEvent<HTMLImageElement>, onGiveUp: () => void): void {
   const im = e.currentTarget;
+  if (!im.dataset.origSrc) im.dataset.origSrc = im.src;
   // express（图源 0 / 快速通道）实测只给 logo 不给正文图（photos 被 CDN 重置）：
   // 用户手动选到它时给一次明确提示，而不是对着一片黑猜哪里坏了（每次会话只提示一次）
   if (!expressHintShown && String(client.imageShunt) === "0" && /jm-page|jm-single/.test(im.className)) {
     expressHintShown = true;
     pushToast("快速通道（图源 0）拉不到正文图，请到「换源」换回普通图源", "err");
   }
-  if (im.dataset.corsFallback) return;
-  im.dataset.corsFallback = "1";
-  im.removeAttribute("crossorigin");
-  const src = im.src;
-  im.src = "";
-  im.src = src;
+  const n = Number(im.dataset.retryN || "0");
+  if (n === 0) {
+    // 第 1 次：图床可能不发 CORS 头 → 去掉 crossorigin 立刻重来（canvas 变污染只影响去条纹）
+    im.dataset.retryN = "1";
+    im.removeAttribute("crossorigin");
+    im.src = im.dataset.origSrc;
+    return;
+  }
+  if (n >= PAGE_RETRY_MAX) {
+    markPageFailed(im, onGiveUp);
+    return;
+  }
+  im.dataset.retryN = String(n + 1);
+  // 快速退避阶段：只重试，不打扰用户；转入慢速阶段后先把失败态亮出来（并上报一次）
+  const fast = n <= PAGE_RETRY_DELAYS.length;
+  const delay = fast ? PAGE_RETRY_DELAYS[n - 1] : PAGE_RETRY_SLOW_MS;
+  if (!fast) markPageFailed(im, onGiveUp);
+  clearPageRetry(im);
+  const timer = window.setTimeout(() => {
+    pageRetryTimers.delete(im);
+    im.src = retryUrl(im.dataset.origSrc || im.src, n);
+  }, delay);
+  pageRetryTimers.set(im, timer);
+  jlog("page retry " + n + "/" + PAGE_RETRY_MAX + " in " + delay + "ms page=" + (im.dataset.page || "?"));
+}
+
+/** 标记"这页彻底失败"并只上报一次（同一页重复报会让自愈阈值提前达成） */
+function markPageFailed(im: HTMLImageElement, onGiveUp: () => void): void {
+  const box = pageBoxOf(im);
+  if (box && box.dataset.failed !== "1") {
+    box.dataset.failed = "1";
+    onGiveUp();
+  }
+}
+
+/** "点按重试"：清掉失败态与计数，从原地址重新来一轮 */
+function resetPageImage(im: HTMLImageElement): void {
+  clearPageRetry(im);
+  delete im.dataset.retryN;
+  const box = pageBoxOf(im);
+  if (box) delete box.dataset.failed;
+  const src = im.dataset.origSrc || im.src;
+  im.src = retryUrl(src, Date.now() % 100000); // 换 URL：绕开失败缓存
+  jlog("page retry by tap page=" + (im.dataset.page || "?"));
 }
 
 // —— 去条纹（接缝修复）延后执行 ——
@@ -184,7 +283,7 @@ function applyScramble(img: HTMLImageElement, albumId: number | string, scramble
 
 export default function ReaderPanel({
   albumId: albumIdProp, pages: pagesProp, title: titleProp, scrambleId: scrambleIdProp,
-  onBack, meta, bookMeta, chapterName, chapterSort, offline = false
+  onBack, meta, bookMeta, chapterName, chapterSort, onChapterChange, offline = false
 }: Props) {
   // —— 阅读器内换话：本组件自己维护「当前话」覆盖值，不打断父级的页面栈 ——
   const [override, setOverride] = useState<{ id: string; pages: ReadPage[]; scrambleId?: number | string; label: string; sort?: number } | null>(null);
@@ -195,6 +294,36 @@ export default function ReaderPanel({
   /** 连载目录（多话才有；单本为空数组 → 不显示换话/多选缓存） */
   const chapters = useMemo(() => (bookMeta && bookMeta.chapters.length > 1 ? bookMeta.chapters : []), [bookMeta]);
   const curChapter = chapters.find((c) => String(c.id) === String(albumId));
+  /**
+   * 下一话 = 当前话在**列表里的下一项**（连载列表本身就是阅读顺序）。
+   *
+   * 为什么不直接按 sort 挑"比当前话号大的最小者"：实测有连载的 series.sort 全是一个值
+   * （id=1159383 的 48 话 sort 全是 1），按 sort 挑会一个都挑不出来 → 按钮永远显示"已是最后一话"。
+   * 所以只用 sort 判**列表方向**：单调递增 = 正序（取 idx+1），否则按倒序取 idx-1；
+   * sort 缺失/全相等时判为"不递减"，退化成列表顺序 —— 也就是用户在弹窗里看到的顺序。
+   */
+  const nextChapter = useMemo(() => {
+    if (chapters.length < 2) return null;
+    const idx = chapters.findIndex((c) => String(c.id) === String(albumId));
+    if (idx < 0) return null;
+    const ascending = chapters.every((c, i) => i === 0 || !(Number(c.sort) < Number(chapters[i - 1].sort)));
+    const chapter = (ascending ? chapters[idx + 1] : chapters[idx - 1]) || null;
+    // index = 它在列表里是第几话（1 起始），用于话号重复时消歧
+    return chapter ? { chapter, index: ascending ? idx + 2 : idx } : null;
+  }, [chapters, albumId]);
+
+  /**
+   * 「下一话」按钮文案。
+   * 部分连载的 series.sort 全是一个值（实测 id=1159383 的 48 话 sort 全是 1、name 为空），
+   * 那时每一话都叫"第1话"，直接拼出来就是"下一话 · 第1话"（和当前话一模一样，等于没说）——
+   * 这种情况用它在列表里的位置消歧。
+   */
+  const nextChapterText = (() => {
+    if (!nextChapter) return "";
+    const label = chapterLabel(nextChapter.chapter) || ("#" + nextChapter.chapter.id);
+    const cur = chapterLabel(curChapter) || (curChapter ? "#" + curChapter.id : "");
+    return label && label !== cur ? "下一话 · " + label : "下一话（列表第 " + nextChapter.index + " 话）";
+  })();
   const curLabel = override ? override.label : (chapterLabel(curChapter) || chapterName || "");
   const curSort = override ? override.sort : (Number(chapterSort) || Number(curChapter?.sort) || undefined);
   // —— 弹窗状态 ——
@@ -259,6 +388,12 @@ export default function ReaderPanel({
   // 之前 jm:deseam 只发不收（半截契约），按钮态与真值一旦分头修改就会不一致。
   useEffect(() => on("jm:deseam", (v) => setDeseamState(Boolean(v))), []);
   const currentRef = useRef(1);
+  /** 已预取（并正在解码）的前方页：键是页码，翻过去即释放 */
+  const preloadRef = useRef<Map<number, HTMLImageElement>>(new Map());
+  /** 本话累计"彻底失败"的页数；自愈次数与上次自愈时间（允许隔一段时间再自愈一次，不再一话只给一次机会） */
+  const pageFailRef = useRef(0);
+  const healCountRef = useRef(0);
+  const healAtRef = useRef(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
   const railTimer = useRef<number | null>(null);
@@ -341,20 +476,36 @@ export default function ReaderPanel({
 
   useEffect(() => { localStorage.setItem(MODE_KEY, mode); }, [mode]);
 
-  // 翻页预解码：防抖后提前加载并解码相邻下一页（单页/连续均生效，最多占用 1 张内存）
+  // 翻页预解码：防抖后提前加载并解码相邻 N 页（单页/连续均生效）。
+  // 原来只预取 1 页、防抖 180ms：正文图实测 110~120KB，移动网络下单张几百毫秒，
+  // 也就是**翻页几乎必然要等**（读者感知的"卡"主要在翻页瞬间，不在首页）。
+  // 预取张数按机型分档：低配机（isLowFx）只取 1 页，别和主线程抢解码。
+  // 持有的 Image 只保留"仍在前方"的那几页，翻过去的当帧释放（一张解码后 1~2MB）。
   useEffect(() => {
-    const next = pageUrls.find((p) => Number(p.page) === current + 1);
-    if (!next) return;
     const timer = window.setTimeout(() => {
-      const im = new Image();
-      im.decoding = "async";
-      im.src = next.image;
-      if (typeof im.decode === "function") {
-        im.decode().catch(() => { /* 解码失败不影响正常流程 */ });
+      const ahead = isLowFx() ? 1 : PRELOAD_AHEAD_PAGES;
+      const keep = new Map<number, HTMLImageElement>();
+      for (let k = 1; k <= ahead; k++) {
+        const pageNo = current + k;
+        const next = pageUrls.find((p) => Number(p.page) === pageNo);
+        if (!next) break;
+        const held = preloadRef.current.get(pageNo);
+        if (held) { keep.set(pageNo, held); continue; } // 已预取过，别重复发请求
+        const im = new Image();
+        im.decoding = "async";
+        im.src = next.image;
+        if (typeof im.decode === "function") {
+          im.decode().catch(() => { /* 解码失败不影响正常流程 */ });
+        }
+        keep.set(pageNo, im);
       }
-    }, 180);
+      preloadRef.current = keep;
+    }, PRELOAD_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [current, pageUrls]);
+
+  // 卸载时放掉预取引用（图片缓存本身由浏览器管，不在这里动）
+  useEffect(() => () => { preloadRef.current.clear(); }, []);
 
   useEffect(() => {
     if (!client.setting) {
@@ -532,6 +683,51 @@ export default function ReaderPanel({
     return rows;
   }
 
+  /**
+   * 当前话正文图的路径（含 query）：换源测速的探针。blob:（离线缓存）与相对地址都不能用，跳过。
+   */
+  function pageProbePath(): string {
+    for (const p of pageUrls) {
+      const src = String(p.image || "");
+      if (!/^https?:\/\//i.test(src)) continue;
+      try { const u = new URL(src); return u.pathname + u.search; } catch { /* 跳过这个 */ }
+    }
+    return "";
+  }
+
+  /**
+   * 页图彻底失败（重试链走完快速阶段）时上报。
+   * 一话里累计到阈值就自动换源一次 —— 等于替用户点一下「更快的源」，不再让用户自己摸索。
+   * 每话最多自动跑 HEAL_MAX 次、两次之间至少隔 HEAL_COOLDOWN：弱网下不会反复重载，
+   * 但也不会像"一话只许一次"那样，第一轮自愈正好撞上全网不通就用完了机会。
+   */
+  function onPageGiveUp() {
+    pageFailRef.current += 1;
+    if (offline || pageFailRef.current < PAGE_FAIL_HEAL_MIN) return;
+    if (healCountRef.current >= PAGE_HEAL_MAX) return;
+    if (Date.now() - healAtRef.current < PAGE_HEAL_COOLDOWN_MS) return;
+    healCountRef.current += 1;
+    healAtRef.current = Date.now();
+    pageFailRef.current = 0;
+    pushToast("正文图连续加载失败，正在自动换源…", "err");
+    window.setTimeout(() => { void runSpeedTest(undefined, { avoidCurrent: true }); }, 700);
+  }
+
+  /** <img onError>：CORS 回退 → 退避重试 → 彻底失败时上报（见 handlePageImgError） */
+  function onImgError(e: React.SyntheticEvent<HTMLImageElement>) {
+    handlePageImgError(e, onPageGiveUp);
+  }
+
+  /** <img onLoad>：先把重试计数与失败态清掉（慢速恢复里成功了也要把界面复原），再重排 */
+  function onPageLoaded(im: HTMLImageElement) {
+    clearPageRetry(im);
+    delete im.dataset.retryN;
+    const box = pageBoxOf(im);
+    if (box) delete box.dataset.failed;
+    applyScramble(im, albumId, scrambleId);
+    markPageReady(im);
+  }
+
   /** 手动选源：立刻关浮层，阅读器先进加载骨架，再按新源从头填充（失败把原页放回） */
   async function changeSource(key: string) {
     if (sourceBusy) return;
@@ -541,6 +737,7 @@ export default function ReaderPanel({
     const prevPages = beginRestage();
     try {
       if (key !== "0") await client.getSetting();
+      // 预检开着：万一这个源返回的页 URL 落在拉不动的图床上，会自动换成同路径的可用镜像
       const [r] = await Promise.all([client.getRead(albumId), holdStage()]);
       if (!r) { setPageUrls(prevPages); return; }
       setPageUrls(r.images);
@@ -568,8 +765,16 @@ export default function ReaderPanel({
     setTesting(false);
   }
 
-  /** 阅读器内测速：实测各图源图床下载耗时，自动切到最快图源，并把结果写回弹窗列表 */
-  async function runSpeedTest(gen = ++speedGenRef.current) {
+  /**
+   * 阅读器内测速：实测各图源图床下载耗时，自动切到最快图源，并把结果写回弹窗列表。
+   *
+   * ⚠️ 探针对象必须是**这本书的正文图**，不是封面缩略图：
+   * 封面是静态文件、CDN 边缘直吐，正文图要走回源+解密，两者会给出相反的排名
+   * （启动选源那边同样踩过这个坑，见 core/api.ts 的 PROBE_PHOTO_PATHS）。
+   * 以前这里测的是 /media/albums/<id>_3x4.jpg，于是"更快的源"可能选出一个封面快、
+   * 正文慢甚至拉不到图的图床。现在拿当前话第 1 页的路径去换 host 测，测的就是真正要看的东西。
+   */
+  async function runSpeedTest(gen = ++speedGenRef.current, opts: { avoidCurrent?: boolean } = {}) {
     if (testing) return;
     setTesting(true);
     try {
@@ -589,13 +794,18 @@ export default function ReaderPanel({
       const hostMap = new Map<string, string>();
       const items: SpeedItem[] = [];
       const stamp = String(Date.now());
+      // 探针路径：优先当前话正文图（首页），拿不到（还没加载出页列表 / 离线 blob）才退回封面
+      const samplePath = pageProbePath();
+      const probePath = samplePath
+        ? samplePath + (samplePath.includes("?") ? "&" : "?") + "bust="
+        : "/media/albums/" + String(albumId) + "_3x4.jpg?v=";
       for (const p of probes) {
         if (!p.host) continue;
         hostMap.set(p.key, p.host);
         const label = rows.find((x) => x.key === p.key)?.title || p.key;
         items.push({
           label: label + "（" + p.host + "）",
-          url: "https://" + p.host + "/media/albums/" + String(albumId) + "_3x4.jpg?v=" + stamp,
+          url: "https://" + p.host + probePath + stamp,
           tag: p.key
         });
       }
@@ -615,7 +825,12 @@ export default function ReaderPanel({
         return { ...row, host, ms: s ? s.ms : undefined, ok: s ? s.ok : false };
       }));
       // 选源交给 core/speed.pickFastestSource：官方源优先于 express，且不再按 host 反查、失败不再静默落到 rows[0]
-      const best = pickFastestSource(samples, "0");
+      let best = pickFastestSource(samples, "0");
+      // 自愈场景（正文图已经连续失败）：当前源本身要避开，否则"换到当前源"等于什么也没换
+      if (opts.avoidCurrent && best && String(best.tag) === String(client.imageShunt)) {
+        const alt = pickFastestSource(samples.filter((s) => String(s.tag) !== String(client.imageShunt)), "0");
+        if (alt) best = alt;
+      }
       if (!best || best.tag === undefined) {
         pushToast("所有图源均测速失败，请检查网络后重试", "err");
         return;
@@ -626,6 +841,8 @@ export default function ReaderPanel({
       // 换源同样是整块重载：与手动选源一致，先骨架再从第 1 页填充（失败把原页放回）
       const prevPages = beginRestage();
       try {
+        // 预检开着：测速挑的是"图床"，而 /comic_read 可能把这个 key 落到另一个图床 ——
+        // 预检正好补上这一环（真实页 URL 不可用就换同路径镜像），不会再出现"选了却全黑"
         const r = await client.getRead(albumId);
         if (!r) setPageUrls(prevPages);
         else { setPageUrls(r.images); commitRestage(); }
@@ -718,10 +935,11 @@ export default function ReaderPanel({
     const recovered = await pagesFromCache(id);
     if (recovered.length > 0) {
       // 只有图片、没有 IDB 记录：联网补一次 scrambleId（离线时拿不到，图片会保持未重排）
-      const r = await client.getRead(id).catch(() => null);
+      const r = await client.getRead(id, { preflight: false }).catch(() => null);
       return { pages: recovered, scrambleId: r?.scramble_id };
     }
-    const r = await client.getRead(id).catch(() => null);
+    // 批量缓存路径：不在这里做预检（每话都 HEAD 一次纯属浪费），源在进阅读器时已经验过
+    const r = await client.getRead(id, { preflight: false }).catch(() => null);
     if (!r || !Array.isArray(r.images) || r.images.length === 0) return null;
     return { pages: r.images, scrambleId: r.scramble_id };
   }
@@ -734,6 +952,8 @@ export default function ReaderPanel({
   function beginRestage(): ReadPage[] {
     const prev = pageUrls;
     blobCursorRef.current = blobCheckpoint();
+    // 新一话/新图源：失败计数归零（自愈次数与冷却保留，避免换源失败后立刻再自愈一次）
+    pageFailRef.current = 0;
     setPageUrls([]);
     return prev;
   }
@@ -785,6 +1005,8 @@ export default function ReaderPanel({
       setOverride({ id, pages: next.pages, scrambleId: next.scrambleId, label, sort: Number(c.sort) || undefined });
       commitRestage();
       recordHistory(id, label, Number(c.sort) || undefined);
+      // 回写外层详情页的"当前话"：否则退回详情还停在进入阅读器时那一话
+      onChapterChange?.(id, label, Number(c.sort) || undefined);
     } catch (err) {
       pushToast("切换失败：" + String(err).replace(/^Error: /, "").slice(0, 80), "err");
       setPageUrls(prevPages);
@@ -947,8 +1169,15 @@ export default function ReaderPanel({
         style={{ "--jm-ar": ratioRef.current + "%" } as CSSProperties}
       >
         <img className="jm-page" data-page={p.page} src={pageSrc(p)} alt={imageName(p)} crossOrigin="anonymous" loading="lazy" decoding="async" draggable={false}
-          onLoad={(e) => { applyScramble(e.currentTarget, albumId, scrambleId); markPageReady(e.currentTarget); }}
+          onLoad={(e) => { onPageLoaded(e.currentTarget); }}
           onError={onImgError} />
+        {/* 重试全用尽才显示（CSS 按 figure[data-failed] 控制）：以前失败页和"还在加载"长得一模一样，
+            用户只能靠「换源」把整块重挂一遍来蒙 —— 现在失败是可见的，并且能单页重来 */}
+        <button type="button" className="jm-retry" onClick={(e) => {
+          e.stopPropagation();
+          const im = e.currentTarget.parentElement?.querySelector<HTMLImageElement>("img.jm-page");
+          if (im) resetPageImage(im);
+        }}>加载失败 · 点按重试</button>
       </figure>
     );
   }
@@ -1164,6 +1393,24 @@ export default function ReaderPanel({
               <button className="sheet-close" aria-label="关闭" onClick={() => setChapOpen(false)}>×</button>
             </div>
             <p className="muted">共 {chapters.length} 话 · 当前 {curLabel || "第1话"}</p>
+            {/* 「下一话」：× 之下、话列表之上。连续看的时候不用回列表里翻找，一话读完直接点它 */}
+            <button
+              type="button"
+              className="chap-next"
+              disabled={switchBusy || !nextChapter}
+              aria-busy={nextChapter && switchKey === String(nextChapter.chapter.id) ? "true" : undefined}
+              onClick={() => { const n = nextChapter; if (n) void switchToChapter(n.chapter); }}
+            >
+              {nextChapter
+                ? (
+                  <>
+                    {switchKey === String(nextChapter.chapter.id) && <span className="row-spin" aria-hidden="true" />}
+                    <span>{nextChapterText}</span>
+                    <span className="chev" aria-hidden="true">›</span>
+                  </>
+                )
+                : <span>已是最后一话</span>}
+            </button>
             <div className="list sheet-list">
               {chapters.length === 0 && <SkeletonRows count={6} />}
               {chapters.map((c) => {
@@ -1280,9 +1527,14 @@ export default function ReaderPanel({
         {/* key 跟着页走：换页时转圈重新出现，不会沿用上一页的"已就绪"标记 */}
         <div className="jm-single-wrap" key={stageGen + ":" + (page ? String(page.page) : "none")}>
           <span className="loading-spinner" aria-hidden="true" />
-          {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous"
-            onLoad={(e) => { applyScramble(e.currentTarget, albumId, scrambleId); markPageReady(e.currentTarget); }}
+          {page && <img key={String(page.page)} className="jm-single" src={pageSrc(page)} alt={imageName(page)} crossOrigin="anonymous" loading="lazy" decoding="async"
+            onLoad={(e) => { onPageLoaded(e.currentTarget); }}
             onError={onImgError} />}
+          <button type="button" className="jm-retry" onClick={(e) => {
+            e.stopPropagation();
+            const im = e.currentTarget.parentElement?.querySelector<HTMLImageElement>("img.jm-single");
+            if (im) resetPageImage(im);
+          }}>加载失败 · 点按重试</button>
         </div>
 
         {overlays}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickApkAsset, type UpdateAsset } from "./updateAsset";
+import { pickApkAsset, pickIpaAsset, type UpdateAsset } from "./updateAsset";
 
 const a = (name: string): UpdateAsset => ({ name, browser_download_url: "https://example.com/" + name });
 const BOTH = [a("jm-minimal-modern-1.8.2.apk"), a("jm-minimal-compat-1.8.2.apk")];
@@ -40,5 +40,46 @@ describe("pickApkAsset", () => {
     expect(pickApkAsset(undefined, "modern")).toBeNull();
     expect(pickApkAsset([], "modern")).toBeNull();
     expect(pickApkAsset([{ name: 123 } as unknown as UpdateAsset], "modern")).toBeNull();
+  });
+});
+
+// iOS 侧：不能自己装 ipa（无越狱没有任何 API 允许 App 安装另一个 App），
+// 但可以跳浏览器下载 → 下载件点开交给 SideStore 装。所以要挑出 ipa 的**直链**。
+describe("pickIpaAsset", () => {
+  const IPA = a("jm-minimal-ios-2.2.6.ipa");
+  const FULL = [a("jm-minimal-modern-2.2.6.apk"), a("jm-minimal-compat-2.2.6.apk"), a("jm-minimal-setup-2.2.6.exe"), a("latest.yml"), IPA];
+
+  it("从完整 Release 里挑出 ipa，且不受 apk/exe/yml 干扰", () => {
+    expect(pickIpaAsset(FULL)?.name).toBe("jm-minimal-ios-2.2.6.ipa");
+    expect(pickIpaAsset(FULL)?.browser_download_url).toContain(".ipa");
+  });
+
+  it("Release 里还没有 ipa → null（上层退化成打开 Release 页手动下载）", () => {
+    expect(pickIpaAsset([a("jm-minimal-modern-2.2.6.apk")])).toBeNull();
+    expect(pickIpaAsset([])).toBeNull();
+    expect(pickIpaAsset(undefined)).toBeNull();
+  });
+
+  it("多个 ipa 时只认 ios 命名的那个（不能把别的平台的包推给 iPhone）", () => {
+    const assets = [a("vbox-2.2.6.ipa"), IPA];
+    expect(pickIpaAsset(assets)?.name).toBe("jm-minimal-ios-2.2.6.ipa");
+  });
+
+  it("只有一个 ipa 但名字里没有 ios 也兜底返回（紧急发布只挂了单包）", () => {
+    expect(pickIpaAsset([a("jm-minimal-2.2.6.ipa")])?.name).toBe("jm-minimal-2.2.6.ipa");
+  });
+
+  it("多个 ipa 且都不含 ios → null（宁可让用户去发布页自己看，也不推错包）", () => {
+    expect(pickIpaAsset([a("a-1.ipa"), a("b-2.ipa")])).toBeNull();
+  });
+
+  it("大小写不敏感，且忽略非 ipa 资产", () => {
+    expect(pickIpaAsset([a("JM-Minimal-IOS-2.2.6.IPA")])?.name).toContain("IOS");
+    expect(pickIpaAsset([a("jm-minimal-ios-1.ipa.zip")])).toBeNull();
+  });
+
+  it("空/异常输入不抛错", () => {
+    expect(pickIpaAsset([{ name: 123 } as unknown as UpdateAsset])).toBeNull();
+    expect(pickIpaAsset([{ name: null } as unknown as UpdateAsset])).toBeNull();
   });
 });

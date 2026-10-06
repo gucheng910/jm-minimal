@@ -71,6 +71,8 @@ export interface AlbumDetailApi {
   toggleFavorite: () => Promise<void>;
   buy: () => Promise<void>;
   switchChapter: (id: number | string) => Promise<void>;
+  /** 阅读器内换话后同步"当前话"：只改本地快照，不打网络（见实现处说明） */
+  setCurrentChapter: (id: number | string, name?: string) => void;
   submitComment: () => Promise<void>;
   /** 立即阅读：先空数据切页，后台再拉图片列表 */
   startRead: () => void;
@@ -233,6 +235,22 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     });
   }, [applyDetail, fetchDetail, run, applyFirstPage]);
 
+  /**
+   * 阅读器里换了话之后，把"当前话"回写到详情快照。
+   *
+   * 为什么必须有：换话只在阅读器内部（ReaderPanel 的 override），详情页的快照还停在进入阅读器
+   * 时那一话 —— 于是"里面翻了好几话，退回详情还停在初始话"，再点「立即阅读」又从头开始。
+   *
+   * 为什么**不打网络**：那一话的页数据阅读器已经拿到了，这里只需要把 id/名称换掉；
+   * 走 switchChapter 会重新拉详情+评论（弱网下明显卡顿，而且会把刚读完的页码/进度打乱）。
+   */
+  const setCurrentChapter = useCallback((id: number | string, name?: string) => {
+    const cur = detailRef.current;
+    if (!cur || String(cur.id) === String(id)) return;
+    const target = cur.series?.find((s) => String(s.id) === String(id));
+    applyDetail({ ...cur, id, name: name || target?.name || cur.name } as unknown as AlbumDetail);
+  }, [applyDetail]);
+
   const loadComments = useCallback(async (aid: number | string) => {
     const data = await run(() => client.getAlbumComments(aid, 1));
     if (data) applyFirstPage(data);
@@ -329,6 +347,7 @@ export function useAlbumDetail(opts: AlbumDetailOptions = {}): AlbumDetailApi {
     setCommentText, setRead, setComments,
     begin, load, set: applyDetail, leave,
     toggleFavorite, buy, switchChapter, submitComment, startRead,
+    setCurrentChapter,
     loadComments, loadMoreComments
   };
 }

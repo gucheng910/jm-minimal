@@ -1221,6 +1221,29 @@ h3 { font-size: 14px; margin: 4px 0; }
 }
 .sheet-actions button:last-child:hover { background: var(--brand); }
 .sheet-actions button:disabled { opacity: 0.5; }
+/* 换话弹窗顶部的「下一话」：在 × 之下、话列表之上。
+   连载一话读完接着看下一话是最高频动作，不该逼用户回列表里找那一行。 */
+.chap-next {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin: 8px 0 2px;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--brand-deep);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: var(--sh-1);
+  cursor: pointer;
+}
+.chap-next:hover { background: var(--brand); }
+.chap-next:active { transform: scale(0.99); }
+.chap-next:disabled { opacity: 0.5; cursor: default; background: var(--surface-2); color: var(--ink-2); }
+.chap-next .chev { font-size: 16px; line-height: 1; opacity: 0.85; }
 .reader-toolbar input.page-input { width: 62px; text-align: center; background: var(--reader-field); color: #fff; border-color: var(--reader-line); padding: 6px; }
 .reader-toolbar .muted { color: var(--reader-ink-3); }
 .reader-cont { padding: 0; }
@@ -1266,6 +1289,30 @@ h3 { font-size: 14px; margin: 4px 0; }
 .jm-single-wrap { position: relative; display: flex; align-items: center; justify-content: center; min-height: calc(var(--vh100) - var(--reader-chrome)); }
 .jm-single-wrap > .loading-spinner { position: absolute; }
 .jm-single-wrap[data-ready] > .loading-spinner { display: none; }
+/* 正文页彻底失败（重试全用尽）才出现的重试入口。
+   以前失败与"还在加载"外观完全一样（都是一个黑框），用户只能去「换源」把整块重挂一遍蒙；
+   现在失败可见、可单页重来。默认隐藏，由 figure/single-wrap 的 data-failed 打开。 */
+.jm-retry {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  padding: 8px 14px;
+  border: 1px solid #4a4646;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.jm-figure[data-failed] > .jm-retry,
+.jm-single-wrap[data-failed] > .jm-retry { display: inline-flex; }
+.jm-figure[data-failed] { background: #171515; }
+/* 失败时别让转圈和重试按钮叠在一起 */
+.jm-single-wrap[data-failed] > .loading-spinner { display: none; }
 .jm-single-wrap .scramble-canvas { max-width: 100%; max-height: calc(var(--vh100) - var(--reader-chrome)); width: auto; height: auto; object-fit: contain; background: var(--reader-field); }
 /* 仅在连续阅读容器内撑满宽度；单页模式让 canvas 走 .jm-single 的等比约束（否则会被压扁） */
 .reader-cont .scramble-canvas { width: 100%; height: auto; display: block; }

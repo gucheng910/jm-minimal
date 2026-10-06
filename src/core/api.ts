@@ -1,7 +1,7 @@
-import { APP_VERSION, AUTO_SELECT_TTL_MS, CONTENT_SECRET, FALLBACK_SHUNT_KEYS, TOKEN_SECRET, UI_KEYS } from "./constants";
+import { APP_VERSION, AUTO_SELECT_TTL_MS, CONTENT_SECRET, FALLBACK_SHUNT_KEYS, HEAL_COOLDOWN_MS, LINE_FAIL_STREAK, LINE_PROBE_ROUNDS, TOKEN_SECRET, UI_KEYS } from "./constants";
 import { aesEcbDecrypt, md5Hex } from "./crypto";
 import { API_PATHS } from "./endpoints";
-import { measureAll, measureImages, pickFastestSource } from "./speed";
+import { measureImages, pickFastestSource, type SpeedSample } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
 import { getMemCache, invalidatePath, makeKey, setMemCache } from "./requestCache";
 import { bookIdOf, mergeBookMeta, rememberSeries } from "./series";
@@ -79,24 +79,88 @@ function businessError(env: ApiEnvelope): JmError {
 
 const AD_PATHS = ["ad_content_all", "advertise_all"];
 
+/** 单调时钟（毫秒）：测速只用它，系统时间被改也不会算出负耗时 */
+function nowMs(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
+/** 与阅读器同样的 [jmd] 前缀：Android release 包的 WebView console 会进 logcat，便于真机排障 */
+function jlogApi(...args: unknown[]): void {
+  try { console.log("[jmd]", ...args); } catch { /* ignore */ }
+}
+
+/** 图源预检的 HEAD 超时：只判"这个图床给不给这张图"，不需要等正文下完。放 4s 是因为
+ *  它挡在首屏前面——超时就认为这个图床不可用，由镜像池兜底，不让用户干等。 */
+const SOURCE_HEAD_TIMEOUT_MS = 4000;
+/** 镜像池实测取图的超时（只在当前图床不可用时才走到这里） */
+const SOURCE_PROBE_TIMEOUT_MS = 6000;
+/** 图床镜像池缓存时长：hosts 不会每秒变，进几次阅读器不该反复问 /setting */
+const HOST_POOL_TTL_MS = 10 * 60 * 1000;
+
+function hostOf(url: string): string {
+  try { return new URL(url).hostname; } catch { return ""; }
+}
+
+/** 取 URL 的路径 + query：换图床时只换 host，保留原路径与签权参数 */
+function pathOf(url: string): string {
+  try { const u = new URL(url); return u.pathname + u.search; } catch { return ""; }
+}
+
+/** 只换主机、保留路径与 query（同一套 /media/photos 路径在镜像池各图床上是同一份内容） */
+function swapHostKeepPath(url: string, host: string): string {
+  try { const u = new URL(url); u.hostname = host; return u.toString(); } catch { return url; }
+}
+
 /**
- * 校验一个图床域名是否真能出图。
+ * 图床探针路径：**必须用真实正文图**，不是 /media/logo/new_logo.png。
+ *
+ * 为什么（2026-09-30 实测，见 jm-probe/JM加载慢-问题总结.md §3）：
+ *  · logo 是静态文件，CDN 边缘直吐；正文图要走回源 + 解密，两者排名会整体错位
+ *    —— key=2 的 logo 探针 2340ms 而正文只要 226ms（差 10 倍），
+ *    express 的 logo 716ms 而正文 3843ms（差 17 倍，"官方源全挂时兜底到 express"那条路会让整本阅读卡死）。
+ *  · 用 logo 挑源 = **主动避开正文最快的源**，并且会把"只能出 logo 不能出正文"的源判成可用。
+ */
+const PROBE_PHOTO_PATHS = ["/media/photos/400222/00001.webp"];
+const PROBE_LOGO_PATH = "/media/logo/new_logo.png";
+
+/**
+ * 校验一个图床域名是否真能出**正文图**。
  * 用 <img> 真实解码而不是 fetch（no-cors 的 fetch 对 403/404 也会 resolve，会把"连得上但不给图"误判为可用）。
- * 用途：setting 里给的 express 图床在部分网络下是死的，光信它就会一直"线路通、封面全白"。
+ * 用途：setting 里给的图床在部分网络下是死的，光信它就会一直"线路通、封面全白"。
+ *
+ * 正文路径整体取不到（样例图册被删等）时才退回 logo 复检——那时是"路径没了"而不是"图床死了"，
+ * 退回旧判据总好过把可用图床判死。复检超时故意给得短：它只需要分辨 404 与"连不上"。
  */
 async function imageHostOk(host: string, timeoutMs: number): Promise<boolean> {
   const h = String(host || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
   if (!h) return false;
-  const samples = await measureImages(
-    [{ label: "check", url: "https://" + h + "/media/logo/new_logo.png?t=" + Date.now() }],
-    timeoutMs
+  for (const path of PROBE_PHOTO_PATHS) {
+    const samples = await measureImages(
+      [{ label: "check", url: "https://" + h + path + "?t=" + Date.now() }],
+      timeoutMs
+    );
+    if (samples.some((s) => s.ok)) return true;
+  }
+  const fallback = await measureImages(
+    [{ label: "check", url: "https://" + h + PROBE_LOGO_PATH + "?t=" + Date.now() }],
+    Math.min(timeoutMs, 1500)
   );
-  return samples.some((s) => s.ok);
+  return fallback.some((s) => s.ok);
 }
 
 export class JMClient {
   apiBase = "";
   private selecting: Promise<boolean> | null = null;
+  /** 测速是否正在跑（与 selecting 不同：selecting 兑现后仍非空，用它可以区分"在跑"与"跑完过"） */
+  private selectingBusy = false;
+  /** >0 表示当前处于测速/探测流程内部，期间的失败不计入线路劣化（见 noteLineFailure） */
+  private probing = 0;
+  /** 连续网络层失败次数（业务错误码 / 服务端已答复不计） */
+  private netFailStreak = 0;
+  private lastHealAt = 0;
+  /** 图床镜像池缓存 + 上次预检选中的图床（下次预检优先试它） */
+  private hostPool: { at: number; hosts: string[] } = { at: 0, hosts: [] };
+  private preferredHost = "";
   private initPromise: Promise<string> | null = null;
   /** relogin 单飞锁：并发 401 只触发一次登录 */
   private reloginPromise: Promise<MemberInfo | null> | null = null;
@@ -204,20 +268,30 @@ export class JMClient {
   }
 
   private async runAutoSelect(): Promise<boolean> {
+    // 测速期间不计入"线路劣化"（这里的失败是"正在比较各条线路"，不代表当前线路坏了），
+    // 否则弱网下一轮测速就能把自己的自愈触发起来
+    this.probing += 1;
+    this.selectingBusy = true;
+    try {
+      return await this.runAutoSelectInner();
+    } finally {
+      this.probing -= 1;
+      this.selectingBusy = false;
+    }
+  }
+
+  private async runAutoSelectInner(): Promise<boolean> {
     const servers = this.hostConfig?.jm3_Server || [];
     if (servers.length === 0) return false;
     // 图源清单来自 setting：没就绪时只有 express 一个候选源，测不出东西就只能停在死图床
     if (!this.setting) { try { await this.getSetting(); } catch { /* 尽力而为 */ } }
-    const stamp = String(Date.now());
-    // 1) 线路测速
-    const lineItems = servers.map(([host]) => ({ label: host, url: "https://" + host + "/static/jmapp3apk/version.json?t=" + stamp, tag: host }));
-    const lineSamples = await measureAll(lineItems, servers.length);
+    // 1) 线路测速：真实业务接口 /setting + 每线多轮取中位数（见 measureLines 的实测依据）
+    const lineSamples = await this.measureLines(servers.map(([host]) => host));
     // 线路没有 express 概念（tag 就是主机名，不会是 "0"），这里等价于"最快的可用线路"
     const bestLine = pickFastestSource(lineSamples);
     let anyOk = false;
     if (bestLine) {
-      const host = bestLine.url.replace(/^https?:\/\//, "").split("/")[0];
-      this.selectLine(host);
+      this.selectLine(String(bestLine.tag || ""));
       anyOk = true;
     }
     // 2) 图源图床测速（快速通道 + 官方图源1..N）
@@ -226,8 +300,11 @@ export class JMClient {
       const k = String(s.key ?? "");
       if (k && !keys.includes(k)) keys.push(k);
     }
-    // setting 缺失/为空时也要能换源（与官方清单取并集，去重后顺序不变）
-    for (const k of FALLBACK_SHUNT_KEYS) { if (!keys.includes(k)) keys.push(k); }
+    // 兜底表只在 setting 没给出任何图源时补位：那时没有别的候选源可测。
+    // setting 正常时不再并上它——那会为不存在的 key 多发 N 次 /setting，全压在冷启动上。
+    if (keys.length <= 1) {
+      for (const k of FALLBACK_SHUNT_KEYS) { if (!keys.includes(k)) keys.push(k); }
+    }
     const hostByKey = await Promise.all(keys.map(async (key) => {
       let host = "";
       try { host = await this.probeImageHost(key); } catch { host = ""; }
@@ -235,27 +312,22 @@ export class JMClient {
       if (!host && key === "0") host = "cn-ms.jmapiproxy2.cc";
       return { key, host };
     }));
-    // 用真实封面图（<img> 解码）而不是 no-cors 的 logo 探测：
-    // 后者对 403/404 也会 resolve，会把"连得上但不给图"的图床误判为可用（老设备封面全白就是这么来的）
-    const imgItems = hostByKey
-      .filter((p) => p.host)
-      .map((p) => ({ label: p.key, url: "https://" + p.host + "/media/logo/new_logo.png?t=" + stamp, tag: p.key }));
+    // 用真实正文图（<img> 解码）测速，理由见 PROBE_PHOTO_PATHS：
+    // logo 探针会主动避开正文最快的源，还会把"只能出 logo 不能出正文"的源判成可用。
     const okHosts = new Set<string>();
-    if (imgItems.length > 0) {
-      const samples = await measureImages(imgItems, 6000);
-      for (const s of samples) { if (s.ok) okHosts.add(s.url.replace(/^https?:\/\//, "").split("/")[0]); }
-      // 官方正常图源优先于 express（0）。实测（小米 4W / 2026-09-11）：express 图床（cn-ms.*）
-      // 对 /media/logo/new_logo.png 返回 200，对正文 /media/photos/*.webp 直接 ERR_CONNECTION_RESET。
-      // 只按"能不能出图 + 快不快"挑，express 必然胜出 → 封面正常、整本正文全黑。
-      // 所以：官方源里有任何一个可用就不用 express，express 只在官方源全挂时兜底。
-      // 选源规则收在 core/speed.pickFastestSource：官方源优先于 express（0），按 tag 精确取 key，
-      // 不再用 host 反查（host 带尾斜杠/重复时反查会失败或串行）
-      const bestImg = pickFastestSource(samples, "0");
-      if (bestImg && bestImg.tag !== undefined) { this.setImageShunt(String(bestImg.tag)); anyOk = true; }
-    }
+    const samples = await this.measureShuntHosts(hostByKey);
+    for (const s of samples) { if (s.ok) okHosts.add(s.url.replace(/^https?:\/\//, "").split("/")[0]); }
+    // 官方正常图源优先于 express（0）。实测（小米 4W / 2026-09-11）：express 图床（cn-ms.*）
+    // 对 /media/logo/new_logo.png 返回 200，对正文 /media/photos/*.webp 直接 ERR_CONNECTION_RESET。
+    // 只按"能不能出图 + 快不快"挑，express 必然胜出 → 封面正常、整本正文全黑。
+    // 所以：官方源里有任何一个可用就不用 express，express 只在官方源全挂时兜底。
+    // 选源规则收在 core/speed.pickFastestSource：官方源优先于 express（0），按 tag 精确取 key，
+    // 不再用 host 反查（host 带尾斜杠/重复时反查会失败或串行）
+    const bestImg = pickFastestSource(samples, "0");
+    if (bestImg && bestImg.tag !== undefined) { this.setImageShunt(String(bestImg.tag)); anyOk = true; }
     // 3) 用选定线路 + 图源刷新配置（图床随之更新），并记住本次最优选择
     await this.getSetting().catch(() => { /* ignore */ });
-    // 3.5) express（快速通道）图床兜底：setting 给出的 img_host 在部分网络下是死的，
+    // 3.5) 图床兜底：setting 给出的 img_host 在部分网络下是死的，
     //      光信它就会一直"线路通、封面全白"。测速已经验过的源里换一个真能出图的。
     const applied = String(this.setting?.img_host || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
     if (applied && !okHosts.has(applied) && !(await imageHostOk(applied, 4000))) {
@@ -272,6 +344,96 @@ export class JMClient {
     if (anyOk) this.saveBestSelection();
     return anyOk;
   }
+
+  /**
+   * 线路测速：每线 LINE_PROBE_ROUNDS 轮**真实 /setting**，取中位数。返回可直接喂 pickFastestSource 的样本。
+   *
+   * 两处都是实测结论（见 jm-probe/JM加载慢-问题总结.md §2）：
+   *  · 单次采样在 ±200ms 抖动面前就是抽签：p50 只差 37ms 的两条线路，单轮差值能在 4~132ms 之间翻，
+   *    20 轮模拟里选中最优的正确率只有 30%；而选错的代价被 TTL 放大成好几十分钟。
+   *  · 测速对象不能用 /static/jmapp3apk/version.json：静态文件是 CDN 边缘直吐、不需要回源，
+   *    与业务接口的排名会整体错位（实测某线路 version.json 排名第 1、/setting 实测最慢）。
+   *    所以这里直接打业务路径、并带上 Token 签名（与业务请求同一条链路，含服务端解密）。
+   */
+  private async measureLines(hosts: string[]): Promise<SpeedSample[]> {
+    const times = new Map<string, number[]>();
+    for (let round = 0; round < LINE_PROBE_ROUNDS; round++) {
+      // 同一轮内所有线路并发（串行会把"并发"的差别算进单线耗时）
+      const one = await Promise.all(hosts.map(async (host) => ({ host, ms: await this.probeLineOnce(host) })));
+      for (const r of one) {
+        if (r.ms === null) continue;
+        const arr = times.get(r.host);
+        if (arr) arr.push(r.ms); else times.set(r.host, [r.ms]);
+      }
+    }
+    const out: SpeedSample[] = hosts.map((host) => {
+      // 只按成功的轮次算中位数：超时/失败不参与，否则一次超时会把一条好线路判死
+      const arr = (times.get(host) || []).slice().sort((a, b) => a - b);
+      const ok = arr.length > 0;
+      return {
+        label: host,
+        tag: host,
+        url: "https://" + host + "/" + API_PATHS.setting,
+        ms: ok ? arr[Math.floor(arr.length / 2)] : 0,
+        ok
+      };
+    });
+    return out.sort((a, b) => (a.ok === b.ok ? a.ms - b.ms : a.ok ? -1 : 1));
+  }
+
+  /** 单次线路探测：强制指定线路打业务接口，失败返回 null（不重试、不缓存） */
+  private async probeLineOnce(host: string): Promise<number | null> {
+    const t0 = nowMs();
+    try {
+      await this.request<SettingConfig>(
+        API_PATHS.setting,
+        { app_img_shunt: this.imageShunt, t: Math.floor(Date.now() / 1000) },
+        // host 指定线路 → request() 的"解密失败换线"兜底不会介入，测到的就是这条线的时间
+        { host, retries: 1, timeoutMs: 8000, cacheTtlMs: 0 }
+      );
+    } catch {
+      return null;
+    }
+    return Math.round(nowMs() - t0);
+  }
+
+  /**
+   * 图床测速：对每个候选图床用**真实正文图**探测（见 PROBE_PHOTO_PATHS）。
+   * 正文路径整体取不到时退回 logo 复测一遍——那时是"样例图册没了"而不是"所有图床都挂了"，
+   * 退回旧判据只是回到改动前，总好过测不出源、把会话钉在默认图床上。
+   */
+  private async measureShuntHosts(hostByKey: Array<{ key: string; host: string }>): Promise<SpeedSample[]> {
+    const usable = hostByKey.filter((p) => p.host);
+    if (usable.length === 0) return [];
+    const stamp = String(Date.now());
+    const probe = (path: string) => measureImages(
+      usable.map((p) => ({ label: p.key, url: "https://" + p.host + path + "?t=" + stamp, tag: p.key })),
+      6000
+    );
+    for (const path of PROBE_PHOTO_PATHS) {
+      const samples = await probe(path);
+      if (samples.some((s) => s.ok)) return samples;
+    }
+    return probe(PROBE_LOGO_PATH);
+  }
+
+  /**
+   * 线路劣化自愈：连续 LINE_FAIL_STREAK 次**网络层**失败（业务错误码、服务端已答复的不算）就重测一次。
+   * 触发在请求的 catch 里，所以必须是非阻塞的：调用方那次请求照常失败返回，
+   * 换到的新线路/图源由 selectLine 的 jm:lineChanged 与 getSetting 的 jm:setting 驱动 UI 刷新。
+   */
+  private noteLineFailure(): void {
+    this.netFailStreak += 1;
+    if (this.netFailStreak < LINE_FAIL_STREAK) return;
+    this.netFailStreak = 0;
+    const now = Date.now();
+    if (this.selectingBusy || now - this.lastHealAt < HEAL_COOLDOWN_MS) return;
+    this.lastHealAt = now;
+    // 正常路径下 autoSelectBest 每次会话只跑一次（selecting 兑现后仍非空），自愈必须显式放行它
+    this.selecting = null;
+    void this.autoSelectBest().catch(() => false);
+  }
+
   /** 探测指定图源 key 的图床地址（只读，不改变当前图源） */
   async probeImageHost(key: string | number): Promise<string> {
     const cfg = await this.request<SettingConfig>(API_PATHS.setting, {
@@ -452,6 +614,8 @@ export class JMClient {
           const q = this.cleanQuery(params);
           setMemCache(makeKey(apiPath, q as Record<string, unknown>), result, cacheTtl);
         }
+        // 这一次请求走通了当前线路：清掉劣化计数（连续失败要求是"连着的"）
+        this.netFailStreak = 0;
         return result;
       } catch (caught) {
         // 网络错误打上 [network] 标记（区别于业务 api error），便于 UI 提示「检查网络或线路」。
@@ -464,6 +628,9 @@ export class JMClient {
         }
         lastErr = err;
         const kind = kindOf(err);
+        // 线路劣化自愈：连续多次**网络层**失败（不是业务错误码）说明当前线路节点在抽风，
+        // 后台重测一次换线。测速/探测自身的失败不算（options.host 或 probing>0），否则会自激。
+        if (this.probing === 0 && !options.host && (kind === "network" || kind === "timeout")) this.noteLineFailure();
         // 解密失败说明命中异常节点：跳出本线重试循环，交给线路级 fallback
         if (kind === "decrypt") break;
         // 服务端已经答复过（业务错误码）：请求确实被执行了，绝不重发
@@ -568,12 +735,109 @@ export class JMClient {
     return mergeBookMeta(chapter, book);
   }
 
-  getRead(id: number | string): Promise<ReadPayload> {
+  /**
+   * 取一话的阅读数据（页 URL）。默认在建请求前做一次**正文图源预检**（见 ensureReadableSource）：
+   * 进阅读器时"先静默测速、通过后才开始拉正文"，避免进去一片黑还得手动换源。
+   * 内部已经刚测过源的地方（阅读器换源/测速）传 { preflight: false } 跳过。
+   */
+  getRead(id: number | string, opts: { preflight?: boolean } = {}): Promise<ReadPayload> {
+    return this.fetchRead(id).then(async (r) => {
+      if (opts.preflight === false) return r;
+      return (await this.ensureReadableSource(r)) || r;
+    });
+  }
+
+  private fetchRead(id: number | string): Promise<ReadPayload> {
     return this.request<ReadPayload>(API_PATHS.comicRead, {
       id,
       app_img_shunt: this.imageShunt,
       express: this.express ? "on" : "off"
     });
+  }
+
+  /** 单次 HEAD：拿状态码与耗时，不下载正文（这些图床吞 Range，HEAD 是唯一近乎零流量的判据） */
+  private async headOk(url: string, timeoutMs: number): Promise<boolean> {
+    try {
+      const resp = await fetchWithTimeout(url, { method: "HEAD", cache: "no-store", credentials: "omit" }, timeoutMs);
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 正文图源预检（阅读器进入时用）：拿到真实页 URL 后、真正开始下图之前，确认这批 URL 真能取到图。
+   *
+   * 三条都是实测结论（2026-10-06，见 jm-probe）：
+   *  1) 判据必须打在**真实页 URL** 上。用封面/logo 判是假的：封面走 CDN 边缘直吐、正文要回源，
+   *     一个图床完全可能"封面 200、正文被重置"（express 就是活例子）。
+   *  2) 这些图床吞 Range（带 Range 仍返回整图 ~170KB），所以"当前源能不能用"用 **HEAD** 判最省：
+   *     实测各图床 HEAD 均 200 且 size_download=0。
+   *  3) 换源不能按 key 映射到图床 —— `/setting?app_img_shunt=k` 给的 img_host 与
+   *     `/comic_read?app_img_shunt=k` 返回的页 URL 主机**可以不一致**（实测已踩：按 /setting 挑的
+   *     key，切过去拿到的页 URL 落在一个拉不动的 .xyz 主机上）。而同一套 `/media/photos/...` 路径
+   *     在镜像池的各图床上是同一份内容（实测 7 个图床同一路径同为 200/167708B），
+   *     所以正解是：**验证真实 URL → 不行就把主机换成可用的镜像图床**（路径与 t 参数不变）。
+   *
+   * 成本：最常见 **只发 1 次 HEAD**（~0 字节）；只有当前图床不可用时，才多发 N 次 /setting（并发，
+   * 有 10 分钟缓存）+ N 次真实取图（并发）。且被选中的那张正是第 1 页，URL 完全相同 → 命中缓存不白下。
+   * 找不到可用图床就原样返回 null，交给页级重试与阅读器自愈兜底。
+   */
+  private async ensureReadableSource(r: ReadPayload): Promise<ReadPayload | null> {
+    const first = (r?.images || []).find((p) => /^https?:\/\//i.test(String(p?.image || "")));
+    const pageUrl = String(first?.image || "");
+    if (!pageUrl) return null;
+    const curHost = hostOf(pageUrl);
+    if (await this.headOk(pageUrl, SOURCE_HEAD_TIMEOUT_MS)) {
+      this.preferredHost = curHost;
+      return null; // 最常见的出口
+    }
+    const path = pathOf(pageUrl);
+    jlogApi("preflight: 图床 " + curHost + " 取不到正文图，改从镜像池里挑一个");
+    // 先试"上次成功过的图床"：命中就只花 1 张图的探测（重复进阅读器时最省）
+    const tried = this.preferredHost && this.preferredHost !== curHost
+      ? await this.probeMirrorHosts(path, [this.preferredHost])
+      : [];
+    const samples = tried.some((s) => s.ok) ? tried : await this.probeMirrorHosts(path, await this.candidateHosts());
+    const ok = samples.filter((s) => s.ok && String(s.tag) !== curHost);
+    if (ok.length === 0) {
+      jlogApi("preflight: 镜像池里也没有可用图床，交给页级重试");
+      return null;
+    }
+    const best = ok.reduce((a, b) => (b.ms < a.ms ? b : a));
+    const host = String(best.tag || "");
+    if (!host) return null;
+    this.preferredHost = host;
+    jlogApi("preflight: 正文改走 " + host + "（" + best.ms + "ms，同路径镜像）");
+    return { ...r, images: r.images.map((p) => ({ ...p, image: swapHostKeepPath(String(p.image || ""), host) })) };
+  }
+
+  /** 用真实页路径（只换主机）实测一批图床：<img> 真解码，403/404 不会被当成可用 */
+  private probeMirrorHosts(path: string, hosts: string[]): Promise<SpeedSample[]> {
+    const list = [...new Set(hosts)].filter(Boolean);
+    if (list.length === 0) return Promise.resolve([]);
+    return measureImages(
+      list.map((h) => ({ label: h, url: "https://" + h + path, tag: h })),
+      SOURCE_PROBE_TIMEOUT_MS
+    );
+  }
+
+  /** 图床镜像池：/setting?app_img_shunt=k 的 img_host 去重（10 分钟缓存，别每次进阅读器都问一遍） */
+  private async candidateHosts(): Promise<string[]> {
+    if (Date.now() - this.hostPool.at < HOST_POOL_TTL_MS && this.hostPool.hosts.length > 0) {
+      return this.hostPool.hosts;
+    }
+    const keys: string[] = ["0"];
+    for (const s of this.setting?.app_shunts || []) {
+      const k = String(s.key ?? "");
+      if (k && !keys.includes(k)) keys.push(k);
+    }
+    const hosts = (await Promise.all(keys.map(async (k) => {
+      try { return await this.probeImageHost(k); } catch { return ""; }
+    }))).map((h) => h.replace(/^https?:\/\//, "").replace(/\/+$/, "")).filter(Boolean);
+    const uniq = [...new Set(hosts)];
+    if (uniq.length > 0) this.hostPool = { at: Date.now(), hosts: uniq };
+    return uniq;
   }
 
   // ---- M3 官方账务动作（全部由服务端结算） ----
