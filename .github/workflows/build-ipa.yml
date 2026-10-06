@@ -103,8 +103,10 @@ jobs:
           "$RUNNER_TEMP/iconvenv/bin/pip" install --quiet pillow
           "$RUNNER_TEMP/iconvenv/bin/python" tools/gen-ios-icons.py \
             ios/App/App/Assets.xcassets/AppIcon.appiconset build/icon.png
-          # 复核 manifest：scale 必须是数字、不能出现字符串（actool 会报 Unknown scale value）
-          python3 -c "import json;m=json.load(open('ios/App/App/Assets.xcassets/AppIcon.appiconset/Contents.json',encoding='utf-8'));bad=[i for i in m['images'] if not isinstance(i['scale'],int)];assert not bad, 'scale 不是数字: %s' % bad[:3];print('✓ Contents.json 自检通过：%d 张，scale 全为数字' % len(m['images']))"
+          # 复核 manifest：scale 必须是**带 x 后缀的字符串**（"2x"）。这里踩过两个坑：
+          #   "2" → warning: Unknown scale value "2"（条目不生效）
+          #   2   → error: invalid content for the "scale" key ... should be a string（归档失败）
+          python3 -c "import json;m=json.load(open('ios/App/App/Assets.xcassets/AppIcon.appiconset/Contents.json',encoding='utf-8'));bad=[i for i in m['images'] if not (isinstance(i['scale'],str) and i['scale'].endswith('x'))];assert not bad, 'scale 必须是形如 2x 的字符串: %s' % bad[:3];print('✓ Contents.json 自检通过：%d 张，scale 全为 Nx 字符串' % len(m['images']))"
 
       - name: Archive（关闭签名）→ 打 unsigned IPA
         run: |

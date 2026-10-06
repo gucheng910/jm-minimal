@@ -8,7 +8,12 @@
 （通道没真的丢掉）—— 看起来成功、实际没做到，比直接报错更危险。
 
 Pillow 能一次把事情做对：显式 `convert("RGB")` 会真正去掉 alpha 通道，
-再按目标尺寸高质量缩放。同时把 `hasAlpha: false` 写进 Contents.json（Xcode 15+ 的字段）。
+再按目标尺寸高质量缩放。每张落地后重新打开自检 mode==RGB，不满足直接非零退出。
+
+⚠ Contents.json 的 scale 有讲究（两个方向都踩过）：
+  · "2"（字符串无后缀）→ actool: warning: Unknown scale value "2"，条目不生效
+  · 2  （数字）        → actool: error: invalid content for the "scale" key ... should be a string（归档失败）
+  · "2x"（字符串带 x） → 正确，Capacitor 模板自己也是这么写的
 
 用法（在仓库根跑）：
     python3 tools/gen-ios-icons.py ios/App/App/Assets.xcassets/AppIcon.appiconset build/icon.png
@@ -86,9 +91,13 @@ def main():
         images.append({
             "filename": name,
             "idiom": idiom,
-            "scale": scale,          # ⚠ 必须是数字：写成字符串 actool 会报 Unknown scale value
+            # ⚠ scale 必须是**字符串**且**带 x 后缀**（"2x"）。这里踩过两个坑：
+            #   `"2"`（无后缀）→ actool 报 `warning: Unknown scale value "2"`，且该条目不生效；
+            #   `2`（数字）  → actool 报 `error: ... invalid content for the "scale" key.
+            #                  The content should be a string.` 并让归档直接失败（exit 65）。
+            # Capacitor 模板自带的 Contents.json 用的就是 "2x"，以此为准。
+            "scale": "%gx" % scale,
             "size": size_str(pt),
-            "hasAlpha": False,       # Xcode 15+ 字段，明确声明不透明
         })
         print("  ✓ %-26s %dx%d  RGB" % (name, px, px))
 
