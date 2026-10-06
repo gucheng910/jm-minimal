@@ -19,7 +19,7 @@
  * 用法：
  *   node tools/gen-ios-icons.mjs --src build/icon.png --out ios/App/App/Assets.xcassets/AppIcon.appiconset
  */
-import { mkdirSync, writeFileSync, existsSync, readFileSync, copyFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -58,33 +58,34 @@ function die(msg) {
 /**
  * 缩放到 px×px 并**保证不透明**地写成 PNG。
  *
- * 为什么分三步而不是一步 `sips -s hasAlpha no`：
- *   对 PNG，hasAlpha 是**只读**属性，直接设会报 "Cannot do --setProperty hasAlpha on file"（Error 13）。
- *   走一次 JPEG 就绕开了：JPEG 没有 alpha 通道，转过去再转回来，像素已经不透明，
- *   这时 `hasAlpha no` 只是"确认"而不是"修改"，不会再报错。
- * 万一哪台机器上这条还是失败，退回"直接缩放（不去 alpha）"并明确警告，让构建不因为图标而中断。
+ * 为什么不能只写 `sips -s hasAlpha no`：对 PNG，hasAlpha 是**只读**属性，
+ * 直接设会报 "Cannot do --setProperty hasAlpha on file"（CI 实测：Error 13）。
+ *
+ * 为什么也不能靠"PNG → JPEG → PNG"中转：实测那样 sips 会报成功，但产出的 PNG
+ * 仍然是 `hasAlpha=yes`（JPEG 那一步并没有真的把通道丢掉）—— 也就是说这种方式
+ * **看起来成功、实际没去 alpha**，比直接报错更危险。
+ *
+ * 真正有效的做法是 **--padColor + 一点内缩**：sips 先把源图按 FFFFFF 垫底重绘，
+ * 此时图已不透明，再做 `hasAlpha no` 就不会报错，产出的 PNG 实测 `hasAlpha=no`。
+ * 缩放到 (px-16) 是为了给 pad 留出边距——目的是去 alpha，不是加白边，
+ * 图标本身按 iOS 规范在四周留白反而更安全（系统还会再加圆角遮罩）。
  */
 function flatten(px, dest) {
   const tmp = path.join(tmpdir(), "jm-ios-icon-" + process.pid + "-" + px);
+  const inner = Math.max(1, px - 16);
   const png = tmp + ".png";
-  const jpg = tmp + ".jpg";
+  const padded = tmp + "-padded.png";
   try {
-    let r = run("sips", ["-z", String(px), String(px), SRC, "--out", png]);
+    let r = run("sips", ["-z", String(inner), String(inner), SRC, "--out", png]);
     if (r.code !== 0) die("sips 缩放失败：" + r.out.trim());
-
-    r = run("sips", ["-s", "format", "jpeg", png, "--out", jpg]);
-    if (r.code !== 0) {
-      // 老版本 sips / 特殊色彩配置下再退一步：先写中间 PNG 再转 JPEG
-      die("sips 转 JPEG 失败（去 alpha 的关键一步）：" + r.out.trim());
-    }
-    r = run("sips", ["-s", "format", "png", "-s", "hasAlpha", "no", "-z", String(px), String(px), jpg, "--out", dest]);
-    if (r.code !== 0) {
-      console.warn("  ⚠ 去 alpha 失败（" + r.out.trim().split("\n")[0] + "），退回不去 alpha");
-      copyFileSync(png, dest);
-    }
+    r = run("sips", ["-s", "format", "png", "-s", "hasAlpha", "no", "--padColor", "FFFFFF", "-z", String(px), String(px), png, "--out", padded]);
+    if (r.code !== 0) die("sips 去 alpha 失败：" + r.out.trim());
+    // 再兜一次尺寸：pad 与缩放组合后尺寸偶尔会差一像素
+    r = run("sips", ["-z", String(px), String(px), padded, "--out", dest]);
+    if (r.code !== 0) die("sips 定尺失败：" + r.out.trim());
   } finally {
     rmSync(png, { force: true });
-    rmSync(jpg, { force: true });
+    rmSync(padded, { force: true });
   }
   const got = pngSize(dest);
   if (got.w !== px || got.h !== px) die(path.basename(dest) + " 尺寸不对：期望 " + px + "，得到 " + got.w + "x" + got.h);
@@ -140,7 +141,7 @@ const ENTRIES = [
 mkdirSync(OUT, { recursive: true });
 
 const images = [];
-let alphaWarn = 0;
+const alphaBad = [];
 for (const e of ENTRIES) {
   const pt = parseFloat(e.size);
   const px = Math.round(pt * e.scale);
@@ -148,14 +149,23 @@ for (const e of ENTRIES) {
   const dest = path.join(OUT, file);
   flatten(px, dest);
   const alpha = hasAlphaFlag(dest);
-  if (alpha === "yes") alphaWarn += 1;
-  images.push({ idiom: e.idiom, size: e.size, scale: String(e.scale), filename: file });
+  if (alpha !== "no") alphaBad.push(file + "(" + alpha + ")");
+  // ⚠ scale 必须是**数字**：写成字符串的话 actool 会逐条报
+  // `warning: Unknown scale value "2"`，而且那条目实际不会被采用（CI 实测过一次）
+  images.push({ idiom: e.idiom, size: e.size, scale: e.scale, filename: file });
   console.log("  ✓ " + file.padEnd(26) + px + "x" + px + "  hasAlpha=" + alpha);
 }
 
 writeFileSync(path.join(OUT, "Contents.json"), JSON.stringify({ images, info: { author: "xcode", version: 1 } }, null, 2) + "\n");
 console.log("\n✓ AppIcon 资源集已生成：" + path.relative(ROOT, OUT) + "（" + images.length + " 张）");
-if (alphaWarn > 0) {
-  // 不让构建直接挂，但把问题摆到明面上（iOS 图标带 alpha 在归档/上架阶段会被拒）
-  console.warn("⚠ 有 " + alphaWarn + " 张仍带 alpha —— iOS 图标不接受透明，上架/归档可能被拒");
+
+// ---- 硬断言：这两个条件不满足就直接 fail，别让构建"看起来成功" ----
+// 1) 不能带 alpha（iOS 图标不接受透明）
+if (alphaBad.length > 0) {
+  die("有 " + alphaBad.length + " 张图标仍带 alpha：" + alphaBad.slice(0, 5).join(", ") +
+      "\n  iOS 图标不接受透明通道。去 alpha 请走 --padColor（sips 的 hasAlpha 对 PNG 是只读的）。");
 }
+// 2) Contents.json 的 scale 必须是数字，否则 actool 逐条 Unknown scale value 且条目不生效
+const badScale = images.filter((i) => typeof i.scale !== "number");
+if (badScale.length > 0) die("Contents.json 里有 " + badScale.length + " 条 scale 不是数字 —— actool 会报 Unknown scale value");
+console.log("✓ 自检通过：全部不透明 + scale 均为数字");
