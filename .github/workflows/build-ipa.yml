@@ -95,7 +95,16 @@ jobs:
             || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VER" "$INFOPLIST"
 
       - name: 生成 App 图标（沿用 build/icon.png，去 alpha）
-        run: node tools/gen-ios-icons.mjs --src build/icon.png --out ios/App/App/Assets.xcassets/AppIcon.appiconset
+        run: |
+          set -euo pipefail
+          # Pillow 用一次性 venv，避免 --break-system-packages / externally-managed-environment 那套坑
+          python3 -m venv "$RUNNER_TEMP/iconvenv"
+          "$RUNNER_TEMP/iconvenv/bin/pip" install --quiet --upgrade pip
+          "$RUNNER_TEMP/iconvenv/bin/pip" install --quiet pillow
+          "$RUNNER_TEMP/iconvenv/bin/python" tools/gen-ios-icons.py \
+            ios/App/App/Assets.xcassets/AppIcon.appiconset build/icon.png
+          # 复核 manifest：scale 必须是数字、不能出现字符串（actool 会报 Unknown scale value）
+          python3 -c "import json;m=json.load(open('ios/App/App/Assets.xcassets/AppIcon.appiconset/Contents.json',encoding='utf-8'));bad=[i for i in m['images'] if not isinstance(i['scale'],int)];assert not bad, 'scale 不是数字: %s' % bad[:3];print('✓ Contents.json 自检通过：%d 张，scale 全为数字' % len(m['images']))"
 
       - name: Archive（关闭签名）→ 打 unsigned IPA
         run: |

@@ -235,7 +235,7 @@ node tools/release.mjs 2.3.0 --publish --notes <说明文件>
 | `cap add ios` + `cap sync ios` | `ios/` **不入库**（Capacitor 官方建议：原生工程由 cap 生成），所以 CI 每次现生成 |
 | `IPHONEOS_DEPLOYMENT_TARGET = 16.0` | 模板默认 14，用 `sed` 全量替换后断言"至少改到 1 处"，改不到直接 fail |
 | `CFBundleDisplayName = JM极简版` | 桌面图标下的名字。`appName` 只在 `cap add` 那次用过，之后改 `capacitor.config.ts` 不会同步到已有工程 |
-| `node tools/gen-ios-icons.mjs` | 用 `build/icon.png`（512×512 RGBA）生成全套 AppIcon；**必须去 alpha**（iOS 图标不接受透明），1024 那档是升采样 |
+| 生成 AppIcon（`tools/gen-ios-icons.py`） | 用 `build/icon.png`（512×512 RGBA）生成全套 23 张；**必须去 alpha**（iOS 图标不接受透明），1024 那档是升采样。⚠ 不要用 macOS 自带的 sips 做这件事：sips 对任何 PNG 都拒绝 `--setProperty hasAlpha`（Error 13），而"PNG→JPEG→PNG 中转"会**报成功但通道仍在** —— 所以用 Pillow 显式 `convert("RGB")`，并把 `hasAlpha:false` 与**数字** scale 写进 Contents.json（写成字符串 actool 会报 Unknown scale value 且条目不生效） |
 | `xcodebuild archive` + `zip` | `CODE_SIGNING_ALLOWED=NO` 等全关；打完**断言 ipa 里没有 `_CodeSignature`** —— 有就说明签名没关干净，SideStore 会装不上 |
 
 ⚠️ **版本号铁律**：ipa 内嵌的版本来自构建那一刻的 `package.json`，而 iOS 的"检查更新"是按 Release tag
