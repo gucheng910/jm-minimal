@@ -236,23 +236,27 @@ function pumpSeam(): void {
           let bad = 0;
           let maxLevel = 0;
           let maxEnd = 0;
+          let sumDrop = 0;
           const fixed = smoothSeams(cv, task.parts, SEAM_VISIBLE_SCORE, (info) => {
             bands += 1;
             if (info.level > maxLevel) maxLevel = info.level;
             if (info.endLevel > maxEnd) maxEnd = info.endLevel;
             if (info.level <= SEAM_VISIBLE_SCORE) return;
             bad += 1;
-            // 每条超标边界都记全：判定值 / 残留 / 干净列数 / 被"内容否决"剔除的列数 / 保留遍数。
-            // 这五项就是「误判还是真条纹」的判据（内容否决会把误判的 n 打到很小、否决数很大），
-            // 也是以后调门槛（多条边界才动手之类）的唯一依据。
+            sumDrop += Math.max(0, info.jumpBefore - info.jumpAfter);
+            // 每条超标边界都记全：判定值 / 残留 / **边界跳变（肉眼指标）** / 干净列数 /
+            // 被内容判据剔除的列数 / 保留遍数。
+            // 「跳变降了多少」是验收指标（2026-10-10 的回归就是只量遍数才放过去的）；
+            // 「干净列数 + 剔除列数」用来判断判定是否过严。
             bandLines.push("b=" + info.b + " lv=" + info.level.toFixed(2) + "→" + info.endLevel.toFixed(2) +
-              " n=" + info.n + " 否决=" + info.rejected + " 修" + info.repaired);
+              " 跳" + info.jumpBefore.toFixed(0) + "→" + info.jumpAfter.toFixed(0) +
+              " n=" + info.n + " 剔除=" + info.rejected + " 修" + info.repaired);
           });
           cv.dataset.seamRepaired = "1";
           const tail = bad === 0
             ? " 达标跳过"
-            : (fixed > 0 ? " → 保留 " + fixed + " 遍修复（残留 " + maxEnd.toFixed(2) + "）"
-                         : " → 未修（回滚 / 样本不足）");
+            : (sumDrop > 0 ? " → 跳变共降 " + sumDrop.toFixed(0) + " 灰阶（保留 " + fixed + " 遍，残留 " + maxEnd.toFixed(2) + "）"
+                           : " → 未修（回滚 / 样本不足）");
           jlog("seam page=" + task.pageName + " 超额 " + maxLevel.toFixed(2) + "，超标 " + bad + "/" + bands + " 条边界" + tail);
           if (bad > 0) jlog("seam bands page=" + task.pageName + " " + bandLines.join(" | "));
         } catch (err) {
