@@ -13,7 +13,7 @@ import { measureImages, pickFastestSource, type SpeedItem } from "./core/speed";
 import { pushToast } from "./ui/toast";
 import { SkeletonRows } from "./ui/SkeletonRows";
 import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
-import { deseaOn, drawUnscrambled, measureSeamDetail, pageNameOf, scrambleSliceCount, setDeseam, smoothSeams } from "./core/scramble";
+import { deseaOn, drawUnscrambled, pageNameOf, scrambleSliceCount, SEAM_VISIBLE_SCORE, setDeseam, smoothSeams } from "./core/scramble";
 import { resolveReaderScrollHost, scrollByHost, scrollToTopOf, scrollTopOf } from "./core/scrollHost";
 import { TAP_ZONES_CONTINUOUS, TAP_ZONES_SINGLE, loadTapInvert, resolveTapAction, saveTapInvert } from "./core/tapZones";
 import { NO_SEAM, UI_KEYS } from "./core/constants";
@@ -60,10 +60,9 @@ function imageName(p: ReadPage): string {
 }
 
 // 去条纹 = 纯本地图像修复（不消耗额外流量）：
-//   按条带边界量测"超额跳变"，未达标的做逐列加权垂直高斯（平坦列全量、有垂直细节的列不动），
-//   修完复测该边界，未达标则换更宽的核再来一遍。
-// 评分 > 1 即判为可见条纹（阈值见 src/core/scramble.ts）
-const SEAM_BAD_SCORE = 1.0;
+//   按条带边界量测"超额跳变"，未达标的做逐列加权垂直高斯（平坦列全量、
+//   有垂直细节或落着内容横边的列一点不动），修完复测该边界，没换来改善就回滚收工。
+// 可见阈值（1.0）在 core/scramble 里定义一次（SEAM_VISIBLE_SCORE），这里不再各写一份。
 
 function jlog(...args: unknown[]) {
   try { console.log("[jmd]", ...args); } catch { /* ignore */ }
@@ -229,11 +228,33 @@ function pumpSeam(): void {
       const task = seamTasks.get(cv);
       if (task) {
         try {
-          const before = measureSeamDetail(cv, task.parts);
-          const fixed = before.score > SEAM_BAD_SCORE ? smoothSeams(cv, task.parts) : 0;
+          // smoothSeams 内部已经量过所有边界、并通过回调把每条边界的信息带回来，
+          // 所以这里不再单独 measureSeamDetail 一次 —— 原来每次进视口要跑两遍全扫
+          // （Reader 一遍 + smoothSeams 内部一遍），纯浪费。
+          const bandLines: string[] = [];
+          let bands = 0;
+          let bad = 0;
+          let maxLevel = 0;
+          let maxEnd = 0;
+          const fixed = smoothSeams(cv, task.parts, SEAM_VISIBLE_SCORE, (info) => {
+            bands += 1;
+            if (info.level > maxLevel) maxLevel = info.level;
+            if (info.endLevel > maxEnd) maxEnd = info.endLevel;
+            if (info.level <= SEAM_VISIBLE_SCORE) return;
+            bad += 1;
+            // 每条超标边界都记全：判定值 / 残留 / 干净列数 / 被"内容否决"剔除的列数 / 保留遍数。
+            // 这五项就是「误判还是真条纹」的判据（内容否决会把误判的 n 打到很小、否决数很大），
+            // 也是以后调门槛（多条边界才动手之类）的唯一依据。
+            bandLines.push("b=" + info.b + " lv=" + info.level.toFixed(2) + "→" + info.endLevel.toFixed(2) +
+              " n=" + info.n + " 否决=" + info.rejected + " 修" + info.repaired);
+          });
           cv.dataset.seamRepaired = "1";
-          jlog("seam page=" + task.pageName + " 超额 " + before.score.toFixed(2) +
-            (fixed > 0 ? " → 修复 " + fixed + " 条边界" : " 达标跳过"));
+          const tail = bad === 0
+            ? " 达标跳过"
+            : (fixed > 0 ? " → 保留 " + fixed + " 遍修复（残留 " + maxEnd.toFixed(2) + "）"
+                         : " → 未修（回滚 / 样本不足）");
+          jlog("seam page=" + task.pageName + " 超额 " + maxLevel.toFixed(2) + "，超标 " + bad + "/" + bands + " 条边界" + tail);
+          if (bad > 0) jlog("seam bands page=" + task.pageName + " " + bandLines.join(" | "));
         } catch (err) {
           // canvas 被跨域数据污染（图床未发 CORS 头）→ 无法量测，跳过
           jlog("seam skip page=" + task.pageName + " " + String(err).slice(0, 60));
