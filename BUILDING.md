@@ -387,7 +387,7 @@ gh release create/upload …               # 见 §5
 $base = "$env:LOCALAPPDATA\Programs\jm-client"
 & "$base\Uninstall JM极简版.exe" /S /currentuser     # 静默卸载（退出码 0 = 成功）
 # 安装（静默）；GUI 程序必须用 Start-Process -Wait，PowerShell 直接 & 不会等 GUI 进程
-Start-Process "E:\JMClient\release-pc\jm-minimal-setup-<ver>.exe" -ArgumentList '/S' -Wait -PassThru
+Start-Process "<仓库根>\release-pc\jm-minimal-setup-<ver>.exe" -ArgumentList '/S' -Wait -PassThru
 # 升级/重装前必杀进程（1 个实例 = 4 个 electron 子进程，进程名含中文）
 Get-Process -Name 'JM极简版' | Stop-Process -Force
 # 启动已安装应用

@@ -12,7 +12,7 @@
 // 用法（**用 pwsh 跑**；git-bash 里起不来浏览器。先自己起好 server）：
 //   node node_modules/vite/bin/vite.js --port 5199 --strictPort      # 另开一个
 //   TEST_URL=http://127.0.0.1:5199/ node tools/e2e/editor-shell.mjs
-//   截图写到 SHOTS 目录（默认 <工作台>\jm-v3-shots，可用 SHOTS_DIR 覆盖）。
+//   截图写到 SHOTS 目录（默认 <仓库>/_archive/shots，可用 SHOTS_DIR 覆盖）。
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -20,10 +20,17 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, "../..");
 const URL_ = process.env.TEST_URL || "http://127.0.0.1:5199/";
 const PORT = Number(process.env.E2E_PORT || 9339);
 const PROFILE = path.join(os.tmpdir(), "jm-e2e-profile-shell");
-const SHOTS = process.env.SHOTS_DIR || path.join(os.homedir(), "Desktop", "deepseek工作台", "jm-v3-shots");
+/**
+ * 截图输出目录。
+ * ⚠️ 默认值**不能写死本机路径**（这里原来硬编码了某台机器的桌面目录）—— 本文件是公开仓库的一部分，
+ * 写进去等于把开发机的目录结构一并公开。默认落在仓库的 `_archive/shots`（`_archive/` 已在
+ * .gitignore 里，截图属于产物不入库）；要放到别处就用 `SHOTS_DIR` 覆盖。
+ */
+const SHOTS = process.env.SHOTS_DIR || path.join(ROOT, "_archive", "shots");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const EDGE_CANDIDATES = [
