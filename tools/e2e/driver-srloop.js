@@ -51,7 +51,8 @@
   q(".list-item").click();
   await waitFor(".page-push .card h2");
   await sleep(800);
-  const link = qa(".page-push .link").find((l) => l.textContent === "巨乳");
+  // 详情页 v7.1：标签是胶囊 .tagchip（作者仍是蓝字 .link），两类都认
+  const link = qa(".page-push .link, .page-push .tagchip").find((l) => l.textContent === "巨乳");
   if (!link) throw new Error("找不到标签链接「巨乳」");
   link.click();
   await waitFor(".sr-layer.open");

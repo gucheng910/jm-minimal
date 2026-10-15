@@ -97,7 +97,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   const home = useHomeFeed({
     onListShown: () => {
       // 用户已主动进入详情/阅读器时，不把首页预取结果打回 home
-      // （修复：从会员页收藏/足迹点进详情，被冷启动测速后的 showList 抢回首页）
+      // （修复：从设置页收藏/足迹点进详情，被冷启动测速后的 showList 抢回首页）
       if (modeRef.current === "detail" || modeRef.current === "reader") return;
       setMode("home");
     },
@@ -474,6 +474,19 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
   useEffect(() => {
     let alive = true;
     (async () => {
+      /**
+       * 「启动阶段结束」这个信号必须在**每条出口**上都发一次。
+       * `App.confirmGate` 在等 `startupReady`，只要漏发，18+ 确认按钮就要转满 35 秒的
+       * 兜底超时才放行 —— 表现为「点了确认一直转圈」，且不报错。
+       *
+       * 原来只在 `pageMode === "home" && !aid` 这一条路径里发，于是两条出口永远漏发：
+       *   · 深链冷启动 `?aid=xxx`（直接进详情）；
+       *   · 分类 / 搜索 tab 的冷启动（各自提前 return 或走别的分支）。
+       *
+       * 这里的 finally 只兜住其余出口：`announceStartupReady` 内部只 resolve 一次，
+       * 重复调用是空操作，所以正常路径上那次**提前发**（首屏不必等推荐接口）仍然生效。
+       */
+      let speedOk = true; // 没测过就当没问题，避免深链/分类/搜索路径误报「线路失败」
       try {
         // 18+ 门放行后才开始网络启动（点击确认后由 App 放行），避免后台提前跑完造成“秒进”
         await gatePassed;
@@ -490,6 +503,19 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         }
         const aid = new URLSearchParams(window.location.search).get("aid");
         if (pageMode === "home" && !aid) {
+          /**
+           * 🔻 v3.13 修的是「切到首页一片空白」：这一整段**不点亮骨架屏**。
+           *
+           * 骨架的判据是 `busy && items.length === 0`（`ui/blocks/AlbumFeed`），而首页有两条加载路径：
+           *   · `home.loadRandom/loadLatest` —— 它们自己会 `setBusy(true)`（那条路径一直是对的）；
+           *   · **这一段启动流程** —— 直接调 `client.getRandomRecommend()`，过去没有任何东西
+           *     告诉列表"正在请求"，于是"空列表 + busy=false" = 骨架不画、网格也空 = **整片空白**。
+           * 用户实测的两个入口正是本条：从分类页切回首页、以及过完 18+ 门刚进首页。
+           *
+           * 熄灭放在最外层那个 `finally` 里（见该 effect 末尾）——那里本来就是"每条出口都要走一次"
+           * 的地方，`endExternal()` 幂等，比在分支里再套一层 try/finally 少一层缩进。
+           */
+          homeRef.current.beginExternal();
           // 每次冷启动都自动选优（18+ 确认页期间后台完成）
           // 启动顺序（实测结论）：
           //  1) 先恢复记忆里的最优（一次本地读 + 一次正文图探测），远快于完整测速；
@@ -497,7 +523,7 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           //     弱网下要好几秒。先用 setting 给的默认图床把首屏画出来，测速在后台跑完再静默换源
           //     （换源后 getSetting 会发 jm:setting，列表按新图床重新出封面）。
           //  3) 记忆可用时也在后台纠正一次（线路会随时段劣化）。
-          let speedOk = false;
+          speedOk = false;
           try { speedOk = await client.restoreBestSelection(); } catch { speedOk = false; }
           if (!speedOk) {
             if (!client.setting) {
@@ -549,6 +575,11 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
         }
       } catch (err) {
         if (alive && !homeRef.current.hasItems()) homeRef.current.setError(String(err));
+      } finally {
+        announceStartupReady({ speedOk }); // 兜住所有没提前发的出口（见上）
+        // 同理兜住"熄灭骨架"：正常路径上它早就该结束了（推荐已落地），这里只是保证
+        // **没有任何一条出口能把骨架永久留在屏上**（异常、提前 return、卸载都算）。幂等。
+        homeRef.current.endExternal();
       }
     })();
     return () => { alive = false; };

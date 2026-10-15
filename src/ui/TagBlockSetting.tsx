@@ -4,7 +4,7 @@
 //   2. 服务端需 level_ok>=1（默认门槛 8）才能提交
 //   3. 服务端 cooldown 控制：editable=0 时显示倒计时，按钮禁用
 //   4. 屏蔽生效完全由服务端过滤（我们在请求里不再带 saved_tags，全凭 JWT 识别）
-// UI 视觉对齐现有会员页：橙品牌色 + pill chip + ghost 次按钮 + card 容器
+// UI 视觉对齐现有设置页：橙品牌色 + pill chip + ghost 次按钮 + card 容器
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getTagBlockForm, submitTagBlock, type TagBlockItem, type TagBlockState } from "../core/tagBlock";
@@ -75,7 +75,7 @@ export default function TagBlockSetting({ onBusyChange }: Props) {
     }
   }, []);
 
-  // 进入会员页时主动拉取一次
+  // 进入设置页时主动拉取一次
   useEffect(() => { load(); }, [load]);
 
   // 冷却倒计时：editable=0 时启动，30s 节流

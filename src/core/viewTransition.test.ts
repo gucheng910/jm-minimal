@@ -115,3 +115,111 @@ describe("navTransition（页面推拉转场）", () => {
     expect(start).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * 更新回调的看门狗 —— 守一个**实测到**的静默卡死（报告 §14.5）。
+ *
+ * 现场证据：给 `document.startViewTransition` 装 CDP 探针后只看到
+ * `vtCalls: ["SVT-called"]`，**没有 `cb-enter`**，也没有抛错 ——
+ * 浏览器注册了回调却从不进入（headless/不出帧时会出现）。
+ * 于是 `update()` 永不执行、`applied` 永不落定，
+ * 用户看到的是「点卡片什么都不发生、也不发请求、控制台还是干净的」。
+ *
+ * 下面这组的桩就是"注册了但永不调用"。
+ */
+describe("navTransition：更新回调不进入时不许静默卡死", () => {
+  /** 与主 describe 同款：每个用例拿一份干净的模块状态（running 是模块级变量） */
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ navTransition } = await import("./viewTransition"));
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    delete document.documentElement.dataset.nav;
+    delete (window as unknown as { __jmVT?: unknown }).__jmVT;
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    vi.useRealTimers();
+  });
+
+  it("回执从未进入：update 仍会被执行，Promise 也会落定", async () => {
+    installVT();
+    const update = vi.fn();
+    let settled = false;
+    const p = navTransition("push", update).then(() => { settled = true; });
+
+    // 注册了，但没人调用它 —— 此刻还没执行
+    expect(update).not.toHaveBeenCalled();
+    expect(document.documentElement.dataset.nav).toBe("push");
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(update).toHaveBeenCalledTimes(1);
+    await p;
+    expect(settled).toBe(true);
+  });
+
+  it("【关键】回调先到就不会被看门狗补第二次", async () => {
+    const { calls } = installVT();
+    const update = vi.fn();
+    const p = navTransition("push", update);
+    calls[0]();                                   // 正常路径：回调按时进
+    await vi.advanceTimersByTimeAsync(2000);      // 推过 600ms 也推过 1200ms
+    await p;
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("迟到但没超过看门狗的回调：仍由回调那次执行，看门狗不补刀", async () => {
+    const { calls } = installVT();
+    const update = vi.fn();
+    const p = navTransition("push", update);
+    await vi.advanceTimersByTimeAsync(300);       // 还没到 600ms
+    calls[0]();
+    expect(update).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(update).toHaveBeenCalledTimes(1);      // 到点后也不重复
+    await p;
+  });
+
+  it("卡死只影响这一次：下一次导航照常走转场（不会被 running 永久挡住）", async () => {
+    const first = installVT();
+    const a = vi.fn();
+    const p1 = navTransition("push", a);
+    await vi.advanceTimersByTimeAsync(600);
+    await p1;
+    expect(a).toHaveBeenCalledTimes(1);
+
+    // 推过 1200ms 的 running 解锁，换一个"回调立刻进"的桩
+    await vi.advanceTimersByTimeAsync(1500);
+    const { start, calls } = installVT();
+    const b = vi.fn();
+    const p2 = navTransition("pop", b);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(b).not.toHaveBeenCalled();             // 又走了正常的"回调里执行"
+    calls[0]();
+    expect(b).toHaveBeenCalledTimes(1);
+    await p2;
+    void first;
+  });
+
+  it("看门狗的等待期里 data-nav 一直挂着（调用方仍能看出'正在转场'）", async () => {
+    // finished 用"永不落定"，这样解锁只能靠 1200ms 兜底，才能看清 data-nav 的生命周期
+    installVT(new Promise<void>(() => { /* 永不落定 */ }));
+    const p = navTransition("push", vi.fn());
+    expect(document.documentElement.dataset.nav).toBe("push");
+    await vi.advanceTimersByTimeAsync(599);
+    expect(document.documentElement.dataset.nav).toBe("push");
+    await vi.advanceTimersByTimeAsync(1);        // 600ms：看门狗到了
+    expect(document.documentElement.dataset.nav).toBe("push"); // 还要等 1200ms 的兜底才清
+    await vi.advanceTimersByTimeAsync(700);      // 累计 1300ms > 1200ms
+    await p;
+    expect(document.documentElement.dataset.nav).toBeUndefined();
+  });
+
+  it("降级路径（不支持 VT）不受影响：同步执行、不排队看门狗", () => {
+    const update = vi.fn();
+    navTransition("push", update);
+    expect(update).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(2000);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+});

@@ -75,7 +75,7 @@ async function main() {
       E2E_PORT: String(Number(PORT) + 9)
     });
 
-    console.log("\n==== 登录态一致性（会员页 vs 详情页）====");
+    console.log("\n==== 登录态一致性（设置页 vs 详情页）====");
     const auth = await runNode("harness.mjs", {
       DRIVER: "driver-auth.js",
       TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "e2eauth=1"
@@ -107,13 +107,47 @@ async function main() {
       E2E_PORT: String(Number(PORT) + 5)
     });
 
+    console.log("\n==== 加载态：首页骨架（过 18+ 门 / 切 tab）+ 骨架列数跟配置 ====");
+    const loading = await runNode("harness.mjs", {
+      DRIVER: "driver-loading.js",
+      E2E_PORT: String(Number(PORT) + 11)
+    });
+
+    console.log("\n==== 壳层单元解耦 + 「顶栏和底栏 / 阅读器」两个编辑页 ====");
+    const chromeDrv = await runNode("harness.mjs", {
+      DRIVER: "driver-chrome.js",
+      E2E_PORT: String(Number(PORT) + 12)
+    });
+
+    console.log("\n==== 详情形态（目录排法 / 封面排布）+ 列表形态 ====");
+    const forms = await runNode("harness.mjs", {
+      DRIVER: "driver-forms.js",
+      E2E_PORT: String(Number(PORT) + 13)
+    });
+
+    console.log("\n==== 更新提示 / 更新日志（安卓·GitHub 链路）====");
+    const upd = await runNode("harness.mjs", {
+      DRIVER: "driver-update.js",
+      // `?jmupd=upgrade`：让桩把"看过的版本"写成旧版本 → 应用当成升级、弹更新日志（见 stub.js）
+      TEST_URL: URL_ + "?jmupd=upgrade",
+      E2E_PORT: String(Number(PORT) + 14)
+    });
+
+    console.log("\n==== 更新提示（桌面 IPC 链路：下载进度 → 立即安装）====");
+    const updDesk = await runNode("harness.mjs", {
+      DRIVER: "driver-update.js",
+      // 桌面/便携版是**另一条链路**（假 jmUpdate 桥由 stub 按这个参数注入；见 stub.js）
+      TEST_URL: URL_ + "?jmupd=desktop,upgrade",
+      E2E_PORT: String(Number(PORT) + 15)
+    });
+
     let ptrCode = 0;
     if (!process.env.E2E_SKIP_PTR) {
       console.log("\n==== 下拉刷新（CDP 原生触摸）====");
       ptrCode = await runNode("ptr.mjs", { E2E_PORT: String(Number(PORT) + 1) });
     }
-    if (nav || srloop || entry || rapid || scrollleak || auth || cache || hist || reader || paid || ptrCode) process.exitCode = 1;
-    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，搜索层列表不溢出 " + (srloop ? "✗" : "✓") + "，详情转场一致性/连点 " + (entry ? "✗" : "✓") + "，手快不硬跳 " + (rapid ? "✗" : "✓") + "，列表位置记忆 " + (scrollleak ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，付费购买 " + (paid ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
+    if (nav || srloop || entry || rapid || scrollleak || auth || cache || hist || reader || paid || loading || chromeDrv || forms || upd || updDesk || ptrCode) process.exitCode = 1;
+    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，搜索层列表不溢出 " + (srloop ? "✗" : "✓") + "，详情转场一致性/连点 " + (entry ? "✗" : "✓") + "，手快不硬跳 " + (rapid ? "✗" : "✓") + "，列表位置记忆 " + (scrollleak ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，付费购买 " + (paid ? "✗" : "✓") + "，加载态骨架 " + (loading ? "✗" : "✓") + "，壳层单元/编辑页 " + (chromeDrv ? "✗" : "✓") + "，详情+列表形态 " + (forms ? "✗" : "✓") + "，更新提示/日志 " + (upd ? "✗" : "✓") + "，更新提示·桌面 " + (updDesk ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
   } finally {
     if (server) { try { server.kill(); } catch (e) { /* 忽略 */ } }
   }

@@ -33,17 +33,40 @@
   openAid("900002");
   await waitFor(".page-push h2");
   await sleep(1500);
-  const metaLines = qa(".page-push .card > p.muted").map(txt);
+  // 详情页 v7.2：作者/话数/JM号/收录是四宫格（.d-facts），简介 .d-desc，目录 .chap-row
+  const facts = qa(".page-push .d-facts .fact").map(txt);
+  const factKeys = qa(".page-push .d-facts .fact .k").map(txt);
   log.push({
     step: "chapter-detail",
     title: txt(q(".page-push h2")),
-    authorLine: metaLines.find((t) => t.startsWith("作者")) || "",
-    tagsLine: metaLines.find((t) => t.startsWith("标签")) || "",
-    desc: txt(q(".page-push .card > p:not(.muted)")),
-    seriesOptions: qa(".page-push select option").map(txt),
+    authorLine: facts.find((t) => t.startsWith("作者")) || "",
+    facts,
+    tags: qa(".page-push .tagchip").map(txt),
+    desc: txt(q(".page-push .d-desc")),
+    chapters: qa(".page-push .chap-row .chap-name").map(txt),
     albumReqs: albumReqs().slice(before),
     fatal: (document.getElementById("jm-fatal") || {}).textContent || ""
   });
+
+  /**
+   * 【回归断言】v3.12 补：这一页的**四宫格**以前只被记录、没被断言 ——
+   * 于是"详情页的详细内容（作者 / 话数 / JM号 / 收录）不见了"这类回归，四支编辑器 e2e 全绿也抓不到
+   * （用户反馈：从列表进详情页，JM号等详细内容加载不出来）。
+   * 判据写死**四个标签**与**JM号的值等于这一话的 id**：少一个、或 JM号 变成 "-"，立刻红。
+   */
+  if (factKeys.join(",") !== "作者,话数,JM号,收录") {
+    throw new Error("详情页四宫格字段不对（应为 作者,话数,JM号,收录）：" + factKeys.join(",") + " / 实际文本：" + facts.join(" | "));
+  }
+  const jmId = (facts.find((t) => t.startsWith("JM号")) || "").replace(/^JM号/, "").replace(/复制$/, "");
+  if (jmId !== "900002") {
+    throw new Error("详情页 JM号 没有渲染出这一话的 id（应为 900002）：" + JSON.stringify(jmId));
+  }
+  if (!facts.some((t) => /^话数共 \d+ 话$/.test(t))) {
+    throw new Error("详情页「话数」没有渲染出来：" + facts.join(" | "));
+  }
+  if (!qa(".page-push .chap-row").length) {
+    throw new Error("详情页目录一行都没有（章节列表没渲染）");
+  }
 
   // ---- 读第2话 → 返回详情 ----
   clickBtn("立即阅读");
@@ -65,9 +88,9 @@
   await waitGone(".reader-wrap");
   await sleep(800);
 
-  // ---- 会员页 → 我的足迹 ----
-  const memberNav = qa(".nav-item").find((b) => /会员/.test(txt(b)));
-  if (!memberNav) throw new Error("底部没有会员 tab");
+  // ---- 设置页 → 我的足迹 ----
+  const memberNav = qa(".nav-item").find((b) => /设置/.test(txt(b)));
+  if (!memberNav) throw new Error("底部没有设置 tab");
   memberNav.click();
   await sleep(1500);
   clickBtn("我的足迹");

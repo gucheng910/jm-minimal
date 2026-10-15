@@ -6,7 +6,7 @@ export const HOST_KEY_SECRET = "diosfjckwpqpdfjkvnqQjsik";
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 /** 出包标识（诊断用，每次发布更新） */
-export const BUILD_TAG = "v20261010-2.2.7";
+export const BUILD_TAG = "v20261015-2.3.0";
 /**
  * 当前客户端版本号（由 UpdateSection / 侧边栏版本信息共用）。
  * 构建时由 vite.config.ts 的 define 从 package.json 注入 __APP_VERSION__，
@@ -81,7 +81,23 @@ export const UI_KEYS = {
   tapInvert: "jmclient.tapInvert",
   hostConfigCache: "jmclient.hostcfg.v1",
   autoSelectCache: "jmclient.autoSelect.v1",
-  theme: "jmclient.theme"
+  theme: "jmclient.theme",
+  /** 详情页展示编排（区块显隐/顺序、四宫格字段顺序）；结构见 core/detailLayout.ts */
+  detailLayout: "jmclient.detailLayout.v1",
+  /** 详情页版面样式（封面大小 / 标题字号 / 简介行数 / 密度 / 圆角）；结构见 core/detailStyle.ts */
+  detailStyle: "jmclient.detailStyle.v1",
+  /** 列表页展示编排（卡片副标题字段、每行列数）；结构见 core/listLayout.ts */
+  listLayout: "jmclient.listLayout.v1",
+  /** 顶栏 / 底栏 / 阅读器控制条的单元编排（有哪些单元、什么顺序、显不显示）；结构见 core/chromeLayout.ts */
+  chromeLayout: "jmclient.chromeLayout.v1",
+  /** 阅读器观感（滚动条 / 控制条自动隐藏时长）；结构见 core/readerStyle.ts */
+  readerStyle: "jmclient.readerStyle.v1",
+  /** 看过的版本（更新日志弹过就写它）：{ version, at }；见 core/appVersion.ts */
+  versionSeen: "jmclient.version.seen",
+  /** 「不再提醒」跳过的**那一个**版本号；见 core/appVersion.ts */
+  updateSkip: "jmclient.update.skip",
+  /** 上次静默检查更新的时刻（节流用）；见 core/appVersion.ts */
+  updateCheckedAt: "jmclient.update.checkedAt"
 } as const;
 
 /**

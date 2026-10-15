@@ -19,7 +19,10 @@ const config: CapacitorConfig = {
     // index.css 里 12+ 处 env(safe-area-inset-*)）。设成 always/automatic 会由系统再缩一次，
     // 结果就是「顶部多一条空白 + 底部导航被顶起来」，env() 的取值也不再与实际一致。
     contentInset: "never",
-    backgroundColor: "#f4f5f7",
+    // WebView 底色：必须是 index.html 首帧那张纸的颜色，否则页面加载中 / 橡皮筋回弹时
+    // 会露出它。原来是 #f4f5f7（冷蓝灰），而 app 的 --bg 是暖色 #F2F0E5 —— 在暖中性灰的
+    // 界面下面垫一层冷蓝灰，回弹一下就看得见。这里与 index.css 的 :root --bg 对齐。
+    backgroundColor: "#F2F0E5",
     // 最低 iOS 16：由 ios/App/App.xcodeproj 的 IPHONEOS_DEPLOYMENT_TARGET 决定
     // （cap add ios 时用 `--target` 或生成后改工程；见 BUILDING.md 的 iOS 节），这里没有对应字段。
   },

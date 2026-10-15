@@ -106,7 +106,7 @@
     q(".list-item").click();
     await waitFor(".page-push .card h2"); await sleep(700);
     const t2 = track(1000, "S2");
-    qa(".page-push .link").find((l) => l.textContent === "巨乳").click();
+    qa(".page-push .link, .page-push .tagchip").find((l) => l.textContent === "巨乳").click();
     await sleep(80);
     back();
     const r2 = await t2;
@@ -118,7 +118,7 @@
     await ensureList();
     q(".list-item").click();
     await waitFor(".page-push .card h2"); await sleep(700);
-    qa(".page-push .link").find((l) => l.textContent === "巨乳").click();
+    qa(".page-push .link, .page-push .tagchip").find((l) => l.textContent === "巨乳").click();
     await waitFor(".sr-layer.open"); await sleep(800);
     const cards = qa(".sr-layer.open .sr-body .list-item");
     if (cards.length < 2) throw new Error("搜索层卡片不足 2 张");

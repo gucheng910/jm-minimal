@@ -3,14 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#F2F0E5" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#100F0F" media="(prefers-color-scheme: dark)" />
+    <!-- 主题色（状态栏 / 浏览器外框）：**只留一条，由 JS 按「实际生效」的主题维护**。
+         原来这里是两条 media="(prefers-color-scheme: …)" 的 meta —— 那只能跟随**系统**主题，
+         而本 App 的主题是用户可以覆盖的（抽屉里的「深色模式」；core/theme.ts 的规则是
+         "用户显式选过就永远听用户的"）。用户一覆盖两边就不同步：整屏变暗、状态栏留在暖白。
+         写入点有两处，都必须与 core/theme.ts 的 initialDark() 同判定：
+           ① 下面那段内联脚本（首帧，避免闪一下）；
+           ② src/App.tsx 的主题 effect（用户切换时）。 -->
+    <meta name="theme-color" content="#F2F0E5" />
     <link rel="icon" href="./icons/icon-192.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <!-- 首帧定主题：用户显式选过听用户的，没选过跟随系统。
          必须与 src/core/theme.ts 的 initialDark() 保持一致，否则会先闪一下白再变暗。 -->
-    <script>try{var t=localStorage.getItem("jmclient.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(d)document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
+    <script>try{var t=localStorage.getItem("jmclient.theme");var d=t==="dark"||(t!=="light"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(d)document.documentElement.setAttribute("data-theme","dark");var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",d?"#100F0F":"#F2F0E5");}catch(e){}</script>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />

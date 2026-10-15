@@ -2,12 +2,13 @@
 //        + 工具行（共 N 部 · 排序）+ 结果网格（滚到底自动续）
 //
 // 视觉规则（v6）：选中一律"文字 + 下划线"，不用色块；工具条不套卡片；浮层从底部升起。
-import { useEffect, useRef, useState } from "react";
-import { AlbumGrid } from "../ui/AlbumGrid";
-import { SkeletonGrid } from "../ui/SkeletonGrid";
+//
+// 工具行与结果区已抽到 ui/blocks（FeedToolRow / AlbumFeed）——与搜索页共用同一份实现。
+import { useState } from "react";
 import UnderlineTabs from "../ui/UnderlineTabs";
 import SortSheet from "../ui/SortSheet";
 import MoreCategoriesSheet from "../ui/MoreCategoriesSheet";
+import { AlbumFeed, FeedToolRow } from "../ui/blocks";
 import { RANK_MODES, RANK_PLACE, SORT_MODES } from "../core/constants";
 import type { AlbumSummary, CategoryBlock, CategoryItem } from "../core/types";
 
@@ -59,21 +60,6 @@ export default function CategoryFeed({
 }: Props) {
   const [sortOpen, setSortOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const loadMoreRef = useRef(onLoadMore);
-  loadMoreRef.current = onLoadMore;
-
-  // 无限滚动：不再放「加载更多」按钮，哨兵进入预读区就续页
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore || busy) return;
-    const io = new IntersectionObserver(
-      (entries) => { if (entries.some((e) => e.isIntersecting)) loadMoreRef.current(); },
-      { rootMargin: "420px 0px" }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hasMore, busy, items.length]);
 
   const activeCat = categories.find((c) => String(c.slug ?? "") === String(slug ?? ""));
   const subCats = activeCat?.sub_categories || [];
@@ -108,22 +94,22 @@ export default function CategoryFeed({
       {isRank && <UnderlineTabs items={rankTabs} value={rank} onChange={onPickRank} />}
       {!isRank && subTabs.length > 0 && <UnderlineTabs items={subTabs} value={sub} onChange={onPickSub} />}
 
-      {/* 工具行：共 N 部 + 排序（列表功能） */}
-      <div className="toolrow">
-        <span className="cnt">{total > 0 ? "共 " + total.toLocaleString("zh-CN") + " 部" : ""}</span>
-        {!isRank && (
-          <button className="sortbtn" type="button" onClick={() => setSortOpen(true)} data-sort-toggle>
-            <svg className="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14m0 0l-3-3m3 3l3-3M17 19V5m0 0l-3 3m3-3l3 3" /></svg>
-            排序：{sortLabel}
-          </button>
-        )}
-      </div>
+      {/* 工具行：共 N 部 + 排序（列表功能）。排行榜态不传 sort → 不渲染排序按钮 */}
+      <FeedToolRow
+        label={total > 0 ? "共 " + total.toLocaleString("zh-CN") + " 部" : ""}
+        sort={isRank ? undefined : { label: sortLabel, onOpen: () => setSortOpen(true) }}
+      />
 
-      {items.length === 0 && error && <div className="card err">{error}</div>}
-      {busy && !error && items.length === 0 ? <SkeletonGrid /> : null}
-      <AlbumGrid key={gridKey} items={items} onOpen={onOpenAlbum} />
-      {hasMore && <div ref={sentinelRef} className="cat-sentinel" aria-hidden="true" />}
-      {busy && items.length > 0 && hasMore ? <p className="cat-more">正在加载第 {page + 1} 页…</p> : null}
+      <AlbumFeed
+        items={items}
+        gridKey={gridKey}
+        page={page}
+        hasMore={hasMore}
+        busy={busy}
+        error={error}
+        onOpen={onOpenAlbum}
+        onLoadMore={onLoadMore}
+      />
 
       <SortSheet open={sortOpen} onClose={() => setSortOpen(false)} value={order} onChange={onSort} />
       <MoreCategoriesSheet open={moreOpen} onClose={() => setMoreOpen(false)} blocks={blocks} onPick={(term) => { setMoreOpen(false); onPickTerm(term); }} />

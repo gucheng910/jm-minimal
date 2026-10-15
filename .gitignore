@@ -3,6 +3,9 @@ node_modules/
 dist/
 dist-compat/
 dist-legacy/
+# 临时构建目录（dist-j2 / dist-j3 / dist-probe 这类排查用的产物）——
+# 原来只忽略了上面三个固定名字，这几个每次 git status 都冒 ?? 出来
+dist-*/
 release-pc/
 android/app/build/
 android/build/

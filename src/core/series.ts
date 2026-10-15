@@ -94,3 +94,60 @@ export function mergeBookMeta(chapter: AlbumDetail, book: AlbumDetail | null | u
     book_name: book.name || chapter.book_name
   };
 }
+
+// ────────────────────────────────────────────────
+// 目录要显示哪几话、按什么顺序（v3.9，调研 TOP8 第 4 条）
+// ────────────────────────────────────────────────
+
+/** 目录排序档：`asc` = 服务端给的顺序（默认，= 加这一项之前的现状）；`desc` = 按话号倒序（新话在前） */
+export type ChapterOrder = "asc" | "desc";
+/** 目录筛选档：`all` = 全都显示（默认）；`cached` = 只显示**本地已缓存且真有页**的话 */
+export type ChapterFilter = "all" | "cached";
+
+/**
+ * 目录（章节列表）的**可见列表**：先按 `filter` 过滤，再按 `order` 排序。
+ *
+ * 纯函数（不碰 DOM、不碰 I/O）—— `cached` 由调用方扫描后传进来（见 `core/offline.scanCachedChapters`），
+ * 所以这一层能在 node 里直接测。
+ *
+ * ⚠️ 三条判据：
+ *   ① **默认档（`asc` + `all`）必须原样返回服务端给的顺序**（`slice()` 而已，不排序）——
+ *      这是"没配过的用户 DOM 逐字不变"那条红线；
+ *   ② 倒序**按 `sort` 排**，不是 `series.reverse()`：实测有作品的回包顺序本身就不严格按 `sort`，
+ *      reverse 只会把乱序原样反过来（用户看到的仍然是乱的）。`sort` 无效（缺失/0/非数字）的项
+ *      **排到最后并保持它们之间的原相对顺序**（稳定排序，同 `sort` 的也保持原相对顺序）；
+ *   ③ 筛选只看"**有页**的缓存"：`scanCachedChapters` 对"只有封面、没有页"的目录也会给条目
+ *      （判据与 1.7.2 修复一致），但那**读不了** —— 进"只看已缓存"只会点开一个空阅读器。
+ *      所以这里要求 `pages > 0`。
+ */
+export function visibleChapters<T extends { id: number | string; sort?: number | string }>(
+  series: readonly T[],
+  order: ChapterOrder,
+  filter: ChapterFilter,
+  cached: ReadonlyMap<string, { pages: number }>
+): T[] {
+  /** 可读的缓存 = **有页**（只有封面的条目读不了，见上面判据③） */
+  const isCached = (id: string): boolean => {
+    const info = cached.get(id);
+    return !!info && Number(info.pages) > 0;
+  };
+  const out = filter === "cached" ? series.filter((s) => isCached(String(s.id))) : series.slice();
+  if (order !== "desc") return out;
+
+  const idx = new Map<T, number>();
+  out.forEach((s, i) => idx.set(s, i));
+  const num = (s: T): number | null => {
+    const n = Number(s.sort);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  out.sort((a, b) => {
+    const na = num(a);
+    const nb = num(b);
+    if (na === null && nb === null) return idx.get(a)! - idx.get(b)!;   // 都无效：保持原相对顺序
+    if (na === null) return 1;                                          // 无效的排到最后
+    if (nb === null) return -1;
+    if (na !== nb) return nb - na;                                      // 话号倒序
+    return idx.get(a)! - idx.get(b)!;                                   // 同话号：保持原相对顺序
+  });
+  return out;
+}

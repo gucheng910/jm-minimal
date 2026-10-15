@@ -7,49 +7,71 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   try { return JSON.parse(raw) as T; } catch { return fallback; }
 }
 
+/**
+ * localStorage 的**唯一入口**：全部读写都从这里走。
+ *
+ * 为什么必须包一层：这些访问器是在**渲染期**被读的（`App.tsx` 的
+ * `useState(() => sessionStore.apiUrl)` / `useState(() => sessionStore.memberInfo)`），
+ * 而 `localStorage.getItem` 本身**会抛** —— 隐私模式、存储被企业策略禁用、
+ * 配额超限、跨源隔离被收紧，任一条都会让一次读取变成"首次渲染抛异常"→
+ * 整页落到 ErrorBoundary，用户看到的是白屏兜底而不是应用。
+ *
+ * 注意 `safeParse` 只包了 `JSON.parse`，**包不住 getItem 自己抛**（以前的漏洞就在这里）。
+ * 包起来之后语义是"存储不可用 = 读到默认值 / 写入被丢弃"，界面照常显示。
+ */
+function readLS(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function writeLS(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* 存储不可用：丢弃写入，不影响界面 */ }
+}
+function removeLS(key: string): void {
+  try { localStorage.removeItem(key); } catch { /* 同上 */ }
+}
+
 export interface StoredAccount {
   username: string;
   password: string;
 }
 
 export const sessionStore = {
-  get apiUrl(): string { return localStorage.getItem(STORAGE_KEYS.apiUrl) || ""; },
-  set apiUrl(v: string) { localStorage.setItem(STORAGE_KEYS.apiUrl, v); },
+  get apiUrl(): string { return readLS(STORAGE_KEYS.apiUrl) || ""; },
+  set apiUrl(v: string) { writeLS(STORAGE_KEYS.apiUrl, v); },
 
   get token(): string {
-    const v = safeParse<string>(localStorage.getItem(STORAGE_KEYS.token), "");
+    const v = safeParse<string>(readLS(STORAGE_KEYS.token), "");
     return typeof v === "string" ? v : "";
   },
-  set token(v: string) { localStorage.setItem(STORAGE_KEYS.token, JSON.stringify(v)); },
+  set token(v: string) { writeLS(STORAGE_KEYS.token, JSON.stringify(v)); },
 
   get memberInfo(): MemberInfo | null {
-    return safeParse<MemberInfo | null>(localStorage.getItem(STORAGE_KEYS.memberInfo), null);
+    return safeParse<MemberInfo | null>(readLS(STORAGE_KEYS.memberInfo), null);
   },
   set memberInfo(v: MemberInfo | null) {
-    localStorage.setItem(STORAGE_KEYS.memberInfo, JSON.stringify(v));
+    writeLS(STORAGE_KEYS.memberInfo, JSON.stringify(v));
   },
 
   get authExpiry(): number {
-    return Number(localStorage.getItem(STORAGE_KEYS.authExpiry) || 0);
+    return Number(readLS(STORAGE_KEYS.authExpiry) || 0);
   },
-  set authExpiry(v: number) { localStorage.setItem(STORAGE_KEYS.authExpiry, String(v)); },
+  set authExpiry(v: number) { writeLS(STORAGE_KEYS.authExpiry, String(v)); },
 
   get account(): StoredAccount | null {
-    return safeParse<StoredAccount | null>(localStorage.getItem(STORAGE_KEYS.account), null);
+    return safeParse<StoredAccount | null>(readLS(STORAGE_KEYS.account), null);
   },
   set account(v: StoredAccount | null) {
-    if (v) localStorage.setItem(STORAGE_KEYS.account, JSON.stringify(v));
-    else localStorage.removeItem(STORAGE_KEYS.account);
+    if (v) writeLS(STORAGE_KEYS.account, JSON.stringify(v));
+    else removeLS(STORAGE_KEYS.account);
   },
 
-  get lang(): string { return localStorage.getItem(STORAGE_KEYS.lang) || "CN"; },
-  set lang(v: string) { localStorage.setItem(STORAGE_KEYS.lang, v); },
+  get lang(): string { return readLS(STORAGE_KEYS.lang) || "CN"; },
+  set lang(v: string) { writeLS(STORAGE_KEYS.lang, v); },
 
   /**
    * 登录态的唯一判据：本地有 token 即视为已登录。
    * 不要用 memberInfo/authExpiry 参与判断——它们只是「本地缓存的会员资料及其新鲜度」，
-   * 服务端会话通常比本地 1 小时 TTL 活得久。此前会员页按资料判、详情页按 token 判，
-   * 于是出现「会员页显示未登录、详情页却能点收藏」的分裂。
+   * 服务端会话通常比本地 1 小时 TTL 活得久。此前设置页按资料判、详情页按 token 判，
+   * 于是出现「设置页显示未登录、详情页却能点收藏」的分裂。
    */
   isLoggedIn(): boolean {
     return Boolean(this.token);
@@ -73,10 +95,10 @@ export const sessionStore = {
   },
 
   clearAuth() {
-    localStorage.removeItem(STORAGE_KEYS.token);
-    localStorage.removeItem(STORAGE_KEYS.memberInfo);
-    localStorage.removeItem(STORAGE_KEYS.authExpiry);
-    localStorage.removeItem(STORAGE_KEYS.account);
+    removeLS(STORAGE_KEYS.token);
+    removeLS(STORAGE_KEYS.memberInfo);
+    removeLS(STORAGE_KEYS.authExpiry);
+    removeLS(STORAGE_KEYS.account);
     emit("jm:authChanged");
   }
 } as const;

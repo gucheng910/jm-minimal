@@ -21,6 +21,32 @@ export function CheckIcon(p: IconProps) { return <Svg {...p}><path d="m5 13 4 4 
 export function SettingsIcon(p: IconProps) {
   return <Svg {...p}><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2M12 18.5v2M4.9 7.4l1.7 1M17.4 15.6l1.7 1M4.9 16.6l1.7-1M17.4 8.4l1.7-1" /></Svg>;
 }
+/** 拖拽抓手（六点）。编辑器的块 chip 用它取代原来的 `⠿` 正文字符：
+ *  字符手柄的热区实测只有 27×23px，且字形与字体相关（换字体就变形）。 */
+export function GripIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="9" cy="6" r="1.35" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="6" r="1.35" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1.35" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1.35" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="18" r="1.35" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="18" r="1.35" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** 「⋯」次级入口（页面设置 / 排布总表 / 恢复默认 收进它后面，别再常驻占画布） */
+export function MoreIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function HeartIcon({ filled, ...p }: IconProps & { filled?: boolean }) {
   return <Svg {...p}><path d="M12 20s-7-4.4-7-9.3A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.7C19 15.6 12 20 12 20z" fill={filled ? "currentColor" : "none"} /></Svg>;
 }

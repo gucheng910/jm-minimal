@@ -57,7 +57,7 @@ export default function ToastHost() {
 
   function onClick(t: ToastItem) {
     if (t.action === "goto-dns") {
-      // 通知 App 跳转到会员页 DNS 卡（App 监听）
+      // 通知 App 跳转到设置页 DNS 卡（App 监听）
       emit("jm:gotoDns");
     }
   }

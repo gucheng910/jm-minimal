@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
 import { cacheList, enqueueCache, type CacheTaskMeta } from "./core/cacheTasks";
 import { blobCheckpoint, pagesFromCache, releaseOfflinePageUrls, releaseOfflinePageUrlsBefore, scanCachedChapters, toOfflinePageUrls, type CachedChapterInfo } from "./core/offline";
@@ -8,19 +8,25 @@ import { chapterLabel, getChapter, listChapters, type BookChapter, type ChapterM
 import { saveHistory } from "./core/history";
 import { useBackHandler } from "./hooks/useBackHandler";
 import { popSheetLock, pushSheetLock } from "./core/uiLocks";
-import { useSheetTransition } from "./hooks/useSheetTransition";
+// 阅读器内 4 个弹层（更快的源 / 阅读设置 / 换话 / 选话缓存）已整体搬到 ui/sheets：
+// 外壳走 ui/blocks 的 Sheet，弹体各自独立成组件。Reader 这边只留状态与调用。
+import { ReaderCacheSheet, ReaderChapterSheet, ReaderSettingsSheet, ReaderSourceSheet } from "./ui/sheets";
 import { measureImages, pickFastestSource, type SpeedItem } from "./core/speed";
+import { loadChromeLayout, saveChromeLayout, toggleChromeUnit, visibleChromeUnits } from "./core/chromeLayout";
+import type { ChromeLayoutConfig } from "./core/chromeLayout";
+import { READER_AUTOHIDE_MS, applyReaderStyle, clearReaderStyle, loadReaderStyle } from "./core/readerStyle";
+import type { ReaderStyleConfig } from "./core/readerStyle";
+import { TAP_ZONES_CONTINUOUS, TAP_ZONES_SINGLE, loadTapInvert, resolveTapAction, saveTapInvert } from "./core/tapZones";
+import { READER_STATUS_UNITS, READER_TOOL_UNITS, READER_TOP_UNITS, renderChromeUnits } from "./ui/chrome/units";
+import type { ReaderStatusCtx, ReaderToolCtx, ReaderTopCtx } from "./ui/chrome/units";
 import { pushToast } from "./ui/toast";
-import { SkeletonRows } from "./ui/SkeletonRows";
-import { DownloadIcon, LightningIcon, MenuIcon, SettingsIcon } from "./ui/icons";
 import { deseaOn, drawUnscrambled, pageNameOf, scrambleSliceCount, SEAM_VISIBLE_SCORE, setDeseam, smoothSeams } from "./core/scramble";
 import { resolveReaderScrollHost, scrollByHost, scrollToTopOf, scrollTopOf } from "./core/scrollHost";
-import { TAP_ZONES_CONTINUOUS, TAP_ZONES_SINGLE, loadTapInvert, resolveTapAction, saveTapInvert } from "./core/tapZones";
 import { NO_SEAM, UI_KEYS } from "./core/constants";
 import { isLowFx } from "./core/lowfx";
 import type { ReadPage } from "./core/types";
 import type { BookMeta } from "./core/offlineMeta";
-import { on } from "./core/bus";
+import { emit, on } from "./core/bus";
 
 type ReaderMode = "continuous" | "single";
 
@@ -105,6 +111,16 @@ const PAGE_FAIL_HEAL_MIN = 3;
 /** 一话最多自动换源几次 / 两次之间至少隔多久 */
 const PAGE_HEAL_MAX = 2;
 const PAGE_HEAL_COOLDOWN_MS = 60 * 1000;
+
+/**
+ * 右侧浮标：把"轻点"和"拖动"分开的位移阈值（px）。
+ *
+ * 为什么必须有它：浮标常时可命中之后，右边缘那 22px 上的每一次按下都会先落到浮标上。
+ * 没有阈值的话，触摸时那几像素的抖动就会被判成"拖动进度条"，于是**轻点右边缘翻页**
+ * 会变成"跳到与手指高度成正比的那一页"——一个 300 话的章节里差几十页。
+ * 6px 远小于人手抖动之外的有意拖动，也不会让人感觉"拖不动"。
+ */
+const RAIL_DRAG_PX = 6;
 
 /** 重试用的独立 URL：换 URL 才能绕开浏览器里那条失败的缓存记录（同 Cover 的 retry=N 招数） */
 function retryUrl(src: string, n: number): string {
@@ -306,6 +322,18 @@ function applyScramble(img: HTMLImageElement, albumId: number | string, scramble
   }
 }
 
+/**
+ * "HH:MM"（补零）—— 状态栏「时间」条目的值。
+ *
+ * 放在模块层：`useState(() => hhmm())` 要在组件体外就能引用。
+ * 刻意**不用 `padStart`**：那是运行时方法（Chrome 57 才进标准），ES5 转译不会补它，
+ * 而我们的兼容目标是 WebView 57 起 —— 手写两行更稳（与项目里其它格式化处的写法一致）。
+ */
+function hhmm(d: Date = new Date()): string {
+  const two = (n: number) => (n < 10 ? "0" + n : String(n));
+  return two(d.getHours()) + ":" + two(d.getMinutes());
+}
+
 export default function ReaderPanel({
   albumId: albumIdProp, pages: pagesProp, title: titleProp, scrambleId: scrambleIdProp,
   onBack, meta, bookMeta, chapterName, chapterSort, onChapterChange, offline = false
@@ -357,11 +385,8 @@ export default function ReaderPanel({
   const [chapOpen, setChapOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
-  // 四个浮层的出入场（逻辑状态仍然是上面的 boolean：返回键/锁屏判定不受动画影响）
-  const sourceAnim = useSheetTransition(sourceOpen);
-  const settingsAnim = useSheetTransition(settingsOpen);
-  const chapAnim = useSheetTransition(chapOpen);
-  const cacheAnim = useSheetTransition(cacheOpen);
+  // 四个浮层的出入场动画现在由 ui/blocks 的 Sheet 自理（它内部调 useSheetTransition）。
+  // 逻辑状态仍然是上面的 boolean：返回键 / 锁屏判定不受动画影响。
   const [cacheSel, setCacheSel] = useState<Set<string>>(new Set());
   const [cachedIds, setCachedIds] = useState<Map<string, CachedChapterInfo>>(new Map());
   const [chapterMetas, setChapterMetas] = useState<ChapterMeta[]>([]);
@@ -395,9 +420,48 @@ export default function ReaderPanel({
   const recomputeRef = useRef<(() => void) | null>(null);
   const recomputeRafRef = useRef(0);
   const [jumpInput, setJumpInput] = useState("1");
-  // 沉浸阅读：控件默认不显示，点画面中间唤出，3 秒无操作自动淡出
+  // 沉浸阅读：控件默认不显示，点画面中间唤出、3 秒无操作自动淡出
   const [chromeOn, setChromeOn] = useState(false);
   const chromeTimer = useRef<number | null>(null);
+  /**
+   * 控制条的**单元编排**（上排：返回/作品名/页码；下排：进度条 + 工具）。
+   * 与 App 的两个栏同一套：数据层 core/chromeLayout.ts、渲染层 ui/chrome/units.tsx。
+   * 默认配置逐字等于改造前写死的这 7 个元素（顺序、类名、条件渲染都没动）。
+   * ⚠️ 变量名避开 `chrome`：这个组件里 `chromeOn` / `chromeTimer` 已经占用同名语义。
+   */
+  const [chromeCfg, setChromeCfg] = useState<ChromeLayoutConfig>(() => loadChromeLayout());
+  useEffect(() => on("jm:chromeLayout", () => setChromeCfg(loadChromeLayout())), []);
+  /**
+   * 阅读器**观感**（v3.13）：滚动条档位 + 控制条自动隐藏时长。见 `core/readerStyle.ts`。
+   *
+   * `scrollbar` 必须写到 `<html>` 上而不是这个组件里的某个 div：连续模式滚的是**整个文档**
+   * （index.css 里 `html.jm-reading { scrollbar-width: none }`），滚动条属于滚动容器。
+   * 另外这层同时带 CSS 变量那条路的兜底 `applyReaderStyle` 每次变更重跑一次就够了 ——
+   * 属性名固定、值只有三个，不存在"部分应用"的中间态。
+   */
+  const [rdStyle, setRdStyle] = useState<ReaderStyleConfig>(() => loadReaderStyle());
+  useEffect(() => on("jm:readerStyle", () => setRdStyle(loadReaderStyle())), []);
+  useEffect(() => {
+    applyReaderStyle(rdStyle);
+    // 退出阅读器必须把标记摘掉：否则普通页面（首页/详情）的滚动条会带着阅读器的档位
+    // ——阅读器是沉浸深色页，那里选"常显"不代表别处也要。
+    return () => clearReaderStyle();
+  }, [rdStyle]);
+  /** 状态栏要显示哪几条（默认全关 ⇒ 空数组 ⇒ 整行不渲染，红线：默认 DOM 一字不差） */
+  const rdStatusIds = visibleChromeUnits(chromeCfg, "readerStatus");
+  /**
+   * 状态栏的「时间」条目：**只在它被打开时**才起定时器（30 秒一跳，只为了跨过分钟边界）。
+   * 没开这一条的用户不会多一个常驻 interval —— 与"缓存扫描只在打开筛选时才跑"同一条纪律。
+   * ⚠️ 不能每秒跑：一次 setState 就是一帧重渲染，阅读器里每帧都贵。
+   */
+  const [clockText, setClockText] = useState(() => hhmm());
+  const clockOn = rdStatusIds.indexOf("clock") >= 0;
+  useEffect(() => {
+    if (!clockOn) return;
+    setClockText(hhmm());
+    const t = window.setInterval(() => setClockText(hhmm()), 30000);
+    return () => window.clearInterval(t);
+  }, [clockOn]);
   const [task, setTask] = useState<CacheTaskMeta | undefined>(() => cacheList().find((t) => t.id === String(albumId)));
   const [testing, setTesting] = useState(false);
   // —— B 方案：右侧页数浮标（阅读进度指示 + 拖动/点按跳页）——
@@ -423,6 +487,10 @@ export default function ReaderPanel({
   const railRef = useRef<HTMLDivElement | null>(null);
   const railTimer = useRef<number | null>(null);
   const draggingRef = useRef(false);
+  /** 这次按住有没有真的拖动过（跨过下面的阈值）。用来区分"拖动进度条"与"轻点一下" */
+  const railMovedRef = useRef(false);
+  /** 按下时的 Y：跨阈值判定要用位移，不能用"有没有 pointermove"（触摸总会抖几个像素） */
+  const railDownYRef = useRef(0);
   const scrubRaf = useRef(0);
 
   useEffect(() => {
@@ -558,6 +626,11 @@ export default function ReaderPanel({
   }, [mode, total]);
 
   // —— 浮标自动显隐（滚动/拖动/悬停唤起，静止 1.7s 后淡出）——
+  //
+  // ⚠️ v3.17：浮标从"只在滚完那 1.7 秒里可命中"改成**常时可命中**（CSS 去掉了
+  //    `pointer-events: none`）。原因是它是阅读器里**唯一的跳页入口**，而触摸设备没有 hover、
+  //    只有 scroll 会唤醒它 —— 用户想拖它的时候它恰好已经淡出了，等于抓不到。
+  //    常时可命中带来两个必须一起做的配套（见下）：拖动阈值、轻点委托。
   const showRail = useCallback(() => {
     setRailVisible(true);
     if (railTimer.current !== null) window.clearTimeout(railTimer.current);
@@ -588,16 +661,30 @@ export default function ReaderPanel({
     if (total <= 1) return;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     draggingRef.current = true;
+    railMovedRef.current = false;
+    railDownYRef.current = e.clientY;
+    // 按住期间浮标**常显**：先把定时器停掉，松手时再由 onRailPointerEnd 重新计时
     if (railTimer.current !== null) window.clearTimeout(railTimer.current);
+    railTimer.current = null;
     setRailVisible(true);
-    const p = scrubPageFromY(e.clientY);
-    setScrubPage(p);
-    railJump(p);
-    e.preventDefault();
-  }, [railJump, scrubPageFromY, total]);
+    /**
+     * ⚠️ 这里**故意不跳页**（v3.17 改）。
+     *
+     * 改动前：按下即 `scrubPageFromY` + 跳页。那时浮标是 `pointer-events:none`（隐藏态不可命中），
+     * 所以只有"可见的那 1.7 秒"能按到它，跳页是"我就是要拖进度条"的合理推断。
+     * 现在浮标**常时可命中**（那正是这次要修的东西：唯一的跳页入口以前根本抓不到），
+     * 于是"按下即跳"就变成了：在右边缘轻轻点一下 → 正文被扔到**与手指高度成正比**的那一页。
+     * 所以按下只"抓住"，跨过 6px 才算拖动。
+     */
+  }, [total]);
 
   const onRailPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     if (!draggingRef.current) return;
+    if (!railMovedRef.current) {
+      // 触摸按下总会抖几个像素：不设阈值的话，"轻点"也会变成"拖到手指那一页"
+      if (Math.abs(e.clientY - railDownYRef.current) < RAIL_DRAG_PX) return;
+      railMovedRef.current = true;
+    }
     const p = scrubPageFromY(e.clientY);
     setScrubPage(p);
     railJump(p);
@@ -606,9 +693,38 @@ export default function ReaderPanel({
   const onRailPointerEnd = useCallback(() => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
-    setScrubPage(null);
+    if (railMovedRef.current) setScrubPage(null);
     showRail();
   }, [showRail]);
+
+  /**
+   * 浮标上的轻点（没有拖过的松手）。
+   *
+   * 浮标常时可命中之后，"点一下"必须有个交代：**不改阅读位置，让它照常冒泡给 onReaderTap**
+   * 走原来的分区判定 —— 单页模式点右边缘 = 下一页、连续滚动模式 = 唤出/收起控制条。
+   * 这与浮标隐藏时的旧行为逐字一致（那时它 `pointer-events:none`，事件本来就穿透过去）。
+   *
+   * 唯一要拦的是"拖过之后那一次松手"：那也是一次 click，不拦住就会在松手时顺手翻一页。
+   */
+  const onRailClick = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!railMovedRef.current) return;
+    railMovedRef.current = false;
+    e.stopPropagation();
+  }, []);
+
+  /**
+   * 键盘操作（浮标是 `role="slider"`，加上 onClick 之后 a11y 规则就要求它可聚焦 ——
+   * 那条规则是对的：一个只能拖、不能聚焦的滑块，对键盘/读屏用户等于不存在）。
+   * 上下键按页走一步，`jumpTo` 自己会夹在 [1, total]。
+   */
+  const onRailKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const back = e.key === "ArrowUp" || e.key === "ArrowLeft";
+    const fwd = e.key === "ArrowDown" || e.key === "ArrowRight";
+    if (!back && !fwd) return;
+    e.preventDefault();
+    showRail();
+    jumpTo(current + (fwd ? 1 : -1));
+  }, [current, jumpTo, showRail]);
 
   // 卸载/切图源时清理浮标定时器与跳页 rAF
   useEffect(() => () => {
@@ -891,12 +1007,22 @@ export default function ReaderPanel({
     onBack();
   }
 
-  /** 唤出控制条并在 3 秒后自动淡出（翻页/滚动/点按钮都会重新计时） */
+  /**
+   * 唤出控制条并在一段时间后自动淡出（翻页/滚动/点按钮都会重新计时）。
+   * 时长由「自定义 UI → 阅读器」的「控制条自动隐藏」决定，**默认 3 秒 = 改造前写死的值**；
+   * `never`（0）不挂定时器 —— 那时控制条一直留着，再点一下画面仍可手动收起（hideChrome）。
+   */
   const showChrome = useCallback(() => {
     setChromeOn(true);
-    if (chromeTimer.current) window.clearTimeout(chromeTimer.current);
-    chromeTimer.current = window.setTimeout(() => setChromeOn(false), 3000);
-  }, []);
+    if (chromeTimer.current) { window.clearTimeout(chromeTimer.current); chromeTimer.current = null; }
+    const ms = READER_AUTOHIDE_MS[rdStyle.autoHide];
+    if (ms > 0) {
+      chromeTimer.current = window.setTimeout(() => {
+        chromeTimer.current = null;
+        setChromeOn(false);
+      }, ms);
+    }
+  }, [rdStyle.autoHide]);
 
   const hideChrome = useCallback(() => {
     if (chromeTimer.current) window.clearTimeout(chromeTimer.current);
@@ -933,10 +1059,18 @@ export default function ReaderPanel({
     const target = e.target as HTMLElement;
     // 只放过浮层里的真实控件（按钮/输入框）；控制条覆盖全屏，如果整块都吃掉点击，
     // 用户就没办法"再点一下收起"了，所以空白处要能穿透到收起逻辑
-    if (target.closest(".reader-sheet") || target.closest(".reader-rail")) return;
+    //
+    // ⚠️ v3.17 起**不再排除 `.reader-rail`**：浮标改成常时可命中之后，"轻点浮标"
+    //    就该和"轻点那块画面"一样走下面的分区判定（单页模式点右边缘 = 下一页）。
+    //    拖动进度条那一路由 `onRailClick` 的 `stopPropagation` 拦住，不会误翻页。
+    //    （以前排除它，是因为隐藏态浮标 `pointer-events:none`，事件本来就穿透过去 ——
+    //     排除条款只在它可见时生效，那时"点它什么都不做"是对的。）
+    if (target.closest(".reader-sheet")) return;
     if (target.closest("button, input, a, label")) return;
     if (chromeOn) { hideChrome(); return; }
-    // 分区判定收在 core/tapZones（归一化坐标 + 可反转，参考 Mihon 的 ViewerNavigation）
+    // 分区判定收在 core/tapZones（归一化坐标 + 可反转，参考 Mihon 的 ViewerNavigation）。
+    // 语义是**固定**的（v3.15 删掉了"九宫格 × 动作"那套配置）：
+    //   单页模式 左=上一页 / 中=唤出控制条 / 右=下一页；连续滚动模式 点哪都是唤出控制条。
     const rect = e.currentTarget.getBoundingClientRect();
     const x = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
     const y = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
@@ -1207,7 +1341,16 @@ export default function ReaderPanel({
     );
   }
 
-  function toggleDeseam() {
+  /**
+   * 去条纹开关的回调。
+   *
+   * `NO_SEAM` 构建（老安卓包）里这个开关根本不渲染，所以整个函数是死代码 ——
+   * 但**写成普通 function 声明就摇不掉**：它通过 `onToggleDeseam={toggleDeseam}` 被无条件引用，
+   * 里面两句 toast 文案会留在包里（BUILDING.md §4.2 的产物校验要求「去条纹」0 条，
+   * 2.2.6 是 0，§14 把弹层抽出去之后变成了 2）。写成 `NO_SEAM ? undefined : () => …`
+   * 让常量条件吃掉这个引用，打包器就能整块摇掉。
+   */
+  const toggleDeseam = NO_SEAM ? undefined : () => {
     const next = !deseam;
     jlog("toggle pressed →", next ? "ON（显示修复后）" : "OFF（显示原图）", "album=" + albumId, "pages=" + pageUrls.length, "scrambleId=" + String(scrambleId));
     // 只写模块真值：它会派发 jm:deseam，上面的订阅再把按钮态同步过来（单一数据源）
@@ -1223,7 +1366,7 @@ export default function ReaderPanel({
         : "去条纹已关闭：显示原图",
       next ? "ok" : "info"
     );
-  }
+  };
 
   const cacheTaskBusy = Boolean(task && (task.status === "queued" || task.status === "running"));
   /** 整本（或单本当前话）已全部缓存 → 按钮显示「已缓存」且不可点 */
@@ -1237,48 +1380,48 @@ export default function ReaderPanel({
    * 所有原有按钮一个不少，只是不再常驻屏幕。
    */
   const pagePct = total > 1 ? Math.min(100, Math.max(0, ((current - 1) / (total - 1)) * 100)) : 0;
+  /**
+   * 控制条的单元上下文：单元是纯函数，条件渲染（离线没有"更快的源"、单话没有"换话"、
+   * 已缓存时按钮变"已缓存"）留在单元内部 —— 那是运行时事实，不是配置能决定的。
+   */
+  const rdTopCtx: ReaderTopCtx = { onBack: handleBack, title, current, total };
+  const rdStatusCtx: ReaderStatusCtx = {
+    chapter: String(curLabel || ""),
+    current,
+    total,
+    pct: Math.round(pagePct),
+    clock: clockText
+  };
+  const rdToolCtx: ReaderToolCtx = {
+    offline,
+    testing,
+    onOpenSourcePicker: openSourcePicker,
+    chaptersCount: chapters.length,
+    switchBusy,
+    curLabel,
+    onOpenChapters: () => { void refreshCached(); setChapOpen(true); },
+    allCached,
+    cacheTaskBusy,
+    pagesCount: pages.length,
+    task,
+    onOpenCache: openCacheDialog,
+    noSeam: NO_SEAM,
+    onOpenSettings: () => setSettingsOpen(true)
+  };
   const toolbar = (
     <div className={"reader-toolbar" + (chromeOn ? " show" : "")} aria-hidden={!chromeOn} inert={!chromeOn}>
       <div className="rt-top">
-        <button onClick={handleBack}>返回</button>
-        <span className="rt-title one-line">{title}</span>
-        <span className="rt-page mono-num">{current} / {total}</span>
+        {renderChromeUnits(visibleChromeUnits(chromeCfg, "readerTop"), READER_TOP_UNITS, rdTopCtx, "readerTop")}
       </div>
       <div className="rt-bottom">
         <div className="rt-progress" aria-hidden="true"><i style={{ transform: "scaleX(" + (pagePct / 100) + ")" }} /></div>
+        {rdStatusIds.length > 0 && (
+          <div className="rt-status">
+            {renderChromeUnits(rdStatusIds, READER_STATUS_UNITS, rdStatusCtx, "readerStatus")}
+          </div>
+        )}
         <div className="rt-tools">
-          {!offline && (
-            <button className="rt-tool" disabled={testing} onClick={openSourcePicker} title="测速并选择图源">
-              <LightningIcon size={20} />
-              <span>{testing ? "测速中…" : "更快的源"}</span>
-            </button>
-          )}
-          {chapters.length > 1 && (
-            <button className="rt-tool" onClick={() => { void refreshCached(); setChapOpen(true); }} title="切换话数">
-              <MenuIcon size={20} />
-              <span>{switchBusy ? "切换中…" : (curLabel || "换话")}</span>
-            </button>
-          )}
-          {allCached && !cacheTaskBusy ? (
-            <button className="rt-tool btn-cached" disabled title="本作品已全部缓存">
-              <DownloadIcon size={20} />
-              <span>已缓存</span>
-            </button>
-          ) : (
-            <button
-              className="rt-tool"
-              disabled={!pages.length || cacheTaskBusy}
-              onClick={openCacheDialog}
-              title={chapters.length > 1 ? "选择要缓存的话数" : "缓存本话"}
-            >
-              <DownloadIcon size={20} />
-              <span>{cacheTaskBusy ? <span className="mono-num">{"缓存中 " + (task?.done ?? 0) + "/" + (task?.total ?? 0)}</span> : "缓存"}</span>
-            </button>
-          )}
-          <button className="rt-tool" onClick={() => setSettingsOpen(true)} title={NO_SEAM ? "阅读设置：模式 / 跳页" : "阅读设置：模式 / 去条纹 / 跳页"}>
-            <SettingsIcon size={20} />
-            <span>设置</span>
-          </button>
+          {renderChromeUnits(visibleChromeUnits(chromeCfg, "readerTools"), READER_TOOL_UNITS, rdToolCtx, "readerTools")}
         </div>
       </div>
     </div>
@@ -1292,231 +1435,76 @@ export default function ReaderPanel({
    */
   const overlays = createPortal((
     <>
-      {sourceAnim.mounted && (
-        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={sourceAnim.entering ? "" : undefined} data-closed={sourceAnim.closing ? "" : undefined} onClick={closeSourcePicker}>
-          <div className="source-drawer reader-sheet" data-entering={sourceAnim.entering ? "" : undefined} data-closed={sourceAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head">
-              <h3>更快的源</h3>
-              <button className="sheet-close" aria-label="关闭" onClick={closeSourcePicker}>×</button>
-            </div>
-            <p className="muted">{testing ? "正在测速…" : "已自动选择最快图源"}</p>
-            <div className="list sheet-list">
-              {sourceRows.map((s) => {
-                const active = String(client.imageShunt) === s.key;
-                return (
-                  <button
-                    key={s.key}
-                    className={"sheet-row" + (active ? " active" : "")}
-                    disabled={Boolean(sourceBusy)}
-                    aria-busy={sourceBusy === s.key ? "true" : undefined}
-                    onClick={() => { void changeSource(s.key); }}
-                  >
-                    <div>
-                      <div className="title">{s.title}{active ? "（当前）" : ""}</div>
-                      <div className="muted">{sourceBusy === s.key ? "正在切换…" : [s.host, s.ms != null ? s.ms + " ms" : (testing ? "测速中…" : ""), s.ok === false && !testing ? "不可用" : ""].filter(Boolean).join(" · ")}</div>
-                    </div>
-                    {sourceBusy === s.key
-                      ? <span className="row-spin" aria-hidden="true" />
-                      : <span className={"badge" + (active ? " ok" : "")}>{active ? "✓" : ""}</span>}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="row sheet-actions">
-              <button disabled={testing || Boolean(sourceBusy)} onClick={() => { void runSpeedTest(); }}>{testing ? "测速中…" : "重新测速"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReaderSourceSheet
+        open={sourceOpen}
+        onClose={closeSourcePicker}
+        testing={testing}
+        rows={sourceRows}
+        currentKey={String(client.imageShunt)}
+        busyKey={sourceBusy}
+        onChangeSource={changeSource}
+        onRetest={() => { void runSpeedTest(); }}
+      />
 
       {/* 阅读设置：模式 / 去条纹 / 跳页（原来这些都摊在工具栏上，阅读时太吵） */}
-      {settingsAnim.mounted && (
-        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={settingsAnim.entering ? "" : undefined} data-closed={settingsAnim.closing ? "" : undefined} onClick={() => setSettingsOpen(false)}>
-          <div className="source-drawer reader-sheet" data-entering={settingsAnim.entering ? "" : undefined} data-closed={settingsAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head">
-              <h3>阅读设置</h3>
-              <button className="sheet-close" aria-label="关闭" onClick={() => setSettingsOpen(false)}>×</button>
-            </div>
-            <p className="muted">阅读模式</p>
-            <div className="sheet-list">
-              <button
-                className={"sheet-row" + (mode === "continuous" ? " active" : "")}
-                onClick={() => setMode("continuous")}
-              >
-                <div><div className="title">连续滚动</div><div className="muted">上下滚动，图片铺满整宽</div></div>
-                <span className={"badge" + (mode === "continuous" ? " ok" : "")}>{mode === "continuous" ? "✓" : ""}</span>
-              </button>
-              <button
-                className={"sheet-row" + (mode === "single" ? " active" : "")}
-                onClick={() => setMode("single")}
-              >
-                <div><div className="title">单页</div><div className="muted">点左右两侧翻页</div></div>
-                <span className={"badge" + (mode === "single" ? " ok" : "")}>{mode === "single" ? "✓" : ""}</span>
-              </button>
-            </div>
-            {!NO_SEAM && <p className="muted">显示</p>}
-            <div className="row sheet-actions settings-actions">
-              {!offline && !NO_SEAM && (
-                <button
-                  className={deseam ? "btn-deseam on" : ""}
-                  onClick={toggleDeseam}
-                  title="通过简单算法尝试去除部分漫画中的条纹（本地处理，不消耗额外流量）；亮=显示修复后，灭=显示原图"
-                >
-                  {deseam ? "去条纹 ✓" : "去条纹"}
-                </button>
-              )}
-            </div>
-            {/* 翻页方向只对单页模式有意义：连续滚动是上下滚，没有左右分区。
-                所以只在 mode==="single" 时出现（原来无条件渲染，连续滚动下也显示，
-                而那儿它什么也不影响）。样式走 .seg-choice，不复用 .sheet-actions —— 见 index.css。 */}
-            {mode === "single" && (
-              <>
-                <p className="muted">翻页方向（点左右两侧时哪边是上一页）</p>
-                <div className="seg-choice" role="group" aria-label="翻页方向">
-                  <button
-                    className={tapInvert ? "" : "on"}
-                    aria-pressed={!tapInvert}
-                    onClick={() => { setTapInvert(false); saveTapInvert(false); }}
-                    title="左侧点一下上一页，右侧点一下下一页（默认）"
-                  >
-                    左←上一页
-                  </button>
-                  <button
-                    className={tapInvert ? "on" : ""}
-                    aria-pressed={tapInvert}
-                    onClick={() => { setTapInvert(true); saveTapInvert(true); }}
-                    title="左右反转：适合左手持机 / 从右往左翻的阅读习惯"
-                  >
-                    右←上一页
-                  </button>
-                </div>
-              </>
-            )}
-            <p className="muted">跳到第几页</p>
-            <div className="row sheet-actions settings-actions">
-              <button disabled={current <= 1} onClick={() => jumpTo(current - 1)}>上一页</button>
-              <input
-                className="page-input mono-num"
-                value={jumpInput}
-                onChange={(e) => setJumpInput(e.target.value)}
-                inputMode="numeric"
-                onKeyDown={(e) => { if (e.key === "Enter") jumpTo(Number(jumpInput)); }}
-              />
-              <span className="muted mono-num">/{total}</span>
-              <button disabled={current >= total} onClick={() => jumpTo(current + 1)}>下一页</button>
-              {current > 1 && <button onClick={() => jumpTo(1)}>回到开头</button>}
-            </div>
-          </div>
-        </div>
-      )}
+      <ReaderSettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        mode={mode}
+        onMode={setMode}
+        offline={offline}
+        deseam={deseam}
+        onToggleDeseam={toggleDeseam}
+        tapInvert={tapInvert}
+        onTapInvert={(v) => { setTapInvert(v); saveTapInvert(v); }}
+        current={current}
+        total={total}
+        jumpInput={jumpInput}
+        onJumpInput={setJumpInput}
+        onJumpTo={jumpTo}
+        statusOn={rdStatusIds}
+        onToggleStatus={(id) => {
+          /**
+           * 状态栏条目的开关：**写同一份配置 + 广播同一个事件**（与将来那个大编辑器同源）。
+           * 只 save + emit，不在这里 setState —— 本组件已经订阅了 `jm:chromeLayout`，
+           * 走一条路径就不会出现"本地 state 与 localStorage 分叉"。
+           */
+          saveChromeLayout(toggleChromeUnit(chromeCfg, "readerStatus", id));
+          emit("jm:chromeLayout");
+        }}
+      />
 
-      {chapAnim.mounted && (
-        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={chapAnim.entering ? "" : undefined} data-closed={chapAnim.closing ? "" : undefined} onClick={() => setChapOpen(false)}>
-          <div className="source-drawer reader-sheet" data-entering={chapAnim.entering ? "" : undefined} data-closed={chapAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head">
-              <h3>{"切换话数" + (bookMeta?.name ? "：" + bookMeta.name : "")}</h3>
-              <button className="sheet-close" aria-label="关闭" onClick={() => setChapOpen(false)}>×</button>
-            </div>
-            <p className="muted">共 {chapters.length} 话 · 当前 {curLabel || "第1话"}</p>
-            {/* 「下一话」：× 之下、话列表之上。连续看的时候不用回列表里翻找，一话读完直接点它 */}
-            <button
-              type="button"
-              className="chap-next"
-              disabled={switchBusy || !nextChapter}
-              aria-busy={nextChapter && switchKey === String(nextChapter.chapter.id) ? "true" : undefined}
-              onClick={() => { const n = nextChapter; if (n) void switchToChapter(n.chapter); }}
-            >
-              {nextChapter
-                ? (
-                  <>
-                    {switchKey === String(nextChapter.chapter.id) && <span className="row-spin" aria-hidden="true" />}
-                    <span>{nextChapterText}</span>
-                    <span className="chev" aria-hidden="true">›</span>
-                  </>
-                )
-                : <span>已是最后一话</span>}
-            </button>
-            <div className="list sheet-list">
-              {chapters.length === 0 && <SkeletonRows count={6} />}
-              {chapters.map((c) => {
-                const id = String(c.id);
-                const label = chapterLabel(c) || ("#" + id);
-                const isCur = id === String(albumId);
-                const info = cachedIds.get(id);
-                const cached = Boolean(info);
-                const rec = chapterMetas.find((m) => m.chapterId === id);
-                const pagesText = info
-                  ? "已缓存 · " + info.pages + " 页" + (rec && rec.total > info.pages ? "/" + rec.total : "")
-                  : "未缓存";
-                return (
-                  <button
-                    key={id}
-                    className={"sheet-row" + (isCur ? " active" : "")}
-                    disabled={switchBusy}
-                    aria-busy={switchKey === id ? "true" : undefined}
-                    onClick={() => { void switchToChapter(c); }}
-                  >
-                    <div>
-                      <div className="title">{label}{isCur ? "（当前）" : ""}</div>
-                      <div className="muted">
-                        {switchKey === id ? "正在加载这一话…" : [pagesText, !cached && offline ? "离线不可读" : ""].filter(Boolean).join(" · ")}
-                      </div>
-                    </div>
-                    {switchKey === id
-                      ? <span className="row-spin" aria-hidden="true" />
-                      : <span className={"badge" + (cached ? " ok" : "")}>{cached ? "✓" : ""}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
+      <ReaderChapterSheet
+        open={chapOpen}
+        onClose={() => setChapOpen(false)}
+        chapters={chapters}
+        bookName={bookMeta?.name}
+        albumId={albumId}
+        curLabel={curLabel}
+        offline={offline}
+        cachedIds={cachedIds}
+        chapterMetas={chapterMetas}
+        switchBusy={switchBusy}
+        switchKey={switchKey}
+        nextChapter={nextChapter}
+        nextChapterText={nextChapterText}
+        onSwitch={switchToChapter}
+      />
 
-      {cacheAnim.mounted && (
-        <div className="drawer-backdrop reader-sheet-backdrop" data-entering={cacheAnim.entering ? "" : undefined} data-closed={cacheAnim.closing ? "" : undefined} onClick={() => { if (!cacheBusy) setCacheOpen(false); }}>
-          <div className="source-drawer reader-sheet" data-entering={cacheAnim.entering ? "" : undefined} data-closed={cacheAnim.closing ? "" : undefined} onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head">
-              <h3>选择要缓存的话数</h3>
-              <button className="sheet-close" aria-label="关闭" disabled={cacheBusy} onClick={() => setCacheOpen(false)}>×</button>
-            </div>
-            <p className="muted">已缓存的话不可重复选择</p>
-            <div className="list sheet-list">
-              {chapters.map((c) => {
-                const id = String(c.id);
-                const label = chapterLabel(c) || ("#" + id);
-                const info = cachedIds.get(id);
-                const cached = Boolean(info);
-                const rec = chapterMetas.find((m) => m.chapterId === id);
-                return (
-                  <label key={id} className={"sheet-row check-row" + (cached ? " disabled" : "")}>
-                    <input
-                      type="checkbox"
-                      checked={cached || cacheSel.has(id)}
-                      disabled={cached || cacheBusy}
-                      onChange={() => toggleCacheSel(id)}
-                    />
-                    <span className="check-main">
-                      <span className="title">{label}{id === String(albumId) ? "（当前）" : ""}</span>
-                      <span className="muted">{info
-                        ? "已缓存 · " + info.pages + " 页" + (rec && rec.total > info.pages ? "/" + rec.total : "")
-                        : "未缓存"}</span>
-                    </span>
-                    {cached && <span className="badge ok">✓</span>}
-                  </label>
-                );
-              })}
-            </div>
-            <div className="row sheet-actions">
-              <button disabled={cacheBusy} onClick={selectAllChapters}>全选</button>
-              <button disabled={cacheBusy} onClick={invertChapters}>反选</button>
-              <button disabled={cacheBusy || cacheSel.size === 0} onClick={() => { void confirmCache(); }}>
-                {cacheBusy ? "加入中…" : "确认开始缓存（" + cacheSel.size + "）"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReaderCacheSheet
+        open={cacheOpen}
+        onClose={() => setCacheOpen(false)}
+        chapters={chapters}
+        albumId={albumId}
+        cachedIds={cachedIds}
+        chapterMetas={chapterMetas}
+        busy={cacheBusy}
+        selected={cacheSel}
+        onToggle={toggleCacheSel}
+        onSelectAll={selectAllChapters}
+        onInvert={invertChapters}
+        onConfirm={confirmCache}
+      />
     </>
   ), document.body);
 
@@ -1578,6 +1566,9 @@ export default function ReaderPanel({
           style={{ top: railTop }}
           onPointerDown={onRailPointerDown} onPointerMove={onRailPointerMove}
           onPointerUp={onRailPointerEnd} onPointerCancel={onRailPointerEnd}
+          onClick={onRailClick}
+          // 可聚焦 + 键盘可分页：既是 a11y 规则的要求，也让"聚焦即显示"成立
+          tabIndex={0} onFocus={showRail} onKeyDown={onRailKeyDown}
           onPointerEnter={showRail}>
           <div className="reader-rail-line" aria-hidden="true" />
           <div className="reader-thumb" style={{ top: bubbleRatio * 100 + "%" }}>

@@ -34,6 +34,26 @@ export interface HomeFeedApi {
   reset: () => void;
   /** 当前是否已有列表内容（调用方据此决定要不要占用整屏错误态） */
   hasItems: () => boolean;
+  /**
+   * **外部驱动的加载**（v3.13）：点亮骨架屏，直到 `endExternal()`。
+   *
+   * ── 为什么需要它（修的是"切到首页一片空白"的真 bug）────────────────────
+   * 骨架屏的判据是 `busy && items.length === 0`（见 `ui/blocks/AlbumFeed`）。
+   * 而首页有**两条**加载路径：
+   *   ① `loadRandom / loadLatest / loadMore` —— 它们自己会 `setBusy(true)`；
+   *   ② **启动流程**（`ContentView` 里那段 effect：还原最优线路 → 取 setting → 拉推荐，
+   *      失败还隔 900ms 重试一次）—— 它直接调 `client.getRandomRecommend()`，
+   *      过去**没有任何东西**告诉列表"现在正在请求"。
+   * 于是从分类页切到首页、或者过完 18+ 门刚进首页时：空列表 + busy=false
+   * = 骨架不画、网格也是空的 = **整片空白**，用户完全看不出在加载（用户实测反馈）。
+   *
+   * 为什么不干脆让那段直接调 `loadRandom()`：那会连带改掉它的失败文案、
+   * 900ms 重试与 `onRandomFail` 的 toast 语义（那是**冷启动专用**的一套处理）。
+   * 加一个显式的"我在加载"开关比"顺手把两套合并"风险小得多，也正是缺的那样东西。
+   */
+  beginExternal: () => void;
+  /** 结束外部加载（幂等；正常路径由 `ContentView` 的 finally 调用） */
+  endExternal: () => void;
 }
 
 export function useHomeFeed(opts: HomeFeedOptions = {}): HomeFeedApi {
@@ -42,6 +62,8 @@ export function useHomeFeed(opts: HomeFeedOptions = {}): HomeFeedApi {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** 外部加载标志（见 `HomeFeedApi.beginExternal` 的说明）：与 `busy` 取并集对外暴露 */
+  const [external, setExternal] = useState(false);
   const [error, setError] = useState("");
   const itemsRef = useRef<AlbumSummary[]>([]);
   itemsRef.current = items;
@@ -128,5 +150,19 @@ export function useHomeFeed(opts: HomeFeedOptions = {}): HomeFeedApi {
 
   const hasItems = useCallback(() => itemsRef.current.length > 0, []);
 
-  return { items, kind, page, hasMore, busy, error, setError, show, loadLatest, loadRandom, loadMore, reset, hasItems };
+  const beginExternal = useCallback(() => {
+    setExternal(true);
+    setError(""); // 与 run() 开跑时一致：新一轮加载开始，旧的错误卡就该让位给骨架
+  }, []);
+  const endExternal = useCallback(() => { setExternal(false); }, []);
+
+  /**
+   * ⚠️ 对外的 `busy` 是**两个来源的并集**：内部请求（`run()`）与外部加载（启动流程）。
+   *    只暴露内部那一个，就是"切到首页一片空白"那个 bug 的直接成因。
+   */
+  return {
+    items, kind, page, hasMore, busy: busy || external, error,
+    setError, show, loadLatest, loadRandom, loadMore, reset, hasItems,
+    beginExternal, endExternal
+  };
 }

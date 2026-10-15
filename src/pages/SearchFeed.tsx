@@ -1,10 +1,11 @@
 // 搜索页：搜索框 + 类型（下划线）+ 热词/记录 + 结果（共 N 部 · 排序 · 无限滚动）
 // 排序与分类页共用同一个 SortSheet（列表功能）；排行榜不在这里。
-import { useEffect, useRef, useState } from "react";
-import { AlbumGrid } from "../ui/AlbumGrid";
-import { SkeletonGrid } from "../ui/SkeletonGrid";
+//
+// 工具行与结果区已抽到 ui/blocks（FeedToolRow / AlbumFeed）——与分类页共用同一份实现。
+import { useState } from "react";
 import UnderlineTabs from "../ui/UnderlineTabs";
 import SortSheet from "../ui/SortSheet";
+import { AlbumFeed, FeedToolRow } from "../ui/blocks";
 import { SORT_MODES } from "../core/constants";
 import type { AlbumSummary } from "../core/types";
 
@@ -68,21 +69,6 @@ export default function SearchFeed({
   onOpenAlbum
 }: Props) {
   const [sortOpen, setSortOpen] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const loadMoreRef = useRef(onLoadMore);
-  loadMoreRef.current = onLoadMore;
-
-  // 无限滚动：与分类页同一套做法，不再放「加载更多」按钮
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore || busy) return;
-    const io = new IntersectionObserver(
-      (entries) => { if (entries.some((e) => e.isIntersecting)) loadMoreRef.current(); },
-      { rootMargin: "420px 0px" }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hasMore, busy, items.length]);
 
   const sortLabel = (SORT_MODES.find(([key]) => key === order) || ["", "最新"])[1];
 
@@ -120,19 +106,26 @@ export default function SearchFeed({
         </div>
       ) : (
         <div>
-          <div className="toolrow">
-            <span className="cnt">{total > 0 ? "已加载 " + items.length + " / 共 " + total.toLocaleString("zh-CN") + " 部" : ""}</span>
-            <button className="sortbtn" type="button" onClick={() => setSortOpen(true)} data-sort-toggle>
-              <svg className="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14m0 0l-3-3m3 3l3-3M17 19V5m0 0l-3 3m3-3l3 3" /></svg>
-              排序：{sortLabel}
-            </button>
-          </div>
-          {items.length === 0 && error && <div className="card err">{error}</div>}
-          {busy && !error && items.length === 0 ? <SkeletonGrid /> : null}
-          {!busy && !error && items.length === 0 ? <p className="muted sr-empty">没有找到相关漫画</p> : null}
-          <AlbumGrid key={gridKey} items={items} onOpen={onOpenAlbum} />
-          {hasMore && <div ref={sentinelRef} className="cat-sentinel" aria-hidden="true" />}
-          {busy && items.length > 0 && hasMore ? <p className="cat-more">正在加载第 {page + 1} 页…</p> : null}
+          <FeedToolRow
+            label={total > 0 ? "已加载 " + items.length + " / 共 " + total.toLocaleString("zh-CN") + " 部" : ""}
+            sort={{ label: sortLabel, onOpen: () => setSortOpen(true) }}
+          />
+
+          <AlbumFeed
+            items={items}
+            gridKey={gridKey}
+            page={page}
+            hasMore={hasMore}
+            busy={busy}
+            error={error}
+            onOpen={onOpenAlbum}
+            onLoadMore={onLoadMore}
+            /* 搜索特有的空态：骨架之后、网格之前 */
+            empty={!busy && !error && items.length === 0
+              ? <p className="muted sr-empty">没有找到相关漫画</p>
+              : null}
+          />
+
           <SortSheet open={sortOpen} onClose={() => setSortOpen(false)} value={order} onChange={onSort} />
         </div>
       )}

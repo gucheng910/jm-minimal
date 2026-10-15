@@ -1,5 +1,5 @@
 // JM极简版 PC 壳（Electron）：本地静态服务加载 dist
-const { app, BrowserWindow, shell, session, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, session, ipcMain, nativeTheme } = require("electron");
 const { createDnsCleaner } = require("./dns-clean.cjs");
 const { createDesktopUpdater } = require("./updater.cjs");
 const { createStaticServer } = require("./static-server.cjs");
@@ -44,7 +44,10 @@ if (!gotLock) {
       minHeight: 680,
       title: "JM极简版",
       icon: path.join(__dirname, "..", "build", "icon.png"),
-      backgroundColor: "#f4f5f7",
+      // 窗口底色：**必须和 index.html 首帧那张纸一个颜色**，否则打开时会先闪一下再被网页盖住。
+      // 原来是 #f4f5f7（冷蓝灰），而 app 的 --bg 是暖色 #F2F0E5 / 暗色 #100F0F —— 亮闪很显眼，
+      // 尤其在系统用暗色主题时。这里按系统主题取对应值（窗口背景只能二选一，跟随系统是最合理的近似）。
+      backgroundColor: nativeTheme.shouldUseDarkColors ? "#100F0F" : "#F2F0E5",
       autoHideMenuBar: true,
       webPreferences: {
         preload: path.join(__dirname, "preload.cjs"),

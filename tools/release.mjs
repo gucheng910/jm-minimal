@@ -112,6 +112,26 @@ const mName = gradle.match(/versionName\s+"([^"]+)"/);
 if (!mCode || !mName) die("解析 " + gradlePath + " 失败");
 const nextCode = Number(mCode[1]) + 1;
 
+/**
+ * 更新日志把关（v3.16）：**发布的新版本必须在 `src/core/changelog.ts` 里有条目**。
+ *
+ * 为什么把它放在发布脚本里而不是"记得写"：那个日志是"升级后第一次进首页弹给用户看"的
+ * 唯一数据源（用户拍板：内置一份，不依赖运行时拉 GitHub）。漏写的后果不是报错，
+ * 而是**用户装完新版什么也看不到** —— 这种"静默缺东西"只有靠机器拦。
+ * 判据与 `currentChangelog()` 一致：版本号逐字相等（带 `v` 不算）。
+ */
+{
+  const clPath = "src/core/changelog.ts";
+  const cl = readText(clPath);
+  const hit = new RegExp('version:\\s*"' + version.replace(/\./g, "\\.") + '"').test(cl);
+  if (!hit) {
+    die("发布被拒：src/core/changelog.ts 里没有 " + version + " 的条目。"
+      + "请先补一条（version 必须是 " + version + "，逐字相等、不带 v），"
+      + "否则用户升级后弹不出更新日志。");
+  }
+  step("更新日志  " + clPath + " 里有 " + version + " 的条目 ✓");
+}
+
 // 只拦「已跟踪文件被改」，未跟踪的新文件（如本脚本自身）不算脏
 const dirty = capture("git", ["status", "--porcelain", "--untracked-files=no"]);
 if (dirty && !DRY) die("工作区有未提交改动，先提交或 stash：\n" + dirty);

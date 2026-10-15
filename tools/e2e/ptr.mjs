@@ -37,7 +37,8 @@ const evalJs = async (expr) => {
 async function main() {
   let list = [];
   for (let i = 0; i < 60; i++) {
-    try { list = await (await fetch("http://127.0.0.1:" + PORT + "/json/list")).json(); if (list.some((t) => t.type === "page")) break; } catch (e) { /* 等启动 */ }
+    // 每次探测都要有上限，否则端口开着但不回话时整个脚本会「挂着不出结果」
+    try { list = await (await fetch("http://127.0.0.1:" + PORT + "/json/list", { signal: AbortSignal.timeout(2000) })).json(); if (list.some((t) => t.type === "page")) break; } catch (e) { /* 等启动 */ }
     await sleep(300);
   }
   const page = list.find((t) => t.type === "page");

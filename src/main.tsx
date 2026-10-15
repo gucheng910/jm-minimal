@@ -61,7 +61,7 @@ window.addEventListener("unhandledrejection", (e) => {
   showFatal("Promise错误: " + (r && (r.message || String(r)) || "unknown"));
 });
 
-// App 级兜底：抽屉/会员页等外壳里的渲染异常此前会把整个界面打空（1.7.2 前的抽屉崩溃就是这样）
+// App 级兜底：抽屉/设置页等外壳里的渲染异常此前会把整个界面打空（1.7.2 前的抽屉崩溃就是这样）
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary label="应用" fullPage>
     <App />

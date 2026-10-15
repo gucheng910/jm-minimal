@@ -46,7 +46,9 @@ async function main() {
   let list = [];
   for (let i = 0; i < 60; i++) {
     try {
-      list = await (await fetch("http://127.0.0.1:" + PORT + "/json/list")).json();
+      // 每次探测都要有上限：端口开着但服务不回话时，裸 fetch 会一直挂着，
+      // 下面的 sleep(300) 永远走不到 —— 整个 e2e 就「挂着不出结果」而不是「报错退出」。
+      list = await (await fetch("http://127.0.0.1:" + PORT + "/json/list", { signal: AbortSignal.timeout(2000) })).json();
       if (list.some((t) => t.type === "page")) break;
     } catch (e) { /* 还没起来 */ }
     await sleep(300);

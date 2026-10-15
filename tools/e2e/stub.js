@@ -1,9 +1,56 @@
 (() => {
   const HOST = "mock.jm.local";
+  /** 驱动用 `?jmupd=desktop,upgrade` 这类参数开关桩的行为（逗号可叠加） */
+  const JMUPD = (location.search.match(/jmupd=([a-z,]+)/g) || []).join(",");
+  /**
+   * 桌面更新桥的假实现（v3.16，只在 `?jmupd=desktop` 时注入）。
+   *
+   * 为什么需要它：`isDesktop` 是**模块加载期**读一次 `window.__jmDesktop` 的常量，
+   * 驱动跑起来之后再改就晚了 —— 所以只能在桩这一层（页面脚本之前注入）开关。
+   * 这个假桥读的是驱动设的 `window.__ghRelease`，于是两种模式共用同一套驱动断言；
+   * 它多给的一段是 `act()`：能真的走完 downloading(60%) → downloaded，
+   * 于是"进度条"与"立即安装"这两个只有桌面链路才有的状态在 e2e 里也能被钉住。
+   */
+  if (/desktop/.test(JMUPD)) {
+    window.__jmDesktop = true;
+    const rel = () => window.__ghRelease;
+    const mk = (phase, extra) => Object.assign({
+      mode: "nsis", phase, currentVersion: "2.2.7", latestVersion: "", latestNotes: "",
+      assetUrl: "", percent: 0, transferred: 0, total: 0, error: ""
+    }, extra || {});
+    let push = () => {};
+    window.jmUpdate = {
+      onState(cb) { push = cb; return () => { push = () => {}; }; },
+      async check() {
+        const r = rel();
+        push(mk("checking"));
+        await new Promise((res) => setTimeout(res, 60));
+        if (!r || r === "fail") { const s = mk("error", { error: "桩：网络失败" }); push(s); return s; }
+        const v = String(r.tag_name || "").replace(/^v/i, "");
+        const s = mk("available", { latestVersion: v, latestNotes: String(r.body || "") });
+        push(s);
+        return s;
+      },
+      async act() {
+        await new Promise((res) => setTimeout(res, 60));
+        push(mk("downloading", { percent: 60, transferred: 44000000, total: 73000000 }));
+        await new Promise((res) => setTimeout(res, 60));
+        const s = mk("downloaded", { percent: 100 });
+        push(s);
+        return s;
+      }
+    };
+  }
   try {
     localStorage.setItem("jmclient.hostcfg.v1", JSON.stringify({ ts: Date.now(), cfg: { Setting: [HOST], Server: [HOST], jm3_Server: [[HOST, "線路1"]] } }));
     localStorage.setItem("jmclient.autoSelect.v1", JSON.stringify({ host: HOST, shunt: "1", ts: Date.now() }));
     localStorage.setItem("jmclient.tosAccepted.v1", "1");
+    // 更新驱动的「升级场景」：把"看过的版本"写成一个更老的版本 → 应用判定为升级、弹更新日志。
+    // ⚠️ 默认**什么都不写**：全新 profile 在应用侧就是"全新安装"（`changelogDecision` 的 seed 态），
+    //    它自己就不会弹日志 —— 这正是 14 支老驱动不被遮罩打扰的原因，别在这里补一个"当前版本"。
+    if (/upgrade/.test(JMUPD)) {
+      localStorage.setItem("jmclient.version.seen", JSON.stringify({ version: "0.0.1", at: 1 }));
+    }
     // 主题默认锁浅色：e2e 断言都基于浅色。
     // ?e2edark=<任意值> 时不写，让 App 走「首次启动跟随系统偏好」那条路径（配合 harness 的 E2E_DARK=1）。
     if (!/[?&]e2edark=/.test(location.search)) localStorage.setItem("jmclient.theme", "light");
@@ -135,6 +182,30 @@
     // 失败注入：window.__failMap[path] = n → 该路径接下来 n 次请求直接抛网络错误（刷新失败的回归用）
     const failMap = window.__failMap || (window.__failMap = {});
     if (failMap[p] > 0) { failMap[p] -= 1; throw new TypeError("Failed to fetch"); }
+    // 延迟注入：window.__delayMap[path] = ms → 该路径的请求先等这么久再回。
+    // 与上面那条"失败注入"是同一族手段。**为什么必须要有它**：桩是秒回的，而"正在加载"
+    // 这一类回归（骨架屏/加载态）只有在加载窗口里才看得见 —— 秒回时骨架可能一帧都没画出来
+    // 就已经被内容替换掉了，于是"骨架根本不画"的 bug 在测试里照样是绿的。
+    const delayMap = window.__delayMap || (window.__delayMap = {});
+    const delayMs = Number(delayMap[p] || 0);
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+    // ── GitHub Releases：更新提示的桩（v3.16）────────────────────────────
+    // ⚠️ **默认必须返回失败**：这是个全局的 fetch 桩，42 支别的驱动都在用它 ——
+    //    如果默认回一个"有新版"的 Release，那些驱动的首页会在 1.5s 后弹出更新提示
+    //    （静默检查是应用自己的行为，拦不住），它们的断言会被这个浮层搅乱。
+    //    所以只有显式设了 `window.__ghRelease` 的驱动才会看到"有新版本"。
+    if (u.hostname === "api.github.com" && /\/releases\/latest$/.test(u.pathname)) {
+      const rel = window.__ghRelease;
+      // 诊断用：更新驱动要能证明"这次检查真的打到了 GitHub、拿到的是哪个 tag"
+      window.__ghHits = (window.__ghHits || 0) + 1;
+      window.__ghLastTag = rel && rel !== "fail" ? String(rel.tag_name || "") : "(fail)";
+      if (!rel || rel === "fail") return new Response("stub: no release", { status: 404 });
+      // ⚠️ 不能用上面那个 `json()`：它包的是**JM 接口的** `{code,data}` 封套，
+      //    而 GitHub 的 `/releases/latest` 是**裸对象**（`rel.tag_name` 直接在顶层）。
+      //    用错了的表现是"永远查不到新版本"（tag_name 为 undefined → 当成已是最新），
+      //    而且不会报错 —— 正是那种"看起来绿、其实什么都没测"的坑。
+      return new Response(JSON.stringify(rel), { status: 200, headers: { "content-type": "application/json" } });
+    }
     // 图片：图源1 的图床刻意慢 300ms，用于验证「更快的源」自动选中更快的那一个
     if (/\.(jpg|jpeg|png|webp)$/i.test(u.pathname)) {
       if (u.hostname.startsWith("mock-img1")) await new Promise((r) => setTimeout(r, 300));

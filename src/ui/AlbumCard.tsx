@@ -1,6 +1,8 @@
 // 纯展示组件：封面（含 t 签权 URL / 失败重试）+ 标题行，供各处列表复用
 import { memo, useEffect, useRef, useState } from "react";
 import { client } from "../core/api";
+import { DEFAULT_LIST_LAYOUT, listSubtitle } from "../core/listLayout";
+import type { ListLayoutConfig } from "../core/listLayout";
 import type { AlbumSummary } from "../core/types";
 
 export function albumCoverUrl(a: AlbumSummary): string {
@@ -73,7 +75,7 @@ export function prefetchCovers(list: AlbumSummary[], count = 6): void {
   } catch { /* ignore */ }
 }
 
-export const AlbumCard = memo(function AlbumCard({ album, onOpen, onRemove }: {
+export const AlbumCard = memo(function AlbumCard({ album, onOpen, onRemove, layout, skeleton }: {
   album: AlbumSummary;
   onOpen: (a: AlbumSummary) => void;
   /**
@@ -81,10 +83,31 @@ export const AlbumCard = memo(function AlbumCard({ album, onOpen, onRemove }: {
    * 用 span[role=button] 而不是 <button>：外层卡片本身就是 button，里面再嵌 button 是非法 HTML。
    */
   onRemove?: (a: AlbumSummary) => void;
+  /**
+   * 列表页展示编排（副标题写哪几个字段、什么顺序）。由 AlbumGrid 统一传入 ——
+   * 它是所有卡片网格的唯一入口，订阅一次就够，不必每张卡片各订一份。
+   * 不传时按默认顺序渲染，与改造前逐字一致。
+   */
+  layout?: ListLayoutConfig;
+  /**
+   * 占位渲染（**只在「自定义 UI」的画布/缩略图传 true**）：不生成封面 URL、不加载图片，
+   * 直接渲染"失败回退"式的文字占位（灰底 + 居中书名），与图片加载失败时露出的那一层**同一套视觉**。
+   * 不传 = false → 线上所有列表逐字不变。
+   */
+  skeleton?: boolean;
 }) {
+  const subtitle = listSubtitle(layout || DEFAULT_LIST_LAYOUT, album);
   return (
     <button className="list-item" onClick={() => onOpen(album)}>
-      <Cover url={albumCoverUrl(album)} alt={album.name} />
+      {skeleton ? (
+        /* 与 Cover 的失败回退层同构：.thumb-box（有尺寸）+ .thumb-fallback（铺满 + 居中文字）。
+           刻意**不**走 Cover：连 albumCoverUrl 都不调用，杜绝任何真实封面请求。 */
+        <span className="thumb-box">
+          <span className="thumb-fallback"><span>{album.name}</span></span>
+        </span>
+      ) : (
+        <Cover url={albumCoverUrl(album)} alt={album.name} />
+      )}
       {onRemove && (
         <span
           className="card-remove"
@@ -99,7 +122,8 @@ export const AlbumCard = memo(function AlbumCard({ album, onOpen, onRemove }: {
       )}
       <div>
         <div className="title">{album.name}</div>
-        <div className="muted">{[album.author, album.category?.title, album.sub].filter(Boolean).join(" · ")}</div>
+        {/* 空内容由 CSS 的 `.list-item .muted:empty { display:none }` 收掉，这里不做判断 */}
+        <div className="muted">{subtitle}</div>
       </div>
     </button>
   );

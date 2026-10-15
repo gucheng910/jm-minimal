@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
-import { bookIdOf, isSeriesWork, knownBookId, mergeBookMeta, rememberSeries, clearSeriesMap, seriesMapSize, SERIES_MAP_KEY } from "./series";
+import { bookIdOf, isSeriesWork, knownBookId, mergeBookMeta, rememberSeries, clearSeriesMap, seriesMapSize, SERIES_MAP_KEY, visibleChapters } from "./series";
 import type { AlbumDetail } from "./types";
 
 const d = (patch: Partial<AlbumDetail>): AlbumDetail => ({ id: 1, name: "x", ...patch });
@@ -89,5 +89,58 @@ describe("mergeBookMeta", () => {
     expect(merged.tags).toEqual(["t"]);
     expect(merged.description).toBe("话级简介");
     expect(merged.series).toHaveLength(2);
+  });
+});
+
+// ────────────────────────────────────────────────
+// v3.9 目录两轴（调研 TOP8 第 4 条）：顺序 + 筛选
+// ────────────────────────────────────────────────
+describe("visibleChapters：目录的顺序与筛选（纯函数）", () => {
+  const chap = (id: number | string, sort?: number | string) => ({ id, sort });
+  /** 服务端给的顺序**故意不是**按 sort 排好的（实测真的有这种回包） */
+  const MESSY = [chap(3, 3), chap(1, 1), chap(2, 2)];
+  const ASC = [chap(10, 10), chap(11, 11), chap(12, 12)];
+  const none = new Map<string, { pages: number }>();
+
+  it("【红线】默认档（正序 + 全部）**原样返回服务端给的顺序**（不排序、不动身份）", () => {
+    const out = visibleChapters(MESSY, "asc", "all", none);
+    expect(out.map((c) => c.id)).toEqual([3, 1, 2]);          // 乱序也照原样
+    expect(out[0]).toBe(MESSY[0]);                            // 同一个对象引用
+    expect(visibleChapters([], "asc", "all", none)).toEqual([]);
+  });
+
+  it("★ 倒序按 **sort** 排，不是 reverse()（服务端顺序不可信时这一点才是对的）", () => {
+    // reverse 会给 [2,1,3]；按 sort 倒序应当是 [3,2,1]
+    expect(visibleChapters(MESSY, "desc", "all", none).map((c) => c.id)).toEqual([3, 2, 1]);
+    expect(visibleChapters(ASC, "desc", "all", none).map((c) => c.id)).toEqual([12, 11, 10]);
+  });
+
+  it("倒序：sort 无效（缺失 / 0 / 非数字）的项排到最后，且它们之间保持原相对顺序", () => {
+    const s = [chap("a"), chap("b", 2), chap("c", 0), chap("d", 1), chap("e", "x")];
+    expect(visibleChapters(s, "desc", "all", none).map((c) => c.id)).toEqual(["b", "d", "a", "c", "e"]);
+  });
+
+  it("倒序：sort 相同时保持服务端给的相对顺序（稳定）", () => {
+    const s = [chap("p", 5), chap("q", 5), chap("r", 5)];
+    expect(visibleChapters(s, "desc", "all", none).map((c) => c.id)).toEqual(["p", "q", "r"]);
+  });
+
+  it("★ 筛选只看**有页**的缓存（只有封面的目录读不了，必须被筛掉）", () => {
+    const cached = new Map<string, { pages: number }>([
+      ["1", { pages: 20 }],      // 有页 → 算
+      ["2", { pages: 0 }],       // 只有封面 → 不算（点开会是空阅读器）
+      ["99", { pages: 5 }]       // 不在本书里 → 不影响
+    ]);
+    expect(visibleChapters(MESSY, "asc", "cached", cached).map((c) => c.id)).toEqual([1]);
+  });
+
+  it("筛选 + 倒序可以叠加（先筛后排）", () => {
+    const cached = new Map<string, { pages: number }>([["1", { pages: 3 }], ["3", { pages: 3 }]]);
+    expect(visibleChapters(MESSY, "desc", "cached", cached).map((c) => c.id)).toEqual([3, 1]);
+  });
+
+  it("一话都没缓存 → 空数组（调用方据此显示「本地没有缓存的话」空态，不是只留一个空盒子）", () => {
+    expect(visibleChapters(ASC, "asc", "cached", none)).toEqual([]);
+    expect(visibleChapters(ASC, "desc", "cached", none)).toEqual([]);
   });
 });

@@ -63,13 +63,20 @@
 
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
-| PC + 前端 | package.json → version | 2.2.7 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 2.2.7 / versionCode 76 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| PC + 前端 | package.json → version | 2.3.0 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
+| Android | android/app/build.gradle → defaultConfig | versionName 2.3.0 / versionCode 81 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
-> ⚠️ **现值以本表为准**：package.json `2.2.6` / build.gradle `2.2.6` + `versionCode 74`。
+> ⚠️ **现值以本表为准**：package.json `2.3.0` / build.gradle `versionName 2.3.0` + `versionCode 81`。
+> （2026-10-15 更新：2.2.7 → **2.3.0** —— 这批工作（四个页面的自定义 UI、详情页编辑器拖拽手感与行内落位）
+> 定名为 2.3.0 正式版；versionCode 77 → 78 以保证覆盖安装。
+> （2026-10-15 又出 **2.3.1**：修「老用户升级后不弹更新日志」（无 seen 记录时改看“有没有用户配置痕迹”）+ 更新弹窗观感重做（条目列表 / 版本徽标 / 按钮主次）；versionCode 78 → 79。）
+> （2026-10-15 **2.3.2**：更新弹窗**留白重做**（各行左右 20px、行距 14px、块内 14/16px、条目行高 1.7）—— 用户实测「太挤了，没留空」；versionCode 79 → 80。）
+> （2026-10-15 **2.3.0 正式发行版**：版本号回落到 **2.3.0**（这批工作的正式定名），versionCode 80 → **81** —— versionName 回落时 versionCode **必须继续递增**，否则已装测试包（2.3.1/2.3.2）的机器无法覆盖安装。）**改版本号时这三处一起改**：
+> 上表两处之外还有 `src/core/changelog.ts` 的 `version`（内置更新日志按它匹配，
+> 不一致会导致升级后不弹日志；e2e `driver-update.js` 的 `APP_VERSION` 常量也要同步）。）
 > （2026-09-13 修正：这里原来残留着 "现值 = 1.8.1 / versionCode 48"，与正上方的表格自相矛盾，
 > 是上一次发版只更新了表格、没更新这句话造成的。2026-10-06 又发现它停在 `2.1.0 / 64` 没跟着走，
-> 已按当前值改写：改版本号时**这两处一起改**。）
+> 已按当前值改写。**这句话与表格必须同时改**，否则又会长出第二个"现值"。）
 > ⚠️ **README.md 下载表在 2.2.6 这一版仍是 2.2.5**：那四行是指向已发布 Release 的下载链接，
 > 提前改成 2.2.6 会变成 404；由发版时的 `tools/release.mjs` 与 Release 一起更新。
 > `tools/release.mjs` 会一次性同步 **6 处**：package.json、package-lock.json、android/app/build.gradle（versionName + versionCode）、

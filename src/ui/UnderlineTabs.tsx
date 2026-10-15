@@ -7,6 +7,12 @@ import { isLowFx } from "../core/lowfx";
 export interface UnderlineTab {
   key: string;
   label: string;
+  /**
+   * 追加到按钮上的属性（一般是 data-*）。
+   * 详情页的「相关漫画」标签用它带 data-related-toggle —— e2e 按这个钩子点开相关区
+   * （driver.js / driver-scrollleak.js），不需要为测试复制一份标签行组件。
+   */
+  attrs?: Record<string, string>;
 }
 
 interface Props {
@@ -87,6 +93,7 @@ export default function UnderlineTabs({ items, value, onChange, scroll, classNam
             data-on={on ? "1" : "0"}
             className={"tk" + (on ? " on" : "")}
             onClick={() => onChange(it.key)}
+            {...(it.attrs || {})}
           >
             {it.label}
           </button>

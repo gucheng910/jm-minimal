@@ -165,8 +165,8 @@ html { background: var(--bg); }
   box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
 }
 [data-theme="dark"] .source-drawer::before { background: #3E3C3A; }
-[data-theme="dark"] .member-page .card button { background: var(--surface); color: var(--ink); border-color: var(--line-strong); }
-[data-theme="dark"] .member-page .card button:active { background: var(--surface-2); }
+[data-theme="dark"] .settings-page .card button { background: var(--surface); color: var(--ink); border-color: var(--line-strong); }
+[data-theme="dark"] .settings-page .card button:active { background: var(--surface-2); }
 [data-theme="dark"] .progress { background: var(--surface-2); }
 [data-theme="dark"] .age-gate { background: linear-gradient(160deg, #100F0F, #100F0F 55%, #1c1612); }
 [data-theme="dark"] .age-card { background: var(--surface); box-shadow: 0 8px 22px rgba(0,0,0,0.55); }
@@ -191,7 +191,7 @@ html { background: var(--bg); }
 [data-theme="dark"] .menu-btn:active,
 [data-theme="dark"] .top-actions button:active,
 [data-theme="dark"] button.ghost:active,
-[data-theme="dark"] .member-page .card button:active {
+[data-theme="dark"] .settings-page .card button:active {
   background: #343331;
 }
 [data-theme="dark"] .skeleton-item { background: var(--surface); }
@@ -208,8 +208,13 @@ html { background: var(--bg); }
 [data-theme="dark"] .progress { background: #343331; }
 [data-theme="dark"] .progress-fill { background: linear-gradient(90deg, var(--brand), var(--brand-deep)); }
 [data-theme="dark"] .tag-spoiler {
-  background: rgba(251, 146, 60, 0.16);
-  color: #CECDC3;
+  /* v3.17：原来这里是 rgba(251,146,60,0.16)（Tailwind orange-400）—— 那是**另一种语义色**，
+     不是同一颜色的另一种明度：浅色态的 .tag-spoiler 走 var(--brand-soft)（暖灰），
+     一切到暗色就变成橙胶囊，在整套暖中性灰里像渲染错误。而橙色正是本文件 L28 宣布
+     "在界面里退场（只保留在 App 图标与启动图）"的那个色。
+     #CECDC3 同样只是暗色 --ink 的字面重打。改回令牌后两态同源。 */
+  background: var(--brand-soft);
+  color: var(--ink);
 }
 [data-theme="dark"] .tos-link, [data-theme="dark"] .op-link { color: #CECDC3; }
 [data-theme="dark"] .thumb-box .thumb { background: #282726; }
@@ -459,9 +464,14 @@ input:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 .chip:focus-visible,
-.theme-toggle:focus-visible {
+.theme-toggle:focus-visible,
+/* v3.17：右侧进度浮标是 `role="slider"` + `tabIndex=0`（可聚焦才能键盘分页），
+   而它不在这份名单里 ⇒ 键盘用户看不到自己停在哪。`:focus-visible` 只在键盘聚焦时命中，
+   触摸/点击不会留圈（点右边缘翻页不会被一个描边打扰）。 */
+.reader-rail:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
+  border-radius: 4px;      /* 22px 宽的长条：直角描边会显得很硬 */
 }
 button:focus:not(:focus-visible),
 .theme-toggle:focus:not(:focus-visible) {
@@ -764,7 +774,6 @@ h3 { font-size: 14px; margin: 4px 0; }
   border-top-color: var(--brand);
   animation: spin 0.8s linear infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- 行式列表骨架（封面骨架之外的列表统一用它过渡） ---------- */
 .skeleton-rows { display: flex; flex-direction: column; gap: 10px; padding: 6px 0; }
@@ -1013,19 +1022,19 @@ h3 { font-size: 14px; margin: 4px 0; }
 /* ---------- 会员中心 ---------- */
 .view-stack { min-height: 60vh; }
 .view-hidden { display: none; }
-.member-page .card button {
+.settings-page .card button {
   background: var(--surface);
   color: var(--ink);
   border: 1px solid var(--line-strong);
   box-shadow: var(--sh-1);
   font-size: 13px;
 }
-.member-page .card button:hover { background: var(--surface-2); }
-.member-page .card button:active { background: #E6E4D9; }
+.settings-page .card button:hover { background: var(--surface-2); }
+.settings-page .card button:active { background: #E6E4D9; }
 /* 登录/注册：两个按钮并排，注册为次级样式（全页只留一个黑底主按钮） */
-.member-page form.card .form-actions { display: flex; gap: 10px; margin-top: 14px; }
-.member-page form.card .form-actions button { flex: 1; }
-.member-page form.card button.ghost {
+.settings-page form.card .form-actions { display: flex; gap: 10px; margin-top: 14px; }
+.settings-page form.card .form-actions button { flex: 1; }
+.settings-page form.card button.ghost {
   background: var(--surface);
   color: var(--ink);
   border: 1px solid var(--line-strong);
@@ -1035,7 +1044,7 @@ h3 { font-size: 14px; margin: 4px 0; }
 .gender-row label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink); cursor: pointer; }
 .reg-hint { font-size: 13px; color: var(--ink-2); line-height: 1.6; margin: 6px 0 0; }
 
-.member-page form.card button {
+.settings-page form.card button {
   background: var(--black);
   color: #fff;
   border-color: transparent;
@@ -1085,6 +1094,17 @@ h3 { font-size: 14px; margin: 4px 0; }
   transform-origin: left center;
   transition: transform var(--t-ui) linear;
 }
+/* —— v3.12 阅读器状态栏条目（调研：**进度条不是原子单元** —— KOReader 的状态栏条目可多选、
+   Moon+ 在进度条那一行里塞了 时间/电池/书名/章节页码/进度 五类）——
+   这里是"进度条下面那一行读数"：放什么由 core/chromeLayout 的 readerStatus 一节决定。
+   ⚠️ 默认**全关**（配置为空时这一行整块不渲染）⇒ 没配过的用户 DOM 与加这一节之前一字不差。
+   ⚠️ 行不占位：`margin-bottom` 用负向补偿，免得"开了条目"把工具行往下推、改变点按热区。 */
+.rt-status {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+  margin: -10px 0 12px; font-size: 12px; line-height: 1.4; color: var(--reader-ink-3);
+}
+.rt-st { min-width: 0; }
+.rt-st-chapter { max-width: 60%; }   /* 话名可能很长：让 `.one-line` 去打省略号，别把整行撑开 */
 .rt-tools { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
 .rt-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; }
 /* 工具按钮：图标 + 11px 小字，四个等分（原来 9 个文字按钮挤成两行） */
@@ -1094,13 +1114,24 @@ h3 { font-size: 14px; margin: 4px 0; }
 }
 .reader-toolbar .rt-tool svg { width: 20px; height: 20px; stroke-width: 1.6; }
 .reader-toolbar .rt-tool:disabled { opacity: 0.35; }
-/* 阅读设置浮层里的控件：保持浅灰（不要被 .sheet-actions 的"末位=主按钮"规则染黑） */
-.reader-sheet .settings-actions { justify-content: flex-start; flex-wrap: wrap; }
+/* 阅读设置浮层里的控件：保持浅灰（不要被 .sheet-actions 的"末位=主按钮"规则染黑）
+ *
+ * ⚠️ v3.17 修了一个**源码顺序陷阱**：下面这条规则（(0,2,1)）与它在压的
+ *    `.sheet-actions button:last-child { flex:1; background: var(--brand-deep); color:#fff }`（也是 (0,2,1)）
+ *    **特异性完全相同**，而那条规则在文件里更靠后 → **这条从来没生效过**。
+ *    实测后果（2026-10 截图）：去条纹这个开关被画成全宽黑主按钮、状态栏 4 个 chip 里末位
+ *    「时间」被拉成 350px 且黑底、跳页行的「下一页」比「上一页」宽 3 倍。
+ *    修法不是调顺序（那只是把雷埋回去），而是**让这三行不再挂 `.sheet-actions`**：
+ *    ReaderSettingsSheet 里的三行现在只有 `.row.settings-actions`，
+ *    为「取消/确定」设计的末位规则根本不再匹配它们。 */
+.reader-sheet .settings-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 10px; }
 .reader-sheet .settings-actions button {
   flex: none; background: var(--surface-2); color: var(--ink); font-weight: 400;
   padding: 10px 14px; font-size: 13px; box-shadow: none;
 }
-.reader-sheet .settings-actions button.btn-deseam.on { background: var(--ink); color: var(--surface); font-weight: 500; }
+/* 「选中」用墨色实心 —— 与 .seg-choice button.on 同一套语言。
+   在这一条之前，状态栏 chip 的 `on` 类**没有任何样式**：选中与未选中的唯一差别是文字尾巴上那个 ✓。 */
+.reader-sheet .settings-actions button.on { background: var(--ink); color: var(--surface); font-weight: 600; }
 /* 二选一（阅读器「翻页方向」）。**不能复用 .sheet-actions**：
    那条规则是 .sheet-actions button:last-child { flex:1; background: var(--brand-deep); color:#fff }
    —— 为「取消 / 确定」这种动作行设计的，会把末位按钮**无条件**画成实心主按钮。
@@ -1124,6 +1155,14 @@ h3 { font-size: 14px; margin: 4px 0; }
   font-weight: 600;
   border-color: var(--ink);
 }
+
+/* 设置类行（去条纹 / 状态栏条目 / 跳页）——**不是**「取消 · 确定」动作行。
+   它们的样式收在上面 `.reader-sheet .settings-actions` 那一段（含为什么不能挂 `.sheet-actions` 的说明）；
+   这里只留一条给跳页行的语义钩子（e2e 与单测按它定位）：
+   这一行有输入框、还可能多出「回到开头」，所以按钮必须按内容宽。
+   ⚠️ 别在这里再加通用按钮外观 —— 那个层的特异性低于 `.reader-sheet .settings-actions button`，
+   写了也不会生效（v3.17 我先写了一版，实测是死代码，已删）。 */
+.settings-actions.page-jump { flex-wrap: wrap; }
 
 .reader-sheet .settings-actions input.page-input {
   width: 68px; text-align: center; background: var(--surface-2); color: var(--ink);
@@ -1331,6 +1370,18 @@ h3 { font-size: 14px; margin: 4px 0; }
 html.jm-reading { scrollbar-width: none; }
 html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
 
+/* 右侧进度浮标（阅读器唯一的跳页入口）
+ *
+ * ⚠️ v3.17：去掉隐藏态的 `pointer-events: none` ⇒ **常时可命中**。
+ *    原来它只在"滚完那 1.7 秒"里可命中，而触摸设备没有 hover、只有 scroll 会唤醒它 ——
+ *    也就是说"想拖它的时候它已经淡出了"，等于抓不到（这也是走查里那条 P0 的成因）。
+ *    可见性（opacity）照旧由 JS 的 showRail 控制，**命中与可见从此解耦**。
+ *
+ * ⚠️ 命中盒**故意不做成 44px**：向右扩会压进 Android 的边缘返回手势区，向左扩则永久占掉
+ *    右边缘 22px 的竖向**滚动起始**区（420px 屏上是 5%），那比要修的缺陷更糟 ——
+ *    真正的缺陷是"根本抓不到"，不是"太细"。22px 作为滚动条抓取宽度是够的
+ *    （Android 自带滚动条只有几像素）。若真机实测发现它吃了滚动，杠杆是：改这里的 width，
+ *    或给隐藏态恢复 pointer-events:none，再靠 pointerenter(鼠标)/scroll(触摸) 唤醒。 */
 .reader-rail {
   position: fixed;
   right: 3px;
@@ -1342,10 +1393,9 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
   user-select: none;
   -webkit-user-select: none;
   opacity: 0;
-  pointer-events: none;
   transition: opacity 0.18s ease;
 }
-.reader-rail.show { opacity: 1; pointer-events: auto; }
+.reader-rail.show { opacity: 1; }
 .reader-rail-line {
   position: absolute;
   left: 50%;
@@ -1538,6 +1588,10 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
 }
 .badge.ok { background: var(--ok); color: var(--surface); }
 .badge.pending { background: var(--surface-2); color: var(--ink-2); }
+/* 「选中」用墨色实心，与全站"选中/主操作统一用墨色"一致。
+   不要用 .badge.ok —— 绿色在这个设计里表达的是**状态**（已缓存 / 已签到），不是选中；
+   阅读设置的「阅读模式」原来是绿 ✓，在一屏浅色里只有它一个绿点，看着像外来元素。 */
+.badge.sel { background: var(--ink); color: var(--surface); }
 
 /* 小号按钮（缓存里的暂停/继续/重试/删除、离线详情页的返回） */
 .btn.sm { padding: 8px 14px; font-size: 13px; border-radius: var(--r-sm); }
@@ -1569,15 +1623,21 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   height: 64px;
   margin: 0 auto 16px;
   border-radius: 16px;
-  box-shadow: 0 8px 22px rgba(20, 22, 28, 0.16);
+  /* v3.17：原来是 `0 8px 22px rgba(20,22,28,0.16)` —— 偏冷的投影色压在暖色卡片上。
+     改成暖中性（与 --sh-2 同源），再加一道 --line 的发丝边：这个 PNG 自带白底，
+     在 #FFFCF0 的卡上原本是一块"浮着的纯白"，加边之后读成"有意摆放的应用图标"。 */
+  box-shadow: 0 0 0 1px var(--line), 0 8px 22px rgba(16, 15, 15, 0.14);
   display: block;
   object-fit: cover;
 }
 .age-card h1 { margin: 0 0 10px; font-size: 18px; letter-spacing: 0.5px; }
-.age-warn { color: var(--ink-2); font-size: 14px; line-height: 1.7; margin: 0 0 22px; }
+/* 认领这一行：中文在这里是两行，默认断行会留下"人浏览。"这样的孤字（实测 22 + 3）。
+   text-wrap: balance 让两行字数接近；老内核不认这条声明会直接忽略（退化成原样，无害）。 */
+.age-warn { color: var(--ink-2); font-size: 14px; line-height: 1.7; margin: 0 0 22px; text-wrap: balance; }
 .age-confirm { width: 100%; padding: 13px; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
-.mini-spin { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: gate-spin .8s linear infinite; }
-@keyframes gate-spin { to { transform: rotate(360deg); } }
+.mini-spin { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+/* v3.17：这里原本还有一份 `@keyframes gate-spin`，与上面的 `@keyframes spin` 逐字相同（转圈只有一种）。
+   已删除，`.mini-spin` 直接复用 `spin`；另有一份重复的 `@keyframes spin`（行式列表骨架那段）也一并删了。 */
 .age-tip { margin: 14px 0 0; font-size: 13px; color: var(--ink-3); }
 /* 18+ 页右上角「无网直达缓存」：老内核没有 env()，先给基础值再覆盖（否则整条声明会被丢弃 → 按钮回到文档流） */
 .age-cache {
@@ -1586,19 +1646,26 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
   right: 16px;
   top: calc(env(safe-area-inset-top) + 14px);
   right: calc(env(safe-area-inset-right) + 14px);
-  width: 42px;
-  height: 42px;
+  /* v3.17：从 42×42 的纯图标方块改成带字胶囊 —— 它是首屏右上角唯一的元素，
+     没有文字就没有任何可供性（用户不知道点它能干嘛）。图标同步降到 16px。
+     ⚠️ 不用 `gap`：老内核（WebView 57）不支持 flex gap，按本项目对新代码的既定做法
+     （见末尾 @supports 段的说明）改用 margin，两代内核都对，也不必再添一条兜底。 */
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0 12px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--r-pill);
   background: rgba(255, 255, 255, 0.72);
   color: var(--ink-2);
+  font-size: 13px;
   box-shadow: var(--sh-1);
   transition: background 120ms var(--ease-out);
 }
-.age-cache:active { background: #fff; color: var(--ink); }
+.age-cache > span { margin-left: 6px; }
+/* 按下态原来写死 #fff（冷白）—— 这个"白"在本设计系统里是 --surface (#FFFCF0 暖白) */
+.age-cache:active { background: var(--surface); color: var(--ink); }
 /* 缓存中心打开期间：确认页降到缓存中心（190）之下当背板，两个方向的过渡都不露主页 */
 .age-gate.behind { z-index: 189; }
 
@@ -1725,11 +1792,26 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
     scroll-behavior: auto !important;
   }
   .loading-spinner { animation: none !important; border-top-color: var(--brand-deep); }
-  /* 过渡：只把「位移 / 缩放 / 高度」归零，保留 opacity 与颜色（技能口径：更轻，不是全无） */
+  /* 过渡：只把「位移 / 缩放 / 高度」归零，保留 opacity 与颜色（技能口径：更轻，不是全无）
+   *
+   * ⚠️ 这是**枚举**名单，需要人肉维护。v3.17 评估过"改成全局 `*{transition-property: … !important}`"，
+   *    **否决**：样式表里的 `!important` 会盖过**内联** `style.transition`，而内联过渡是两处代码的功能依赖 ——
+   *      · `ui/CustomUiPage.tsx:363` 的 FLIP 在等 `propertyName === "transform"` 的 transitionend
+   *        （后面虽有 400ms 兜底，但会从 150ms 退化成 400ms 才收尾）；
+   *      · `ui/PullToRefresh.tsx:66` 的回弹靠内联 `transition: transform …`。
+   *    所以继续按选择器列名单：机制不动，只在发现漏网时往下添。
+   *
+   * v3.17 补了 5 个漏网的 —— 全是"子元素带 transform、父级在名单里所以看着像已覆盖"的：
+   *   `.nav-item svg`（底栏图标按压）、`.grow .chev`（折叠箭头旋转）、
+   *   `.ditem .switch i`（抽屉开关滑钮）、`.tag-block-toggle-knob`（标签屏蔽开关滑钮，
+   *   而且它用的是**过冲**曲线 cubic-bezier(.3,.9,.4,1.1) —— 前庭敏感的人最难受的一类）、
+   *   `.tos-card`（使用须知弹窗的 scale 入场）。
+   * 按钮本身不用列：`button` 已经在名单里，`.nav-item`/`.sortbtn`/`.ed-card` 都是 `<button>`。 */
   .toast, .drawer-backdrop, .tos-backdrop, .source-drawer, .side-drawer, .menu-backdrop,
   .collapse, .d-desc, .sr-layer, .page-push, .page-scrim, .ind, .ptr-wrap, .ptr-indicator,
   .rt-progress i, .progress-fill, .update-progress-fill, .reader-toolbar, .rt-top, .rt-bottom,
-  .thumb, button, .btn, .chip, .tk, .ditem, .grow, .sheet-row, .list-item, .sheet-head .sheet-close {
+  .thumb, button, .btn, .chip, .tk, .ditem, .grow, .sheet-row, .list-item, .sheet-head .sheet-close,
+  .nav-item svg, .grow .chev, .ditem .switch i, .tag-block-toggle-knob, .tos-card {
     transition-property: opacity, color, background-color, border-color, box-shadow !important;
   }
 }
@@ -2235,13 +2317,115 @@ body.jm-scroll-lock { overflow: hidden; }
   transform-origin: left center;
   transition: transform var(--t-ui) var(--ease-out);
 }
+/* 安卓的 DownloadManager 只给 done/failed，**没有百分比** —— 那时不能画一根 0% 的假进度条，
+   改成"来回跑"的不确定进度条（低配模式下动画被全局关掉，所以另有静态兜底，见文末 data-lowfx）。 */
+.update-progress-fill.unknown {
+  width: 35%;
+  transform-origin: left center;
+  animation: jm-upd-indet 1.2s var(--ease-out, ease-in-out) infinite;
+  transition: none;
+}
+@keyframes jm-upd-indet {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(190%); }
+  100% { transform: translateX(-100%); }
+}
+
 /* ============================================================
-   详情页（极简版 v6）：紧凑排版 + 分组行 + 折叠
-   —— 间距整体收到 8–16，内容只占约六成高度，下方刻意留空
+   v3.16 更新提示 / 更新日志（ui/UpdateDialog.tsx）
+   ------------------------------------------------------------
+   形态**复用项目自己的底部弹层**（.app-sheet + Sheet 组件）：遮罩、入场/出场过渡、
+   点遮罩关闭、返回键分层全都是现成的 —— 用户要的"不至于太丑"，最稳的做法就是别另起一套视觉。
+   信息结构参考 BiliPai 的 Material3AppUpdateDialog.kt：
+     标题「发现新版本」+ 副标题「版本 X」+ 右上 × + **可滚动正文** + 进度 + 主/次按钮。
+   正文高度上限取屏高的 48%（与本项目其它弹层一致）；老内核不支持 vh 的地方由 min/max 兜住。
+   ============================================================ */
+.update-sheet { max-height: 86vh; overflow-y: auto; }
+
+/* ── 副标题：日志视图 = 「版本徽标 · 日期」两枚（v2.3.1 观感重做 / v2.3.2 统一留白）──
+   ⚠️ **左右必须各留 20px**：`.app-sheet` 外壳的左右 padding 是 0（各行自带），
+   原来这里只有 margin → 版本徽标贴着面板边缘、整块内容看着"挤、没留空"（用户实测反馈）。
+   行距同理：`.sheet-head` 之下留 14px，标题之下留 14px，正文块上下由动作行的 padding 补。
+   ⚠️ 老内核没有 flex gap → 间距一律用 margin，不用 gap。 */
+.update-sub {
+  display: flex; align-items: center; flex-wrap: wrap;
+  padding: 2px 20px 0;
+  margin: 0 0 14px; font-size: 13px; color: var(--ink-3);
+}
+.update-ver {
+  display: inline-block; padding: 3px 10px;
+  border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .2px;
+  color: var(--brand, #1677ff);
+  background: var(--brand-soft, rgba(22, 119, 255, .10));
+}
+.update-sep { margin: 0 7px; color: var(--ink-3); }
+.update-date { font-size: 12.5px; color: var(--ink-3); }
+
+/* 标题：16.5px/700 —— 它是这一屏的"一句话主题"，必须比正文明显 */
+.update-headline {
+  padding: 0 20px; margin: 0 0 14px;
+  font-size: 16.5px; font-weight: 700; line-height: 1.5; color: var(--ink);
+}
+.update-status { padding: 0 20px; margin: 0 0 12px; font-size: 13px; color: var(--ink-2); }
+/* 更新内容：外来的 Release 正文**保留换行原样显示**（本来就是 Markdown 文本），
+   并且必须能滚 —— 但滚的是这一块，不是整个弹层（否则按钮会被滚出屏幕）。
+   左右 20px 与其它行对齐；块内 14/16px 留白（原来 10/12px 偏闷）。 */
+.update-notes {
+  margin: 0 20px; padding: 14px 16px;
+  max-height: min(48vh, 380px); overflow-y: auto;
+  border-radius: var(--r-sm, 10px); background: var(--surface-2, rgba(128,128,128,.08));
+  color: var(--ink); font: inherit; font-size: 13px; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* ── 内置日志的**条目列表**（v2.3.1 起）─────────────────────────────
+   用户原话「更新日志有点丑」：原来整块 <pre> 里是 "· 一行"，等宽感 + 无层次。
+   现在每条一个 <li>：品牌色圆点 + 舒展行距 + 条目间留白；圆点用 ::before 画
+   （不新增 DOM 节点，老内核上节点越少越好）。v2.3.2 把条目行距与块内留白再放大一档。 */
+.update-notes-list { padding: 14px 16px; white-space: normal; }
+.update-list { margin: 0; padding: 0; list-style: none; }
+.update-list li {
+  position: relative; padding: 7px 0 7px 17px;
+  font-size: 13.5px; line-height: 1.7; color: var(--ink);
+}
+.update-list li::before {
+  content: ""; position: absolute; left: 3px; top: 15px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--brand, #1677ff); opacity: .7;
+}
+/* ── 动作行（v2.3.1）──────────────────────────────────────────────
+   ⚠️ **不复用 `.sheet-actions`**：`.sheet-actions button:last-child` 是一条**无条件**的
+   通用规则（末位 = flex:1 + 实心主按钮），为"取消 / 确定"那种动作行设计；更新弹窗的
+   按钮数量与主次都不定，复用它的实测后果就是**主次颠倒** —— "发布页 / 稍后安装 /
+   下次再说"被画成黑主按钮，而真正的主动作（知道了 / 立即更新）不是。
+   项目里同类事故已记过两次（见上面 `.reader-sheet .settings-actions` 那段），
+   修法一致：**让这一行不再挂 `.sheet-actions`**，布局与主次全在这里定义。 */
+.update-actions {
+  display: flex; flex-wrap: wrap; align-items: center;
+  padding: 16px 20px 6px; margin-top: 0;   /* 上方 16px：正文块与按钮之间要透气 */
+}
+/* 老内核没有 flex gap：间距一律用相邻兄弟补丁（与本项目其它动作行同款） */
+.update-actions > * + * { margin-left: 10px; }
+.update-actions > .btn {
+  padding: 13px 16px; font-size: 14px; font-weight: 400;
+  border-radius: var(--r-md); box-shadow: none;
+  flex: 1 1 auto; min-width: 92px;
+}
+/* 主操作 = 实心墨色、占满剩余宽度；次要操作 = 浅灰面、按内容宽
+   （"发布页 ↗"不该和"知道了"平分整行） */
+.update-actions > .btn.primary { background: var(--ink); color: var(--surface); font-weight: 500; }
+.update-actions > .btn.soft { background: var(--surface-2); color: var(--ink); flex: 0 1 auto; }
+/* "便携版 / iOS 无法自己安装"那行提示独占一行 */
+.update-actions > .dl-hint { flex: 1 1 100%; margin: 8px 0 0; }
+
+/* ============================================================
+   详情页（极简版 v7.1）：主视觉（封面+标题+数据条）→ 标签 chips → JM号行
+   → 动作区 → 简介 → 横栏标签（目录/评论/相关，「目录」默认选中）
+   —— 模块排放对照图：工作台 jm-detail-layout-proposal（v6 的分组行/select 已退役）
    ============================================================ */
 .detail-card { background: none; padding: 4px 0 28px; margin: 0; border-radius: 0; }
-/* 返回：横排、不换行；与标题同一行（标题在它右边） */
-.d-head { display: flex; align-items: flex-start; gap: 8px; max-width: var(--measure); }
+/* 返回独占一行；标题挪进主视觉右栏 */
+.d-head { display: flex; align-items: center; gap: 8px; max-width: var(--measure); }
 .backtxt {
   display: inline-flex; align-items: center; gap: 2px; flex: none;
   /* 视觉上仍是「返回」两字，命中区撑到 44 高（详情页最常用的操作之一） */
@@ -2251,18 +2435,180 @@ body.jm-scroll-lock { overflow: hidden; }
   font: inherit; font-size: 14px; cursor: pointer; border-radius: var(--r-sm);
   white-space: nowrap;
 }
-.d-head .d-title { flex: 1; min-width: 0; margin-top: 4px; }
 .backtxt:active { opacity: 0.6; }
 .d-title {
-  font-size: 18px; font-weight: 500; letter-spacing: -0.005em;
-  line-height: 1.45; margin: 2px 0 8px; max-width: var(--measure);
+  font-size: 16px; font-weight: 600; letter-spacing: -0.005em;
+  line-height: 1.35; margin: 0 0 6px;
 }
 .d-meta {
   color: var(--ink-2) !important; font-size: 13px !important;
   line-height: 1.7; margin: 0 0 5px; max-width: var(--measure);
 }
 .d-meta .link { font-weight: 400; }
-.d-copy { margin-left: 10px; }
+
+/* —— v7.1 主视觉：封面左置（3:4），标题/作者/话数/数据条右置 —— */
+.d-hero { display: flex; gap: 12px; align-items: flex-start; margin-top: 2px; max-width: var(--measure); }
+.d-hero-info { flex: 1; min-width: 0; }
+/* —— v3.10 主视觉排布（调研 TOP8 第 7 条）：左图右文（默认，上面那条）↔ **封面居中** ——
+   出处：三种封面形态（左小图 / 大图居中 / 模糊铺满）在调研里都有实例；但 390px 下"大图居中"
+   会把首屏占满，所以默认仍是"左图右文"，居中档是可选项。
+   ⚠️ 这一档**不改封面大小** —— 大小是「封面大小」那条轴的事（两轴可组合：居中 + 拖大 = 展示派版式）。
+   只在选了这一档时才有这个属性（默认档不输出 data-dl-herolayout ⇒ DOM 与加这一项之前一字不差）。 */
+.detail-card[data-dl-herolayout="center"] .d-hero {
+  flex-direction: column; align-items: center; gap: 14px;
+}
+.detail-card[data-dl-herolayout="center"] .d-hero-info { width: 100%; }
+/* 固定 104×139（=3:4），不用 aspect-ratio：老内核兜底少一处 */
+.d-cover-box {
+  position: relative; width: 104px; height: 139px; flex: none;
+  border-radius: var(--r-md); overflow: hidden; background: var(--thumb-fill);
+}
+/* 图压在占位文字之上（占位只是加载失败时的兜底，不能盖住已加载的封面） */
+.d-cover { display: block; width: 100%; height: 100%; object-fit: cover; position: relative; z-index: 1; }
+/* 图没来/加载失败时露出来的书名兜底（垫在图下面，不是遮罩） */
+.d-cover-ph {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px; text-align: center;
+  font-size: 11px; line-height: 1.4; color: var(--ink-3);
+}
+.d-stat { margin: 8px 0 0; font-size: 11px; color: var(--ink-3); letter-spacing: 0.02em; }
+.d-actors { margin: 10px 0 0; }
+
+/* —— v7.1 四宫格（作者 / 话数·页数 / JM号 / 收录）：2×2，每列齐头 —— */
+.d-facts {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; grid-gap: 8px 12px;
+  align-items: start;
+}
+.d-facts .fact { min-width: 0; }
+.d-facts .k {
+  display: block; font-size: 11px; line-height: 1.4;
+  color: var(--ink-3); margin-bottom: 1px;
+}
+.d-facts .v {
+  display: block; min-width: 0;
+  font-size: 12px; line-height: 1.5; color: var(--ink); word-break: break-word;
+}
+.d-facts .v b { font-weight: 600; }
+.d-facts .v .d-copy-btn { margin-left: 6px; vertical-align: 1px; }
+
+/* —— v3.8 形态：主视觉信息区「紧凑两列表」——
+   结构一个都没动（每个 `.fact` 里本来就是 `k` + `v`），只是把"2 列卡片、label 在值上方"
+   改成"label 与值同一行并排"。出处（调研 TOP8 第 5 条）：Marvel 的元信息**每行 21px**
+   （同一页的章节行是 52px），Kotatsu 有一个独立的 `layout_details_table`。
+   ⚠️ 只在选了这一档时才有这个类（默认档不加类 ⇒ DOM 与加这一层之前逐字一致）。 */
+.d-facts-table { display: block; }                 /* 不再是 2 列网格：每一行就是一条 label:value */
+.d-facts-table .fact {
+  display: grid; grid-template-columns: 56px 1fr;  /* 固定 label 列宽 → 多行之间标签对齐 */
+  align-items: baseline; column-gap: 8px; padding: 2px 0;
+}
+.d-facts-table .k { display: inline; margin-bottom: 0; }
+.d-facts-table .v { display: inline; }
+
+/* —— v7.1 标签 chips（与首页热词胶囊同一套语言，小一号、更紧凑）—— */
+.d-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-width: var(--measure); }
+/* —— v3.8 形态：标签「横滑一行」——
+   chip 一个都不删，只是不再换行、横向可滑。为什么值得做（调研 TOP8 第 3 条）：
+   窄屏 + 标签多（18 个）时折行会占 5~6 行、把目录挤下去；Mihon 同一模块就有两态
+   （收起 LazyRow 横滑 / 展开 FlowRow 折行），Comick 用滚动盒。
+   ⚠️ 只在选了这一档时才有这个类。 */
+.d-tags-scroll {
+  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+  scrollbar-width: none;          /* 移动端不要横向滚动条 */
+  padding-bottom: 2px;            /* 给 chip 的按下缩放留余量，别被裁掉 */
+}
+.d-tags-scroll::-webkit-scrollbar { display: none; }
+.d-tags-scroll .tagchip { flex: 0 0 auto; }   /* 不许被压扁 */
+.tagchip {
+  background: var(--surface-2); color: var(--ink); border: 0;
+  min-height: 28px; padding: 5px 10px;
+  font: inherit; font-size: 12px; border-radius: var(--r-pill); cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out);
+}
+.tagchip:active { transform: scale(0.94); }
+
+/* —— v7.1 复制小按钮（JM号宫格内）—— */
+.d-copy-btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  border-radius: var(--r-sm); padding: 2px 7px; min-height: 22px; flex: none;
+  font: inherit; font-size: 11px; cursor: pointer;
+}
+.d-copy-btn:active { opacity: 0.6; }
+
+/* —— v7.1 横栏标签 + 目录列表（UnderlineTabs 复用分类页样式，这里只管内容区）—— */
+/* 只给读屏 / e2e 的文本：视觉隐藏但仍在无障碍树里 */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.d-tabs { margin-top: 18px; }
+/* ── v3.5：`detail` 的**第二种形态**「折叠三行」（用户第 4 条）──────────────
+   三行 = 同样的三个面板（目录 / 评论 / 相关漫画），只是各占一行、点一下展开。
+   四条规矩：
+   · 与横栏形态**占位一致**（margin-top 同为 18px）→ 切换形态时区块位置不跳；
+   · 行分隔用 `inset box-shadow`（与 .chap-row 同一手法）：不占盒、不改布局；
+   · 展开箭头只用 `transform` 旋转 —— 老内核上 transform 是安全的，别去动 height/width；
+   · 不用 flex gap（老内核整条丢弃声明），间距一律走 margin。 */
+.d-fold { margin-top: 18px; max-width: var(--measure); }
+.d-fold-item { position: relative; }
+.d-fold-head {
+  display: flex; align-items: center; width: 100%;
+  padding: 14px 2px; border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+/* 编辑态渲染的是 div（不可交互）：光标与按压反馈都不该装出"能点"的样子 */
+.d-fold-head.static { cursor: inherit; }
+.d-fold-head:not(.static):active { background: var(--surface-2); }
+.d-fold-name { flex: 1; min-width: 0; }
+.d-fold-caret {
+  flex: none; margin-left: 8px; font-size: 16px; line-height: 1;
+  color: var(--ink-3); transition: transform 180ms var(--ease-out);
+}
+.d-fold-caret.on { transform: rotate(90deg); }
+.d-fold-body { padding-bottom: 6px; }
+.chap-list { margin-top: 6px; max-width: var(--measure); }
+.chap-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 12px 2px; border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.chap-row.static { cursor: default; }
+.chap-row.on { font-weight: 600; }
+.chap-row:not(.static):active { background: var(--surface-2); }
+.chap-name { flex: 1; min-width: 0; }
+.chap-tag { flex: none; font-size: 11px; padding: 1px 8px; border-radius: var(--r-pill); }
+.chap-tag.now { color: var(--link); background: var(--surface-2); }
+.chap-tag.last { color: var(--ok); background: var(--ok-soft); }
+.chap-more {
+  display: inline-block; margin-top: 6px; padding: 12px 4px 10px;
+  background: none !important; border: 0; color: var(--link);
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+
+/* —— v3.8 目录排法（调研 TOP8 第 2 条）：单列列表 ↔ **两列网格** ——
+   出处：Mihon / Kotatsu 都把章节列表形态做成用户设置（`onDisplayModeChanged` / `list_mode`+`grid_size`），
+   五家实测的章节行高也各不相同（bilibili 42px / 快看 50px / MangaDex 52px / Webtoon 75px）。
+   为什么值得做：146 话的作品里找"第 90 话"，单列要滚很久，两列一屏能看到两倍的行。
+   行高沿用单列那套（`.chap-row` 自带 12px 上下内边距 ≈ 48px 一行），所以两档之间不会跳。
+   只在选了「两列」时才有这个属性 —— 默认档不输出 `data-dl-chap`，DOM 与加这一项之前一字不差。 */
+.detail-card[data-dl-chap="grid2"] .chap-list {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; grid-gap: 0 10px; align-items: stretch;
+}
+.detail-card[data-dl-chap="grid2"] .chap-row { width: auto; min-width: 0; }
+/* 话名一行不换行、超出打省略号 —— 否则长话名会把网格的行高撑得参差不齐 */
+.detail-card[data-dl-chap="grid2"] .chap-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 「查看全部 / 收起」跨满两列（它是动作，不是一话） */
+.detail-card[data-dl-chap="grid2"] .chap-more { grid-column: 1 / -1; }
+/* 网格档**不显示角标**：单元格只有约一半宽，「在读 / 上次读到」会把话名挤掉。
+   这正是调研点出的轴冲突②（形态 × 密度）那一类，选择是"窄形态自动减信息"；
+   当前话仍有 `.on` 加粗，不会丢"我在哪"。 */
+.detail-card[data-dl-chap="grid2"] .chap-tag { display: none; }
 .d-desc {
   font-size: 14px; line-height: 1.7; letter-spacing: 0.01em; color: var(--ink-2);
   margin: 12px 0 0; max-width: var(--measure);
@@ -2302,25 +2648,17 @@ body.jm-scroll-lock { overflow: hidden; }
 
 /* 分组行：浅灰面 + 1px 内分隔，不用边框 */
 .group { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 16px; }
-.d-group { margin-top: 16px; }
 .grow {
   display: flex; align-items: center; gap: 12px; width: 100%;
   padding: 15px 18px; border: 0; background: none; color: var(--ink);
   font: inherit; font-size: 14px; text-align: left; cursor: pointer;
   transition: background 0.12s linear;
 }
-.grow + .grow, .grow + .selectrow, .selectrow + .grow { box-shadow: inset 0 1px 0 var(--line); }
+.grow + .grow { box-shadow: inset 0 1px 0 var(--line); }
 .grow:active { background: var(--surface-2); }
 .grow .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
 .grow .chev { flex: none; color: var(--ink-3); font-size: 16px; line-height: 1; transition: transform var(--t-ui) var(--ease-out); }
 .chev-toggle.open { transform: rotate(90deg); }
-.selectrow { cursor: default; }
-.selectrow select {
-  margin-left: auto; max-width: 62%; border: 0; padding: 0; background: none;
-  font: inherit; font-size: 13px; color: var(--ink-2); text-align: right;
-  appearance: none; -webkit-appearance: none;
-}
-.selectrow select:focus { box-shadow: none; }
 
 /* ============================================================
    分类页（极简版 v6）：下划线标签 + 行尾钉住的「更多」+ 工具行
@@ -2387,7 +2725,7 @@ body.jm-scroll-lock { overflow: hidden; }
 
   /* 文字/控件块：锁 640 居中，剩下的留白 */
   .card, .tabs, .toolrow, .catrow, .searchbar, .seg { max-width: var(--col); margin-left: auto; margin-right: auto; }
-  .member-page { max-width: var(--col); margin-left: auto; margin-right: auto; }
+  .settings-page { max-width: var(--col); margin-left: auto; margin-right: auto; }
 
   /* 长文：再收到 476（约 34 汉字，见 W3C clreq） */
   .d-title, .d-desc, .d-meta, .actrow, .comment-body, .book-desc { max-width: var(--measure); }
@@ -2438,7 +2776,7 @@ body.jm-scroll-lock { overflow: hidden; }
 .tags button:active { transform: scale(0.95); }
 .app-sheet .sheet-scroll { flex: 1; min-height: 0; }
 
-/* ---------- 会员页「诊断与线路」（默认折叠，工具页风格） ---------- */
+/* ---------- 设置页「诊断与线路」（默认折叠，工具页风格） ---------- */
 .member-top { margin: 4px 0 12px; }
 .diag { padding: 0; overflow: hidden; }
 .diag-head {
@@ -2464,7 +2802,14 @@ body.jm-scroll-lock { overflow: hidden; }
 .drawer-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 26px 20px 18px; }
 .drawer-id { min-width: 0; }
 .drawer-name { font-size: 16px; font-weight: 500; letter-spacing: -0.005em; }
-.drawer-ver { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+/* 版本号那一行现在是个按钮（点它看更新日志，v3.16）—— 清掉按钮默认外观，只保留文字样式，
+   并给一个"可点"的暗示（下划线 + 按压变色）。 */
+.drawer-ver {
+  display: block; margin: 2px 0 0; padding: 0; border: 0; background: none;
+  font: inherit; font-size: 13px; color: var(--ink-3); text-align: left;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line);
+}
+.drawer-ver:active { color: var(--ink); }
 .drawer-body { flex: 1; overflow-y: auto; padding: 0 20px 32px; }
 .drawer-sec { margin-bottom: 24px; }
 .drawer-sec h5 { margin: 0 0 8px; font-size: 13px; font-weight: 400; color: var(--ink-3); }
@@ -2485,21 +2830,21 @@ body.jm-scroll-lock { overflow: hidden; }
 /* 仓库入口和上面的「检查更新」之间留出间距，避免两块粘在一起 */
 .ditem.repo-link { margin-top: 14px; }
 
-/* ---------- 会员页（v6）：分组卡 + 账号/签到展开 ---------- */
+/* ---------- 设置页（v6）：分组卡 + 账号/签到展开 ---------- */
 .member-title { margin: 4px 0 16px; font-size: 16px; font-weight: 500; letter-spacing: -0.005em; }
-.member-page .group { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 16px; }
-.member-page .grow {
+.settings-page .group { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 16px; }
+.settings-page .grow {
   display: flex; align-items: center; gap: 12px; width: 100%;
   padding: 16px 18px; border: 0; background: none; color: var(--ink);
   font: inherit; font-size: 14px; text-align: left; cursor: pointer;
   transition: background var(--t-press) linear;
 }
-.member-page .grow + .grow, .member-page .grow + .grow-body { box-shadow: inset 0 1px 0 var(--line); }
-.member-page .grow:active { background: var(--surface-2); }
-.member-page .grow .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
-.member-page .grow .chev { flex: none; color: var(--ink-3); font-size: 16px; line-height: 1; transition: transform var(--t-ui) var(--ease-out); }
-.member-page .grow .chev-toggle.open { transform: rotate(90deg); }
-.member-page .grow-body { padding: 14px 18px 18px; }
+.settings-page .grow + .grow, .settings-page .grow + .grow-body { box-shadow: inset 0 1px 0 var(--line); }
+.settings-page .grow:active { background: var(--surface-2); }
+.settings-page .grow .v { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+.settings-page .grow .chev { flex: none; color: var(--ink-3); font-size: 16px; line-height: 1; transition: transform var(--t-ui) var(--ease-out); }
+.settings-page .grow .chev-toggle.open { transform: rotate(90deg); }
+.settings-page .grow-body { padding: 14px 18px 18px; }
 /* 折叠面板（Collapse.tsx）：高度由 JS 给（0 ↔ 内容高度），这里只管过渡与裁切 */
 .collapse {
   overflow: hidden;
@@ -2509,10 +2854,10 @@ body.jm-scroll-lock { overflow: hidden; }
 }
 .collapse[data-open] { opacity: 1; }
 /* 折叠行之间的分隔线：原来靠 .grow + .grow-body 相邻选择器，现在中间多了 .collapse 这一层 */
-.member-page .grow + .collapse { box-shadow: inset 0 1px 0 var(--line); }
-.member-page .grow-note { margin: 0 0 12px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
-.member-page .grow-actions { gap: 8px; margin-top: 12px; }
-.member-page .member-grid { gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+.settings-page .grow + .collapse { box-shadow: inset 0 1px 0 var(--line); }
+.settings-page .grow-note { margin: 0 0 12px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.settings-page .grow-actions { gap: 8px; margin-top: 12px; }
+.settings-page .member-grid { gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
 
 /* ============================================================
  * 老内核兜底：WebView < 88 没有 aspect-ratio
@@ -2576,9 +2921,11 @@ body.jm-scroll-lock { overflow: hidden; }
  * 老内核兜底：flex gap（Chrome 84+ 才支持；WebView 57 上 gap 整条被丢弃）
  * 实测（小米 4W / WebView 57）：liveFlexGap=10（两个 10px 盒子完全贴在一起）→ 所有
  * display:flex; gap:* 的间距全部为 0，界面要么挤成一团、要么靠 padding 硬撑。
- * 这里用边距把 65 处非换行 flex 间距补回来；换行的 5 处用「容器负半距 + 子项半距」。
- * 只加一个轴（左/上），不动其它方向的既有 margin；grid 容器走 grid-gap（本文件已改）。
+ * 这里用边距把非换行 flex 间距补回来；**换行**的用「容器负半距 + 子项半距」；grid 容器走
+ * 同一条规则里双写的 grid-gap（本文件已改）。
  * 清单由 scripts/css-gap-scan.mjs 生成后人工核对：改上面的 gap 值时同步这里。
+ * 🚨 收尾波起这条纪律有门禁兜底：`npm run scan:gap`（= `--check` 模式）会把"有 gap 候选
+ *    没在下面补上"直接判失败 —— 历史上靠人工核对，结果漏了 8 处（含 `.d-hero`/`.d-tags`）。
  * ============================================================ */
 @supports not (gap: 1px) {
   .theme-toggle-left > * + * { margin-left: 8px; }
@@ -2592,12 +2939,24 @@ body.jm-scroll-lock { overflow: hidden; }
   .menu-head > * + * { margin-left: 10px; }
   .app-sheet .opt-row > * + * { margin-left: 12px; }
   .app-sheet .sheet-actions > * + * { margin-left: 10px; }
-  .member-page form.card .form-actions > * + * { margin-left: 10px; }
+  .settings-page form.card .form-actions > * + * { margin-left: 10px; }
   .gender-row > * + * { margin-left: 24px; }
   .gender-row label > * + * { margin-left: 6px; }
   .rt-top > * + * { margin-left: 10px; }
   .rt-nav > * + * { margin-left: 10px; }
   .reader-toolbar .rt-tool > * + * { margin-top: 6px; }
+/* —— 以下是本轮（v3.14）由 `npm run scan:gap` 抓出来的漏网 gap（老内核上这些间距 = 0）——
+   为什么现在才补：`scan:gap` 在 `npm run check` 里，而本任务前几轮的关卡清单里没有它，
+   于是 v3.8 起的几处新 gap（封面居中 / 目录两列 / 阅读器状态栏 / 阅读器画布 / 单列行卡）
+   一直是"现代包看着对、compat 包会贴在一起"。这些都是**只在老内核生效**的补丁，
+   现代渲染一字未动。 */
+.detail-card[data-dl-herolayout="center"] .d-hero > * + * { margin-top: 14px; }
+/* 换行容器的正解：**容器负半距 + 子项半距**（两边各 6px = 12px，与 `gap: 4px 12px` 等价）。
+   只写子项的一半会被 scan:gap 判为"没补全"—— 因为末项右半边的 6px 没人抵消掉。 */
+.rt-status { margin-right: -6px; }
+.rt-status > * { margin: 0 6px 4px 0; }
+.ed-readerpage > * + * { margin-top: 8px; }
+.list.form-row .list-item > * + * { margin-left: 12px; }
   .sheet-head > * + * { margin-left: 10px; }
   .sheet-list > * + * { margin-top: 6px; }
   .sheet-row > * + * { margin-left: 10px; }
@@ -2640,9 +2999,22 @@ body.jm-scroll-lock { overflow: hidden; }
   .diag-actions > * + * { margin-left: 8px; }
   .drawer-head > * + * { margin-left: 12px; }
   .ditem > * + * { margin-left: 12px; }
-  .member-page .grow > * + * { margin-left: 12px; }
-  .member-page .grow-actions > * + * { margin-left: 8px; }
-  .member-page .member-grid > * + * { margin-left: 18px; }
+  .settings-page .grow > * + * { margin-left: 12px; }
+  .settings-page .grow-actions > * + * { margin-left: 8px; }
+  .settings-page .member-grid > * + * { margin-left: 18px; }
+
+  /* ---- 收尾波补齐：历史手工清单漂移漏掉的 7 处 ----
+     这份清单原本靠人工核对，于是新加的规则一路漏补（`scripts/css-gap-scan.mjs` 现在有
+     `--check` 模式 + `npm run scan:gap`，改了 gap 不补这里会当场红）。
+     其中两处是用户直接看得见的：`.d-hero` 漏补 → 老内核上封面贴住信息栏；
+     `.d-tags` 漏补 → 标签胶囊挤成一团（它是换行容器，补丁在下面负半距那一组）。 */
+  .skeleton-rows > * + * { margin-top: 10px; }   /* column：只加上边距 */
+  .seg-choice > * + * { margin-left: 8px; }
+  .chap-next > * + * { margin-left: 6px; }
+  .list-ops > * + * { margin-left: 16px; }
+  .d-hero > * + * { margin-left: 12px; }
+  .chap-row > * + * { margin-left: 10px; }
+  .lib-actions > * + * { margin-left: 4px; }
 
   /* ---- 换行 flex：容器右侧/底部负半距，子项补半距（等价于 gap，且首项不缩进）---- */
   .row { margin-right: -4px; margin-bottom: -4px; }
@@ -2655,6 +3027,10 @@ body.jm-scroll-lock { overflow: hidden; }
   .tags > * { margin-right: 4px; margin-bottom: 4px; }
   .chips { margin-right: -4px; margin-bottom: -4px; }
   .chips > * { margin-right: 4px; margin-bottom: 4px; }
+  /* 详情页标签胶囊：换行容器，必须用负半距（用 `> * + *` 的话换行后行与行之间仍贴在一起）。
+     gap: 6px → 半距 3px。 */
+  .d-tags { margin-right: -3px; margin-bottom: -3px; }
+  .d-tags > * { margin-right: 3px; margin-bottom: 3px; }
 }
 
 /* 老内核没有 inset 简写：这 10 个铺满层会塌成 0×0（弹层遮罩、返回提示、纯占位图兜底文字都靠它） */
@@ -2681,6 +3057,12 @@ html[data-lowfx="1"] * {
   animation-delay: 0ms !important;
   animation-iteration-count: 1 !important;
   transition: none !important;
+}
+/* 不确定进度条在低配模式下动画被压掉 → 给一个**静态的固定占比**，
+   否则"下载中"会显示成一根空槽（比不动更糟：用户以为卡死了）。 */
+html[data-lowfx="1"] .update-progress-fill.unknown {
+  width: 40% !important;
+  transform: none !important;
 }
 /* 按压反馈（:active 缩放）也一并去掉，但**只能逐个点可点元素**：
    ⚠️ 绝不能写成 `*:active` —— :active 会同时命中祖先，而顶栏/底栏是靠 `left:50% + translateX(-50%)` 居中的，
@@ -2758,3 +3140,953 @@ html[data-lowfx="1"] .cache-overlay .cache-body { box-shadow: none; }
 /* 被详情盖住：不可见、不接收点击，但保持挂载。
    用 visibility 而不是 display:none —— display:none 会把浮层内部的滚动位置清零。 */
 .cache-overlay[data-hidden] { visibility: hidden; pointer-events: none; }
+
+/* ============================================================
+   详情页布局面板（自定义布局）
+   这是 core/detailLayout.ts 那层参数面向用户的界面。
+   行沿用抽屉的 .ditem 语言（同一套面 / 圆角 / 开关），右侧多一组「上移 / 下移」小按钮。
+
+   ⚠️ 刻意**不用 flex gap**：老内核（WebView 57）不支持 flex gap，而这层是新增的，
+      不想再往 index.css 末尾那 59 条 @supports not (gap:1px) 补丁里添一条 ——
+      用 margin 就两代内核都对，不用配兜底。
+   ============================================================ */
+/* .app-sheet 自身左右不设内边距（子块各自给），所以行容器要自己补 20px */
+.dl-rows { padding: 0 20px; }
+.dl-hint { margin: 0; padding: 0 20px 8px; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+/* 右侧控件组：靠 margin-left:auto 推到行尾（不用 gap，见上） */
+.dl-ctl { margin-left: auto; display: flex; align-items: center; flex: none; }
+.dl-step {
+  width: 32px; height: 32px; margin-left: 6px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--r-sm);
+  background: var(--surface); color: var(--ink-2);
+  font: inherit; font-size: 13px; line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-press) var(--ease-out);
+}
+.dl-step:active { background: var(--line); }
+.dl-step:disabled { opacity: 0.35; cursor: default; background: var(--surface); }
+/* .ditem .switch 自带 margin-left:auto（抽屉里靠它把开关推到行尾）；
+   放进控件组后要改成定距，否则它会被推到 ▲▼ 的另一头 */
+.dl-ctl .switch { margin-left: 6px; padding: 0; border: 0; }
+/* 被隐藏的区块整行淡掉，一眼看出"这一块我关了"。
+   注意用 .dl-label 而不是 > span:first-child —— 行里现在还有一个拖拽手柄 .dl-grip 在最前面 */
+.ditem.dl-off .dl-label { opacity: 0.45; }
+/* 字段来源说明（列表页那层用，例如 album.author）。详情页的节点没有 note，不会渲染 */
+.dl-from { margin-left: 6px; font-style: normal; font-size: 12px; color: var(--ink-3); font-weight: 400; }
+
+/* ---- 拖拽排序手柄 ----
+   只有它能起拖（整行起拖会和"上下滚页面"打架）。
+   touch-action:none 是关键：没有它，浏览器会把手势当滚动手势吃掉，拖不起来。 */
+.dl-grip {
+  flex: none; margin: 0 2px 0 -4px; padding: 0 8px;
+  font-size: 15px; line-height: 1; color: var(--ink-3);
+  cursor: grab; touch-action: none;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.dl-grip:active { cursor: grabbing; color: var(--ink-2); }
+/* 拖动中的行用 outline 画标记：outline 不占盒、不改变布局，所以"一进拖动就错位"不会发生。
+   别用 border（会挤动），也别用 box-shadow（老内核合成开销大且易闪）。 */
+.ditem.dl-dragging { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+/* ---- 「样式与大小」编辑器 ---- */
+.dl-style { padding: 0 20px 10px; }
+.dl-style .grpname { display: flex; align-items: center; }
+.dl-style .seg-choice { margin-top: 6px; }
+/* 单项复位（调研：Webstudio 的 Alt 点击样式值 = 复位该项；手机没有 Alt，给个按钮）。
+   只在该项被改过时才画，所以不需要禁用态 —— 与"不可隐藏就不画开关"同一条原则。 */
+.dl-reset {
+  margin-left: 6px; width: 24px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--r-sm); background: none; color: var(--ink-3);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.dl-reset:active { background: var(--line); color: var(--ink); }
+/* 分组标题上的圆点：表示"这一组被改过"（调研：Webstudio Style panel 的做法） */
+.dl-dot {
+  display: inline-block; width: 7px; height: 7px; margin-left: 6px;
+  border-radius: 50%; background: var(--brand); vertical-align: middle;
+}
+
+/* ---- 有界滑块（尺寸类三项：封面宽度 / 标题字号 / 简介行数）----
+   Home Assistant 真做了拖拽之后仍把"改大小"做成滑块（"a very nice slider interface"），
+   两端的 min/max 就是安全边界（Mihon 的 0~25 同理）。
+   range 控件在 WebView 57 上是原生可用的；不给它加 appearance 之类的花活。 */
+.dl-slider { display: flex; align-items: center; margin-top: 6px; }
+.dl-slider input[type="range"] {
+  flex: 1 1 auto; min-width: 0; height: 30px; margin: 0 10px 0 0;
+}
+.dl-slider input[type="range"]:disabled { opacity: 0.4; }
+.dl-out {
+  flex: none; min-width: 52px; text-align: right;
+  font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   详情页版面样式（用户可调）——「自定义 UI → 详情页」选中模块后的配置
+   ------------------------------------------------------------
+   配置层在 core/detailStyle.ts。出口分两条：
+   · **尺寸类三项**（封面宽度 / 标题字号 / 简介行数）v2 起是**数值**（有界滑块），
+     几何走内联 style（coverBoxStyle/titleStyle/descStyle）—— 连续值没法逐档预写声明，
+     而 var() 传数字在旧 Chromium 上行为不确定（报告 §4.3），兼容包目标是 WebView 57，
+     所以直接写内联（width / font-size / line-clamp 都是普通盒属性，无特异度冲突）。
+   · **语义档位两项**（疏密 / 圆角）维持"每档一条完整声明"（属性选择器 + 字面量）。
+
+   两路都只在**非默认**时输出（默认值在 core/detailStyle.ts 的 DEFAULT_DETAIL_STYLE）：
+   不改设置的用户一个 data-* 属性都没有、一个内联 style 都没有，DOM 与引入之前逐字一致。
+   data-dl-cover/title/desc 数值属性仍会挂，但**只作测试 / 真机验收的观测钩子**，不驱动几何。
+
+   ⚠️ 不要给这些规则加 flex gap / aspect-ratio / inset —— 老内核会整条丢弃声明。
+   ============================================================ */
+
+/* 版面疏密：只动**区块之间**的上边距，不动块内行距 */
+.detail-card[data-dl-density="compact"] .d-desc { margin-top: 4px; }
+.detail-card[data-dl-density="compact"] .d-actors { margin-top: 2px; }
+.detail-card[data-dl-density="compact"] .d-tags { margin-top: 2px; }
+.detail-card[data-dl-density="compact"] .actrow { margin-top: 8px; }
+.detail-card[data-dl-density="compact"] .d-tabs { margin-top: 10px; }
+.detail-card[data-dl-density="roomy"] .d-desc { margin-top: 22px; }
+.detail-card[data-dl-density="roomy"] .d-actors { margin-top: 18px; }
+.detail-card[data-dl-density="roomy"] .d-tags { margin-top: 18px; }
+.detail-card[data-dl-density="roomy"] .actrow { margin-top: 26px; }
+.detail-card[data-dl-density="roomy"] .d-tabs { margin-top: 28px; }
+
+/* 圆角：只作用在详情页上看得见的三类面上（封面 / 标签胶囊 / 动作按钮） */
+.detail-card[data-dl-radius="none"] .d-cover-box,
+.detail-card[data-dl-radius="none"] .tagchip,
+.detail-card[data-dl-radius="none"] .actrow .btn { border-radius: 0; }
+.detail-card[data-dl-radius="sm"] .d-cover-box,
+.detail-card[data-dl-radius="sm"] .tagchip,
+.detail-card[data-dl-radius="sm"] .actrow .btn { border-radius: 4px; }
+.detail-card[data-dl-radius="lg"] .d-cover-box,
+.detail-card[data-dl-radius="lg"] .tagchip,
+.detail-card[data-dl-radius="lg"] .actrow .btn { border-radius: 16px; }
+
+/* v3：登场人物字号（唯一走属性选择器的键，其余 10 个键都是内联）。
+   为什么不能内联：该元素是 `<p className="muted d-meta d-actors">`，而 .d-meta 的
+   `font-size: 13px !important`（见上面 :2261 那条）会**压掉内联普通声明** ——
+   层叠顺序里 author !important > 内联。照搬内联方案的话，用户拖滑块页面纹丝不动且不报错。
+   所以这里用「属性选择器 + 同权重 !important + 逐档完整字面量」（项目既有"写法 B"）。
+   默认档 md 不写规则、也不输出属性 → 默认配置 DOM 零差异。 */
+.detail-card[data-dl-actorsize="sm"] .d-actors { font-size: 12px !important; }
+.detail-card[data-dl-actorsize="lg"] .d-actors { font-size: 15px !important; }
+
+/* ============================================================
+   v3 流式槽位：12 列宽度档位 + 并排
+   `data-slots` **只在用户真的设了窄块**时才出现（core/detailLayout.isSlotted 门控），
+   所以没配过宽度的用户走 display:block，DOM 与行为逐字不变（设计文档 §4.2 的红线）。
+   三条硬纪律：
+   ① 属性选择器 + 字面量，**不用** var() 传 repeat() 次数（老内核行为不确定，调研 §4.3）；
+   ② **只给列间距**，行间距继续由各块自己的 margin-top 负责 —— 槽位容器再叠一层
+      grid-row-gap 会双重间距，而且只在 modern 包上双重（老内核丢 gap）→ 又一个"只在真机看得出"的 bug；
+   ③ grid 万一不可用，退化为纵向流（顺序仍尊重配置，只是不并排），而不是塌成白屏。
+   ============================================================ */
+.detail-card[data-slots="1"] {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: auto;
+  align-items: start;
+  grid-column-gap: 12px;
+  column-gap: 12px;
+}
+/* 网格项默认满宽。min-width:0 防止长内容把窄格撑破（与 .d-facts .fact 同一手法） */
+.detail-card[data-slots="1"] > * { grid-column: span 12; min-width: 0; }
+/* 显式跨格 —— 有界档位：12（满宽，不写属性）/ 9 / 8 / 6 / 4 / 3 */
+.detail-card[data-slots="1"] > [data-span="9"] { grid-column: span 9; }
+.detail-card[data-slots="1"] > [data-span="8"] { grid-column: span 8; }
+.detail-card[data-slots="1"] > [data-span="6"] { grid-column: span 6; }
+.detail-card[data-slots="1"] > [data-span="4"] { grid-column: span 4; }
+.detail-card[data-slots="1"] > [data-span="3"] { grid-column: span 3; }
+
+/* v3.3：**窄屏降级已取消** —— 用户要求「不要什么宽屏窄屏的限制了，直接默认认为
+   都是宽屏，给用户充分的自由度」。所以 399px 以下也照配置的跨格数排（并把排在上面的
+   `data-narrow-stack` 那一条整块删掉；容器也不再输出该属性）。
+   代价是实话：390px 上两个半宽块各约 180px，会挤 —— 这是用户明确要的取舍。 */
+
+@supports not (display: grid) {
+  .detail-card[data-slots="1"] { display: block; }
+  .detail-card[data-slots="1"] > * { grid-column: auto; }
+}
+
+/* 线上态的槽位容器：纯占位，不加任何视觉 —— 块自己的样式与 margin-top 原样生效 */
+.d-slot { min-width: 0; }
+
+/* ── v3.4 行内空占位格（`.d-gap`）──────────────────────────────────────
+   用户要「同一行只有一个组件且不满宽时该行空处要有空占位，使 1/2 宽区块可固定在
+   该行中间而不是必须顶格」。所以偏移不靠 margin/padding，而是**真的占住那几列**：
+   网格项 + `grid-column: span N`（N 由 core/detailLayout.packRows 算），
+   于是块的位置与落点判定的矩形永远一致（见 dropIndex 的"判定框接触"）。
+   · 线上：完全不可见（没有背景、没有高度），只是占位；
+   · 编辑态：一条虚线框，让人一眼看出"这里还能放/能挪"。
+     它有 min-height，参与行高；但行高取"本行最高的一项"，
+     真实块几乎都高于 24px，所以**正常情况下编辑态与线上的行高完全一致**。 */
+.d-gap { min-width: 0; }
+.ed-editing .d-gap {
+  min-height: 24px; border: 1px dashed var(--line); border-radius: 6px;
+}
+
+/* 检查器里的宽度档位（6 档）：比通用 .seg-choice 紧凑一档，
+   否则 380px 的手机画布 + 检查器里放不下「满宽 3/4 2/3 1/2 1/3 1/4」六个按钮 */
+.ed-span { margin-top: 6px; }
+.ed-span > button { padding: 7px 3px; font-size: 12px; }
+.ed-span-hint { margin: 6px 0 0; }
+
+/* v3.4 行内位置（左 / 中 / 右 + 逐列微调）：三段式按钮 + 一行读数 */
+.ed-offset { margin-top: 10px; }
+.ed-offsetseg { margin-top: 6px; }
+.ed-offsetseg > button { padding: 7px 4px; font-size: 12px; }
+.ed-offsetnudge {
+  display: flex; align-items: center; margin-top: 6px;
+}
+.ed-offsetnudge .dl-out { flex: 1 1 auto; text-align: center; }
+.ed-offsetnudge .dl-nudge {
+  flex: 0 0 auto; min-width: 40px; padding: 6px 8px;
+  background: transparent; border: 1px solid var(--line); border-radius: 8px;
+  color: var(--ink); font-size: 12px;
+}
+.ed-offsetnudge .dl-nudge[disabled] { opacity: 0.35; }
+
+/* v3.5「形态」档位：`detail` 的「标签页 / 折叠三行」。
+   与宽度 / 位置同一套紧凑尺寸（380px 手机上配置栏很窄），
+   按钮文案比"1/2"长，所以横向内边距给得多一点。 */
+.ed-form { margin-top: 10px; }
+.ed-formseg { margin-top: 6px; }
+.ed-formseg > button { padding: 7px 6px; font-size: 12px; }
+.ed-formhint { margin: 6px 0 0; }
+
+/* ============================================================
+   「自定义 UI」编辑器页（画布 + 检查器）
+   界面解剖抄自 GrapesJS / Webstudio，对照表见 ui/CustomUiPage.tsx 的文件头。
+   ⚠️ 不用 flex gap（老内核整条丢弃声明），间距全部走 margin。
+   ============================================================ */
+.ed-page { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+/* ⚠️ 这里**绝不能**再写 `position: relative`（v3.3 踩过，代价很大）：
+   本元素同时挂着 `.cache-overlay`，而它靠 `position: fixed; inset: 0; z-index: 190`
+   铺满全屏。同特异度下**后写的赢** → 加了 relative 就把 fixed 覆盖掉，
+   整页编辑器掉回文档流（实测 y≈1426，跑到屏幕外）：截图拍到的是首页、
+   画廊缩略图永远不进视口（IntersectionObserver 不触发 → k=0 → 不挂载）、
+   CDP 原生触摸全打在应用上（拖动用例集体变红）。
+   覆盖层的包含块改用 `.ed-sheetpage` 自己的 `position: fixed` —— 那个本来就是全屏件。 */
+
+/* ── v3.3 新增：区块配置栏标题行 + 内层顺序表 + 列表卡片配置 + 页面设置独立屏 ── */
+
+/* 区块配置的标题行：左边名字、右边「完成」（用户第 9 条：所有配置栏都要能一键收起） */
+.ed-modbar { display: flex; align-items: flex-start; padding: 10px 16px 0; }
+.ed-modbar .grpname { flex: 1 1 auto; min-width: 0; margin: 0; padding: 0; }
+.ed-modbar .ed-paneldone { flex: none; margin-left: 8px; }
+
+/* 「显示 / 隐藏」在配置栏最上面那一条（用户第 5 条）——只调间距，控件语言沿用 .ditem */
+.ed-showrow { padding: 4px 16px 0; }
+
+/* 内层节点顺序表（主视觉内序 / 四宫格字段）与列表卡片配置：与模块配置同一套排版 */
+.ed-nodelist, .ed-listcard { padding-top: 6px; }
+.ed-nodelist .dl-rows, .ed-listcard .dl-rows { padding: 0 16px; }
+/* v3.5：「至少留一个」被拒时的那行说明。用 `<output>` 渲染 —— 它天然是 aria-live 区域，
+   读屏会念出来。**拒绝必须被听见**，否则用户看到的就是"点了没反应"（哑控件同罪）。 */
+.ed-nodelist .ed-refuse {
+  margin: 2px 16px 10px; padding: 8px 10px;
+  border-radius: 8px; background: var(--surface-2); color: var(--ink-2);
+}
+
+/* 列表页画布里的"卡片"区块：点它选中（替代已删除的排布总表）。
+   outline 与详情页块同一套语言；只在编辑态可见选中环。 */
+.ed-listblk { position: relative; }
+.ed-editing .ed-listblk { cursor: pointer; }
+.ed-editing .ed-listblk.ed-sel { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* 页面设置（独立一屏，覆盖在编辑器之上；不换 screen 所以画布状态不丢）。
+   `position: fixed`（而不是 absolute）：它要盖住整个编辑器视口，
+   而 `.ed-page` 本身就是 `.cache-overlay` 的 `fixed; inset: 0` —— 两者边界重合。 */
+.ed-sheetpage {
+  position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 45;
+  display: flex; flex-direction: column; background: var(--surface);
+}
+.ed-sheetbar {
+  flex: none; display: flex; align-items: center;
+  padding: 12px 16px; box-shadow: 0 1px 0 var(--line);
+}
+.ed-sheetbar b { font-size: 15px; }
+.ed-sheetbar .dl-from { margin: 0 0 0 8px; padding: 0; }
+.ed-sheetbar .ed-paneldone { margin-left: auto; }
+.ed-sheetbody {
+  flex: 1 1 auto; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch;
+  padding: 4px 16px 20px;
+}
+
+/* —— 顶栏（v3.2）：从"贴边的横条"改成**浮动胶囊** ——
+   圆角 28 + 两层极轻阴影，配方取自 m3e-canvas 的 Toolbar `Pill`
+   （`0 2px 10px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.04)`）。
+   它仍是**一条**（v3.2 之前那三条横条已经并成一条），只是不再贴边、不再靠分隔线划界。 */
+.ed-top {
+  flex: none; display: flex; align-items: center;
+  margin: 8px 12px 0; padding: 6px 8px;
+  background: var(--surface);
+  border-radius: 28px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+.ed-top h2 { margin: 0 8px; font-size: 16px; flex: 1; min-width: 0; }
+.ed-back {
+  flex: none; padding: 8px 10px 8px 4px; border: 0; background: none;
+  color: var(--ink); font: inherit; font-size: 14px; cursor: pointer;
+}
+.ed-more {
+  flex: none; margin-left: 8px; width: 34px; height: 34px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface);
+  color: var(--ink-2); font-size: 16px; cursor: pointer;
+}
+.ed-more.on { border-color: var(--brand); color: var(--brand); }
+.ed-modeswitch { margin-left: 4px; }
+
+/* —— 画廊（「选择页面」屏）：可自定义页面的卡片 ——
+   v3.2 删掉了原来那条常驻控制条（列表页 / 详情页 + 窄 / 标准 / 宽）：
+   页面切换改由卡片承担；「窄/标准/宽」已核实是**哑控件**（只改画布 max-width，
+   而列数全由**视口** @media 决定，手机上三档零可见差异）→ 换成顶栏的「宽屏预览」。 */
+.ed-gallery {
+  flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column;
+  background: var(--surface-2);
+}
+/* 卡片区：**限宽 + 居中**，里面是一叠卡（`.ed-stack`）。
+   · 上限：第一版是 `repeat(2, minmax(0,1fr))` 且没有 max-width → 桌面 1280 上每列被拉到
+     618px，缩略图的缩放比 k = 卡宽/390 变成 **1.59**（把页面**放大**了，已经不是缩略图）。
+     整块限宽 800 → 桌面拉开态两张各 358 并排（k 上限 1，只许缩小）。
+   · 卡宽上限的**物理含义**：不得超过缩略图设计宽 **390** —— 否则 `.ed-thumb-inner` 的
+     `k = min(1, 卡内宽/390)` 被夹在 1，缩略图只有 390 宽，**填不满卡片、右侧留白**。
+     下界则由"份量感"给。两端都有 e2e 断言守着。
+   · 居中：v3.2 时手机上内容只占上半屏、下面一大片空白，像没做完。这里垂直居中。
+   ⚠️ 居中**必须**用「单子元素 + `margin: auto`」，不能用 `justify-content/align-content: center`：
+     内容比容器高时 center 会把首行顶出滚动区（滚不回顶部），而 auto 外边距在没有富余空间时
+     解析成 0 → 内容照常从顶部开始、照常能滚到底。这条有 e2e 断言守着
+     （editor-shell 的 gallery-scroll 用例：矮视口下 scrollTop=0 时首卡必须在可视区内）。
+   v3.6：轨道里是**单轨 peek 轮播**（手机上当前页贴边、邻居露一条边；宽屏切成静态两栏），
+     也不再是 grid —— 卡片全是绝对定位、只有位移，见 `.ed-stack`。 */
+.ed-gallery-inner {
+  margin: auto; width: 100%; max-width: 800px;
+  display: block;
+  padding: 16px;
+}
+
+/* ── 单轨 peek 轮播（v3.6：用户说"画廊依然一塌糊涂"，隐喻换掉了）─────────────
+   旧版把两张卡**缩小后相叠**（后卡 0.704、露出 106px = 42% 卡宽）→ 露出的正好是
+   **被裁切的半截内容**（切掉的标题、半个黑按钮、断句文字），看起来像渲染坏了。
+   Android Recents / M3 Carousel 都不这么做：它们是**单轨 pager + 间距**，
+   邻居卡尺寸不变、被**视口边缘**裁切（AOSP：至少露 50dp、页间距 16dp）。
+   现在卡片的几何只有**位移**（没有缩放），由 JS 逐帧写内联 `transform`：
+     · 当前页贴边，邻居从边缘露出 `clamp(40, 0.16×卡宽, 56)`；
+     · 翻页 = 整体位移 + 吸附（距离过半 **或** 速度 ≥0.3px/ms）；
+     · 宽屏（卡宽会被撑过设计宽时）切成**静态两栏**，两页都完整可见。
+   · `overflow: hidden` 是**横向溢出的兜底**：几何已保证不越界，这里再裁一刀
+     （裁切点落在视口边缘 = "还有更多"的语义，而不是"坏了"）。
+   · `touch-action: pan-y`：竖向留给页面原生滚动，横向留给翻页；方向仲裁在 JS 里
+     （前 10px 内横位移必须 > 1.5×竖位移），判为竖向就**彻底不接管**。
+   · 过渡只在**非拖动**时生效（`.ed-stack-drag` 里关掉），否则拖动会被过渡"拖着走"。 */
+.ed-stack {
+  position: relative; overflow: hidden;
+  touch-action: pan-y;
+}
+.ed-card {
+  position: absolute; top: 0; left: 0;
+  display: block; padding: 0; border: 0; background: none;
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  transform-origin: 0 0;
+  transition: transform 200ms var(--ease-out);
+  will-change: transform;
+}
+.ed-stack-drag .ed-card { transition: none; }
+/* 宽屏画廊（v3.13）：**两列网格，页数多了就换行**。
+   原来宽屏是"所有页并排一行"—— 两页时正好两栏，四页时每张被压到 183px
+   （实测断言「桌面卡片宽度必须落在 [200,390]」当场变红：四张小米粒浮在大片空白里）。
+   几何侧同源改动在 `ui/galleryPager.ts` 的 `WIDE_COLS`（卡宽 = min(390, (轨道宽−间距)/2)）。
+   ⚠️ `CustomUiGallery` 在宽屏下**不再输出**内联的 height/width/transform，所以这里不需要 !important。 */
+.ed-gallery[data-mode="wide"] .ed-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 34px 12px;      /* 行间距要留出卡名那一行（13px 字 + 8px 上边距） */
+  grid-gap: 34px 12px; /* ⚠️ 老内核（WebView 57）的 `gap` 对 grid 无效、`grid-gap` 才认 ——
+                          少写这一行，宽屏画廊在 compat 包上会两张卡贴在一起（scan:gap 会报） */
+  overflow: visible;   /* 第二行不能被裁掉 */
+}
+.ed-gallery[data-mode="wide"] .ed-card {
+  position: static;    /* 行内布局，不再绝对定位 */
+  transform: none;
+  transition: none;
+  will-change: auto;
+}
+/* 前卡 / 后卡的**层次语言**（v3.6）：不再靠缩放区分（那会把正文缩到不可读），
+   只做两件事 —— 前卡带一道**有水平分量的投影**（影子落在后卡那一侧，
+   切线才读成"卡边"），后卡压一层极淡遮罩。宽屏两栏时 data-front 恒为 1。 */
+.ed-card[data-front="1"] .ed-thumb {
+  box-shadow: -10px 0 24px -8px rgba(0, 0, 0, 0.22), 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+.ed-card[data-front="0"] .ed-thumb::after {
+  content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  background: rgba(0, 0, 0, 0.10); pointer-events: none;
+}
+/* 页名分段控件（轨道上方）：沿用 .seg-choice 的控件语言，只补间距与紧凑度。
+   它承担"不滑动也能看见两页名字 + 哪页改过"——被裁切的后卡认不出名字。 */
+.ed-galtabs { margin: 0 0 10px; }
+.ed-galtabs > button { padding: 8px 10px; font-size: 13px; }
+/* v3.17：页签行在 420px 上会折行 —— 「顶栏和底栏」5 个字（≈65px）再加一个「默认」徽标
+   放不进一格的 71px 内容宽，于是它独占两行、把四个页签撑成不等高（`默认` 跟着错位）。
+   两处修正：
+     ① 行内不再重复「默认」—— 四个页签并排写着"列表页默认 详情页默认…"本来就是噪音，
+        而"改过的页面带圆点"已经由下面那行提示说明了（有圆点=改过，没圆点=默认）；
+     ② nowrap 兜底，字体/内边距以后变大也不会再折行。 */
+.ed-galtabs > button { white-space: nowrap; }
+.ed-galtabs .ed-carddefault { display: none; }
+.ed-galtabs .dl-dot { float: none; }
+/* 圆点默认是品牌色（浅底上看得见），但**活动那一格是深色胶囊** —— 品牌色压上去只有 7px，
+   肉眼几乎看不见（看图验收才发现：断言只验了"元素在"，验不出"看不见"）。
+   所以在活动格上换成与胶囊底色对比的 surface 色。 */
+.ed-galtabs > button.on .dl-dot { background: var(--surface); }
+/* 按下反馈：不能再用 `transform: scale()`（内联 transform 由 JS 管，会被覆盖），改成压暗缩略图 */
+.ed-card:active .ed-thumb { opacity: 0.9; }
+
+/* 缩略图 = 比例盒（WebView 57 **没有 aspect-ratio**，抄 .skeleton-thumb-wrapper 的手法）
+   + overflow:hidden 只露页面顶部（天然"截图"语义）。
+   它还兼着兜一个雷：`transform` 元素会成为后代的**包含块**，页面里那些
+   `position: fixed` 的浮层（toast / sheet / 缓存中心…）放进缩略图后不再相对视口定位 ——
+   这里裁掉 + 由下面的作用域规则关闭。 */
+.ed-thumb {
+  display: block; position: relative; overflow: hidden;
+  height: 0; padding-top: 150%;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--bg); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+/* 真实页面：按 390px 设计宽排版，再整体缩到卡片宽（缩放比由 JS 量宽算出，走内联 style） */
+.ed-thumb-inner {
+  position: absolute; top: 0; left: 0; width: 390px;
+  transform-origin: 0 0;
+  pointer-events: none;   /* 缩略图不参与交互：点击交给整张卡片 */
+}
+/* 懒挂载期间的骨架（与 .sk 同一套视觉语言，不做动画 —— 老内核上动画要省着用） */
+.ed-thumb-skel {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  background: var(--surface);
+}
+.ed-thumb-skel::before, .ed-thumb-skel::after {
+  content: ""; position: absolute; left: 12px; right: 12px;
+  border-radius: 4px; background: var(--line);
+}
+.ed-thumb-skel::before { top: 16px; height: 56px; }
+.ed-thumb-skel::after { top: 84px; height: 10px; }
+/* 缩略图作用域内的浮层一律关掉（放大后会盖住卡片，而且它们本是 fixed 定位的） */
+.ed-thumb .toast, .ed-thumb .app-sheet, .ed-thumb .cache-overlay,
+.ed-thumb .ptr-indicator, .ed-thumb .back-hint, .ed-thumb .sr-layer { display: none; }
+
+/* ── v3.5 编辑器内的「骨架占位」观感 ────────────────────────────────────
+   用户要求画布与缩略图**不要出现真实作品**，改用「示例作品1」这类文字占位：
+   列表卡走 `.thumb-fallback`（与"图加载失败"时露出的那一层**同一套结构**，正是用户说的
+   "以失败回退的表现放到封面上"），详情页封面走 `.d-cover-ph`（封面缺失时本就会露出的文字兜底）。
+   这里只加一层极淡斜纹，明确表达"这是占位"而不是"图挂了"。
+   · **作用域只挂在编辑器的两个根上**（`.ed-canvas` 画布 / `.ed-thumb` 画廊缩略图）
+     → 线上路径一个字节都不变（红线）。
+   · 用 `background-image` 而非 `background` 简写：简写会抹掉它们已有的底色。
+   · 颜色取中灰半透明 → 亮/暗两套主题下都看得见，不必再写 `[data-theme="dark"]` 分支。
+   · `repeating-linear-gradient` 自 Chrome 26 起可用，WebView 57 没问题。 */
+.ed-canvas .thumb-fallback, .ed-canvas .thumb.empty,
+.ed-thumb .thumb-fallback, .ed-thumb .thumb.empty,
+.ed-canvas .d-cover-ph, .ed-thumb .d-cover-ph {
+  background-image: repeating-linear-gradient(135deg,
+    rgba(128, 128, 128, 0.16) 0 6px, rgba(128, 128, 128, 0) 6px 12px);
+}
+
+.ed-cardname { display: block; margin-top: 8px; font-size: 13px; color: var(--ink); }
+.ed-cardname .dl-dot { float: right; margin-top: 5px; }
+.ed-carddefault { float: right; font-style: normal; font-size: 11px; color: var(--ink-3); }
+/* 说明行（v3.6：已经不是 grid 了，去掉那条 grid-column） */
+.ed-gallery-hint { margin: 10px 0 0; }
+
+/* —— 画布 ——
+   v3.2 观感：舞台铺一层**极淡点阵**（衬出"这是个可以摆布的画布"，而不是一块灰底），
+   页面本身给"纸张感"（细描边 + 圆角 + 极轻投影）——与画廊里的卡片同一套视觉语言。
+   ⚠️ 用 `background-color` 而不是 `background` 简写：简写会把点阵的 `background-image`
+      重置掉（暗色主题那条覆盖原来正是简写，已一并改掉）。 */
+.ed-stage {
+  flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch;
+  background-color: var(--surface-2);
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 16px 16px;
+  padding: 12px;
+}
+/* 画布固定成"手机宽"。宽度档位已删（它改的就是这条 max-width，而那是哑的） */
+.ed-canvas {
+  max-width: 380px; margin: 0 auto; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+/* v3.3：块名 chip 改成「骑缝」后需要块**上方**的空间，而第一块上方没有别的块
+   （也就没有那道空隙）→ 编辑态给画布留一条 18px 的顶边安全区，否则首块的 chip
+   会被画布上边缘裁掉（`.ed-stage` 是 overflow:auto，裁不掉就会多出一截可滚区域，更难看）。
+   只加编辑态：预览态与线上路径一点多余空间都不出现。
+   它只挪动「页面在画布框里的起点」，**不改页面内部布局**（宽度、块间距、块内排布都没变）。 */
+.ed-canvas.ed-editing { padding-top: 18px; }
+
+/* v3.3：**「宽屏预览」开关与 `.ed-preview-wide` 已删除**。
+   起因：窄屏降级整块被取消（用户要"直接默认都是宽屏"），于是没有需要被压过的规则了 ——
+   跨格规则 `[data-slots="1"] > [data-span="…"]` 在任何视口下都生效，
+   手机上看到的就与配的一致。相应地也删掉了 `.ed-widechip` 这个按钮的样式。 */
+
+/* 画布里的可编辑块：手柄与序号都绝对定位，**不占文档流** ——
+   这样套上这层框后排布与不套时一模一样，不会"一进编辑模式就错位" */
+.ed-blk { position: relative; }
+/* 整块可长按拖（v2）：编辑态禁掉文字选择 / 系统放大镜，否则长按会选中块里的文字 */
+.ed-editing .ed-blk {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  cursor: grab;
+}
+.ed-editing .ed-blk:active { cursor: grabbing; }
+/* 块里的图片在编辑态不许被浏览器"拖出去"（Android 长按弹保存菜单、桌面拖图起原生镜像），
+   否则它会跟 useCanvasDrag 的跟手镜像抢同一个手势。系统菜单另由 EdBlock 的
+   onContextMenu 挡掉（`-webkit-touch-callout` 只管 iOS）。 */
+.ed-editing .ed-blk img { -webkit-user-drag: none; }
+/* 抓手（v3.2 的 `.ed-grip` + 块名 chip）在 **v3.3 已整体删除**。
+   用户原话：「每个区块左上角的数字和六个点那个黑色的框去掉吧，碍眼，平时直接长按模块
+   来拖动，不需要拖动它」。所以块上不再有任何常驻装饰，拖动入口只剩**长按块本体**，
+   选中态由下面那条 `outline` 表达。
+   随之一起作废的还有：骑缝定位、块名渐进披露（选中/悬停才显示名字）、
+   以及给它让位的 18px 画布顶边安全区 —— 都因为"没有那个元素"而不需要了。 */
+/* 描边用 outline：不占盒、不改变布局。别用 border（会挤动）也别用 box-shadow
+   （老内核合成开销大且易闪）。总开关是「编辑/预览」，默认编辑 ——
+   抄 GrapesJS 的 sw-visibility（`.btn-toggle-borders` 默认 active:true）。
+   v3.2：常态从 `dashed` 改成 `solid` —— 虚线读起来像"占位/没做完"，
+   而这里的语义是"这一块可以点、可以拖"，应该是一条克制的实线。 */
+.ed-editing .ed-blk { outline: 1px solid var(--line-strong); outline-offset: -1px; }
+.ed-editing .ed-blk.ed-sel { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* 拖动态 = 原位那个"坑"：内容藏掉（visibility 不占位、不改布局），只留一个带品牌
+   描边的空盒 —— **它就是落点**。兄弟块让位时坑会滑到新位置（FLIP 归 CustomUiPage 管），
+   所以用户看见"坑在哪"就等于"会落在哪"。
+   注意：跟指针走的是另一份 DOM（.ed-ghost 镜像，见 hooks/useCanvasDrag.ts），
+   本元素不承载跟手 transform —— 这正是它不与 FLIP 抢 transform 的原因。 */
+.ed-editing .ed-blk.ed-drag {
+  position: relative; z-index: 3;
+  outline: 2px dashed var(--brand); outline-offset: -2px;
+  background: var(--surface-2);
+}
+/* 内容全隐，只留插入缝可见（visibility 可被子元素改回 visible，所以缝不用额外覆盖） */
+.ed-editing .ed-blk.ed-drag > *:not(.ed-gap) { visibility: hidden; }
+
+/* ── 内嵌槽位（v3 内嵌可拖）────────────────────────────────────────────
+   `.ed-slot` 由 headless 的 `ui/EdSlot.tsx` **注入到既有元素上**（不新增 DOM 层级）：
+   `.d-title` / `.d-facts` / `.fact` / `.d-cover-box` / `.d-hero-info` 自己就是可拖项。
+   用独立类名而不是复用 `.ed-blk`：e2e 里近 20 处 `.ed-canvas .ed-blk` 的计数断言
+   都以"数**顶层块**"为语义（driver.js 直接断言 `=== 8`），共用会让它们集体变红。
+   （`.ed-slot` 只在编辑态存在 —— 线上态渲染的是空绑定，一个类名都不加。）
+
+   三条声明各自的理由：
+   1) `position: relative`：给"坑"的描边与落点判定一个稳定的包含块。已核实这些元素内部
+      没有"依赖更外层包含块"的绝对定位后代（`.d-copy-btn` 是普通按钮；`.d-cover-ph` 在
+      `.d-cover-box` 内，而后者本来就是 relative）。
+   2) 常态描边用 `dotted` 且更细：三层 outline 叠加（块 → 槽位 → 字段）会非常花，
+      内层降噪；选中态仍用品牌实线 —— "当前操作对象"不该被降噪。
+   3) 拖动中与顶层块同一套"坑"语义（内容隐藏、留空盒 + 品牌虚线）：坑在哪就落在哪。
+      内嵌层不渲染插入缝（`.ed-gap`），因为槽位很矮、缝会盖住内容。 */
+.ed-slot { position: relative; }
+.ed-editing .ed-slot {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  cursor: grab;
+}
+.ed-editing .ed-slot:active { cursor: grabbing; }
+.ed-editing .ed-slot img { -webkit-user-drag: none; }
+/*
+   描边**只在"需要看见"时**出现：父块被选中 / 自己（或同族槽位）被选中 / 桌面悬停 / 拖动中。
+
+   为什么不在常态把 9 个内嵌槽位都画出来：主视觉内部有 2（左右栏）+ 3（信息栏内）+ 4（四宫格）
+   = 9 个槽位，常态全画一遍会让画布非常花 —— 而用户对编辑器的抱怨恰恰是"不美观"。
+   改成渐进披露：**点一下父块，它的内部结构才显形**（选中任一同族槽位也一样）。
+   槽位在任何时候都是可拖的，描边只表达"这里可以点/可以拖"。
+*/
+.ed-editing .ed-blk.ed-sel .ed-slot,
+.ed-editing .ed-hero.ed-open .ed-slot,
+.ed-editing .ed-slot:hover { outline: 1px dotted var(--line-strong); outline-offset: -1px; }
+.ed-editing .ed-slot.ed-sel { outline: 2px solid var(--brand); outline-offset: -2px; }
+.ed-editing .ed-slot.ed-drag {
+  position: relative; z-index: 3;
+  outline: 2px dashed var(--brand); outline-offset: -2px;
+  background: var(--surface-2);
+}
+.ed-editing .ed-slot.ed-drag > * { visibility: hidden; }
+/* 插入缝：落点那条线。挂在"坑"里，于是它会跟着让位动画一起滑到落点 */
+.ed-gap {
+  position: absolute; left: -2px; right: -2px; top: -1px; height: 3px;
+  background: var(--brand); border-radius: 2px; z-index: 4;
+}
+/* 跟手镜像：被抓起来的那一块。位置由 useCanvasDrag 的 rAF 循环写**内联 transform**
+   （position: fixed + translate + scale），这里只管"抬起来"的观感：
+   不透明底 + 圆角 + 阴影 + 轻微放大。阴影只给这一个元素（且只在拖动期间），
+   代价可控 —— 老内核上别大面积铺 box-shadow。
+   z-index 压过"坑"（3）就够了：它俩在同一个浮层里。 */
+.ed-ghost {
+  position: fixed; left: 0; top: 0; z-index: 30;
+  pointer-events: none;
+  /* v3.2：补上 transform-origin（审计 L-1）。默认 50% 50% 时 `scale(1.03)` 绕中心放大，
+     视觉左上角会相对 translate 点**往上左各漂 ~1.5% 块尺寸**（380px 块 ≈ 5.7px）——
+     起拖那一下像是"抓偏了"。
+     设成 `0 0` 之后左上角与 translate 点重合，正好等于 useCanvasDrag 里
+     `writeGhost(r.left, r.top)` + `grabRef = 指针 − r.left/top` 的假设（**无需改 JS 基数**：
+     JS 一直是按"左上角对齐"算的，是这个属性的默认值在跟它作对）。 */
+  transform-origin: 0 0;
+  background: var(--bg);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.1);
+  opacity: 0.97;
+  overflow: hidden;
+  will-change: transform;
+}
+/* 预览态：一点编辑痕迹都不留（Webstudio 的 Hide UI / Preview 模式）。
+   v3.2 起序号角标已并入块名 chip（.ed-namechip 在 .ed-grip 里，被这条一起隐藏）。 */
+.ed-canvas:not(.ed-editing) .ed-grip { display: none; }
+
+/* —— 画布 + 检查器的分栏外壳 ——
+   窄屏（手机）上下堆叠；宽屏（Electron / 平板）左右分栏 —— m3e / GrapesJS 的解剖。
+   「挤」的病根就是原来检查器常驻 42vh 又没有分栏，v2 两头一起治。 */
+.ed-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+
+/* —— 检查器：底部 sheet（v3.2）——
+   原来它是"又一条贴着底边的横条 + 常驻折叠段"，读起来像设置页的中段。
+   改成 sheet 之后：顶部圆角 + 抓手条 + 上投影，一眼能看出"这是从底下拉出来的、
+   只跟当前选中块有关的东西"。
+   ⚠️ v3.5.1：46vh → 58vh。46vh 是"宽度 + 两三个滑块"时代的数字；v3.4 加了
+   「位置」（左/中/右 + ◀▶ 读数，约 120px）之后，390×844 的模拟视口刚好把
+   ◀▶ 行截掉、更矮的真机整行都折叠在滚动区下面 —— 而 sheet 的滚动在手机上
+   没有滚动条提示，用户看到的就是"配置栏里没有位置"（实测截图
+   editor-offset-center-390 里「从第 4 列起」已经被截掉一半）。手机上滚动手感
+   由真机验收；宽屏右栏不受影响（下面 900px 断点里覆盖为 max-height:none）。 */
+.ed-inspector {
+  flex: none; max-height: 58vh; overflow: auto; -webkit-overflow-scrolling: touch;
+  /* 滚到头别把页面/画布一起拖动（拖拽判定读画布几何，链条滚动会干扰） */
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.12);
+  padding-bottom: 12px;
+}
+/* sheet 抓手条：纯装饰，用 ::before 画（不新增 DOM —— 老内核上节点越少越好） */
+.ed-inspector::before {
+  content: ""; display: block; width: 36px; height: 4px; margin: 8px auto 0;
+  border-radius: 2px; background: var(--line-strong);
+}
+/* 收起态（没选中任何块、也没开面板）：只留一条提示，不抢画布 */
+.ed-inspector.slim { max-height: none; padding-bottom: 10px; }
+.ed-inspector.slim::before { display: none; }
+.ed-slim { display: flex; align-items: center; padding: 10px 12px; }
+.ed-slim .dl-hint { flex: 1 1 auto; min-width: 0; margin: 0; padding: 0 8px 0 0; }
+.ed-chip {
+  flex: none; margin-left: 8px; padding: 7px 12px;
+  border-radius: 999px; border: 1px solid var(--line-strong);
+  background: none; color: var(--ink-2); font-size: 13px; cursor: pointer;
+}
+.ed-chip:active { background: var(--line); }
+
+/* 选中模块的专属检查器 */
+.ed-module { padding-top: 8px; }
+.ed-panels { margin-top: 8px; }
+/* 面板标题行（v3.2）：这里原来是一条**可点的折叠段**（`.ed-panelhead`，页面设置 / 排布总表
+   两条常驻）。入口搬去顶栏「⋯」之后，它降级成"一行标题 + 完成"——
+   仍然要有个地方告诉用户"现在看的是哪一个面板、怎么退出去"。 */
+.ed-panelbar {
+  display: flex; align-items: center;
+  padding: 10px 12px 8px; border-top: 1px solid var(--line);
+}
+.ed-panelbar b { flex: none; font-size: 14px; font-weight: 600; color: var(--ink); }
+.ed-panelbar .dl-from { flex: 1 1 auto; min-width: 0; margin: 0 0 0 8px; padding: 0; }
+.ed-paneldone {
+  flex: none; margin-left: 8px; padding: 6px 12px;
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  background: none; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer;
+}
+.ed-paneldone:active { background: var(--surface-2); }
+
+/* —— 「⋯」次级菜单（v3.2）——
+   把「页面设置 / 排布总表 / 恢复默认」从**常驻折叠段**里收进来：那两条折叠段平时只是
+   占着检查器的高度（"挤"的来源之一），而它们其实很少用。
+   它是一个**浮在编辑器之上的底部小 sheet**（不动画布与检查器的布局）：
+   绝对定位锚在 `.cache-overlay`（fixed 全屏层）上，所以 bottom:0 就是屏幕底。 */
+.ed-menu {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--surface);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+  padding: 8px 0 10px;
+}
+.ed-menu::before {
+  content: ""; display: block; width: 36px; height: 4px; margin: 0 auto 6px;
+  border-radius: 2px; background: var(--line-strong);
+}
+.ed-menuitem {
+  display: block; width: 100%; text-align: left;
+  padding: 13px 20px; border: 0; background: none;
+  color: var(--ink); font: inherit; font-size: 14px; cursor: pointer;
+}
+.ed-menuitem em { float: right; font-style: normal; font-size: 12px; color: var(--ink-3); }
+.ed-menuitem:active { background: var(--surface-2); }
+/* 「恢复默认」是不可逆的一锅端，用告警色与普通项分开（别让手滑点掉全部配置） */
+.ed-menuitem.danger { color: #c0392b; }
+/* 点空白处关闭菜单（透明遮罩：只吃点击，不改观感）。
+   它是一个 <button>（a11y：可聚焦 + 语义正确），所以要把浏览器默认外观抹平。 */
+.ed-scrim {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 35;
+  padding: 0; border: 0; background: none;
+}
+
+/* 宽屏：画布铺满 + 检查器固定右栏（340px，自己滚）。
+   v3.2：右栏不是 sheet —— 圆角/抓手条/上投影都去掉，免得像"从底下拉出来的东西贴在右边"。 */
+@media (min-width: 900px) {
+  .ed-body { flex-direction: row; }
+  .ed-inspector {
+    flex: none; width: 340px; max-height: none;
+    border-left: 1px solid var(--line);
+    border-radius: 0; box-shadow: none;
+  }
+  .ed-inspector::before { display: none; }
+}
+
+/* 暗色主题：只改**底色**，别用 `background` 简写（简写会把上面点阵的
+   `background-image` 抹掉，画布就退回一块灰底）；暗色下点阵也要更淡，
+   否则 `--line` 偏亮的 1px 点会显得脏。 */
+[data-theme="dark"] .ed-stage {
+  background-color: var(--surface-2);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+}
+[data-theme="dark"] .ed-top, [data-theme="dark"] .ed-inspector, [data-theme="dark"] .ed-menu { background: var(--surface); }
+
+/* ============================================================
+   v3.13「自定义 UI」新增两页（顶栏和底栏 / 阅读器）的画布
+   ------------------------------------------------------------
+   两个画布跑的**都是线上那套渲染**（renderChromeUnits + ui/chrome/units 的注册表），
+   所以这里只需要补三类东西：
+     ① 把 position:fixed 的两个栏「关进框里」（线上它们相对视口，画布里要相对框）；
+     ② 画布自己的容器尺寸（缩略图与编辑画布共用一份高度，见 .ed-thumb 的 150% 比例盒）；
+     ③ 选中高亮 / 「必需」小标 / 行内说明文字。
+   任何"单元长什么样"的声明都不在这里写 —— 一旦在这里重写一份就会与线上漂移。
+   ============================================================ */
+
+/* ---- 顶栏和底栏 ---- */
+.ed-appframe {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* 编辑画布里的高度：**必须让上下两条栏同时看得见**（否则"配底栏"得先滚动，很别扭）。
+     手机竖屏下检查器占掉半屏，实际可用高度只有 ~275px（实测），所以这里给 260。
+     宽屏（检查器是右栏、不占高度）再放宽到 520。
+     缩略图那边由 `.ed-thumb .ed-appframe` 单独定高（它是 390×585 的比例盒）。 */
+  height: 260px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-sizing: border-box;
+}
+@media (min-width: 720px) { .ed-appframe { height: 520px; } }
+.ed-thumb .ed-appframe { height: 560px; }
+/* 只覆盖**定位**：尺寸 / 底色 / 磨砂 / 内边距全部沿用线上那几条规则 */
+.ed-appframe > .top-bar,
+.ed-appframe > .bottom-nav {
+  position: absolute;
+  left: 0;
+  transform: none;
+  max-width: none;
+}
+.ed-appframe > .top-bar { top: 0; }
+.ed-appframe > .bottom-nav { bottom: 0; }
+/* 中间垫一屏样例内容：上留顶栏高度、下留底栏高度，否则两个栏会贴在一起 */
+.ed-appbody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: calc(var(--top-h) + 8px) 14px 78px;
+}
+
+/* ---- 阅读器 ---- */
+.ed-readerstage {
+  position: relative;
+  /* 同 `.ed-appframe`：编辑画布里给 260（控制条是上下浮层，260 就够看出全貌），
+     宽屏 520，缩略图里定高到比例盒的高度。
+     ⚠️ `min-height: 0` **必须写**：这个元素同时挂着 `.reader-wrap`，而那条规则是
+     `min-height: var(--vh100)`（整屏沉浸）—— 只写 height 会被 min-height 压住，
+     画布就变成一整屏高、控制条的下排被检查器盖住（实测：截图里看不到工具行）。 */
+  min-height: 0;
+  height: 260px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-sizing: border-box;
+}
+@media (min-width: 720px) { .ed-readerstage { height: 520px; } }
+.ed-thumb .ed-readerstage { height: 560px; }
+/* 线上控制条是 position:fixed 的整屏浮层、且默认透明（.show 表示"刚点过画面"）；
+   画布里改成框内绝对定位并**常显** —— 配置的对象一直看得见才谈得上配置。
+   注意**不加 pointer-events:none**：画布里的点击要能落到单元上（回调是空操作，不会真弹浮层）。 */
+.ed-readerstage .reader-toolbar {
+  position: absolute;
+  opacity: 1;
+}
+.ed-readerstage .rt-top,
+.ed-readerstage .rt-bottom { transform: none; }
+.ed-readerpage {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  box-sizing: border-box;
+  /* ⚠️ 默认**必须自己藏掉**滚动条：真阅读器是 `html.jm-reading { scrollbar-width: none }` 藏掉的，
+     而画布里的滚动容器是这一个 div，不写这两条它就会露出一根系统滚动条 ——
+     于是"档位选的是隐藏、画布上却明明有一条"，比不给画布更让人糊涂（实测截图里就看到了）。 */
+  scrollbar-width: none;
+}
+.ed-readerpage::-webkit-scrollbar { width: 0; height: 0; }
+.ed-rp {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #2A2A2E, #1A1A1D);
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 12px;
+  font-style: normal;
+}
+
+/* ---- 阅读器滚动条（v3.13 的「阅读器观感」第一项）----
+   默认 = **不挂属性** = 完全隐藏（= 改造前的 html.jm-reading { scrollbar-width: none }）。
+   两条选择器写在同一组里，因为同一份档位要在两处生效：
+     · html.jm-reading[data-jm-rsb] —— 真阅读器。连续模式滚的是**整个文档**，
+       所以属性挂在 <html> 上（见 core/readerStyle.ts 的说明）；
+     · .ed-readerpage[data-jm-rsb]  —— 编辑器画布里的样例滚动区。不这么做的话
+       "选了细条"在画布里看不到任何变化，等于让用户盲选。
+   两代内核各写一套：新内核认 scrollbar-width，老内核（WebView 57）只认 ::-webkit-scrollbar。 */
+html.jm-reading[data-jm-rsb="thin"], .ed-readerpage[data-jm-rsb="thin"] { scrollbar-width: thin; }
+html.jm-reading[data-jm-rsb="auto"], .ed-readerpage[data-jm-rsb="auto"] { scrollbar-width: auto; }
+html.jm-reading[data-jm-rsb="thin"]::-webkit-scrollbar,
+.ed-readerpage[data-jm-rsb="thin"]::-webkit-scrollbar { width: 6px; height: 6px; }
+html.jm-reading[data-jm-rsb="auto"]::-webkit-scrollbar,
+.ed-readerpage[data-jm-rsb="auto"]::-webkit-scrollbar { width: 10px; height: 10px; }
+html.jm-reading[data-jm-rsb="thin"]::-webkit-scrollbar-thumb,
+.ed-readerpage[data-jm-rsb="thin"]::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.3); border-radius: 3px; }
+html.jm-reading[data-jm-rsb="auto"]::-webkit-scrollbar-thumb,
+.ed-readerpage[data-jm-rsb="auto"]::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.42); border-radius: 5px; }
+html.jm-reading[data-jm-rsb]::-webkit-scrollbar-track,
+.ed-readerpage[data-jm-rsb]::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- 单元配置面板里的三样小东西 ---- */
+/* 画布上点中的那个单元 → 清单里对应那一行（联动是单向的：画布 → 清单） */
+.ed-unitsel { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* 「必需」小标：必需单元的开关**根本不画**，所以必须有个东西解释"为什么这行没有开关" */
+.ed-req {
+  margin-left: 6px; padding: 1px 6px;
+  font-style: normal; font-size: 11px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2); color: var(--ink-3);
+}
+/* 单元说明：第二行小字（`.dl-label` 自己那一行放不下"离线时不渲染"这类前提） */
+.dl-note {
+  display: block; margin-top: 2px;
+  font-style: normal; font-size: 11px; line-height: 1.4;
+  color: var(--ink-3);
+}
+/* 「阅读器观感」的档位组用的是 <fieldset>（见 ChromeInspector 的说明：为了不涨 a11y warning），
+   所以要把浏览器给 fieldset 的默认边框 / 内边距 / 外边距清掉。
+   这几条对同样挂 .seg-choice 的 <div> 无害（它们本来就没有默认边框）。 */
+fieldset.seg-choice { margin: 6px 0 0; padding: 0; border: 0; min-width: 0; }
+
+/* v3.14 的「阅读器点击区」（九宫格 × 动作 / 长按）整套样式已在 v3.15 删除：
+   那层配置本身就是被砍掉的东西（默认模式是连续滚动，那儿没有左右分区），
+   连带 `.ed-tapgrid*` / `.ed-tapcell*` / `.ed-tapacts` / `.ed-taprow` / `[data-jm-longpress]` 一起清掉。
+   留着死样式比删掉更糟：下一个人会以为还有人在用。 */
+
+
+/* ============================================================
+   v3.14 列表页卡片的两个新轴（形态 / 标题行数）
+   ------------------------------------------------------------
+   仍然只做"把类名翻译成像素"：类名由 core/listLayout 出，默认档一律**不加类**
+   （所以从没配过的用户 DOM 与改造前逐字一致）。
+   出处见 core/listLayout 里 ListCardForm 的注释（Mihon 网格/列表、Kotatsu 两套卡片布局）。
+   ============================================================ */
+
+/* ---- 形态 2：封面压字 —— 标题/副标题挪到封面底部 ---- */
+/* 省掉封面下面那一行的高度 ⇒ 一屏能多放一行；代价是长标题会压在图上。 */
+.list.form-overlay .list-item { position: relative; }
+.list.form-overlay .list-item > div {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 30px 8px 7px;
+  /* 渐变而不是纯色块：直接铺黑底会像"贴了一块布"，而这是成熟产品里最常见的那种处理 */
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+  border-bottom-left-radius: var(--r-md);
+  border-bottom-right-radius: var(--r-md);
+}
+.list.form-overlay .list-item .title { margin: 0; min-height: 0; color: #fff; }
+.list.form-overlay .list-item .muted { margin-top: 2px; color: rgba(255, 255, 255, 0.74); }
+
+/* ---- 形态 3：单列行 —— 封面在左、文字在右 ---- */
+/* 恒为 1 列（`listColumnsClass` 在这一形态下返回空串，所以不会和 cols-* 同时出现）。 */
+.list.form-row { grid-template-columns: 1fr; gap: 14px; grid-gap: 14px; }
+.list.form-row .list-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  /* 行高比网格卡矮得多：内容可见性用的固有尺寸要跟着改，否则滚动条会跳（同 .list-item 那条注释） */
+  contain-intrinsic-size: auto 84px;
+}
+/* 封面固定成老式 56×72 小图。⚠️ 这几条**必须**把 `@supports not (aspect-ratio)` 那段比例盒
+   一起压掉（那段用的是 padding-top 撑高），否则老内核上行卡的封面会撑成一张大方图。 */
+.list.form-row .list-item > .thumb-box,
+.list.form-row .list-item > .thumb {
+  display: block;
+  width: 56px; height: 72px;
+  padding-top: 0;
+  aspect-ratio: auto;
+  flex: none;
+  position: relative;
+  overflow: hidden;
+}
+.list.form-row .list-item > .thumb-box > .thumb {
+  position: absolute; left: 0; top: 0;
+  width: 100%; height: 100%;
+  aspect-ratio: auto;
+  object-fit: cover;
+}
+.list.form-row .list-item > div { flex: 1 1 auto; min-width: 0; }
+.list.form-row .list-item .title { margin: 0; min-height: 0; }
+.list.form-row .list-item .muted { margin-top: 4px; }
+
+/* ---- 标题行数 1 行 ---- */
+/* `.list-item .title` 写死了 `min-height: 2.8em`（给两行留位，免得每张卡高度不一）——
+   只显示一行时那个预留必须一起收掉，否则"1 行"看起来只是文字少了一行、高度没变。 */
+.list.title-1 .list-item .title { -webkit-line-clamp: 1; min-height: 1.4em; }
+
+/* ---- 骨架屏跟着形态走（只镜像"列数/形态"这一层几何）---- */
+/* ⚠️ 骨架**不**镜像压字的文字层与行卡的小封面：它是占位方块，几何只需要"占几列、占多高"
+   对得上（用户实测报的正是"改成别的档位、加载时还是老样子"这一类错位）。
+   真要连视觉细节也镜像，等于把卡片那套样式再抄一份，迟早与真卡片漂移。 */
+.skeleton-grid.form-row { grid-template-columns: 1fr; gap: 10px; grid-gap: 10px; }
+.skeleton-grid.form-row .skeleton-item { flex-direction: row; align-items: center; }
+.skeleton-grid.form-row .skeleton-thumb-wrapper {
+  width: 56px; height: 72px; flex: none;
+  aspect-ratio: auto;
+}
+.skeleton-grid.form-row .skeleton-title,
+.skeleton-grid.form-row .skeleton-meta { margin-left: 10px; }
+
+/* ============================================================
+   列表页：每行列数的用户覆盖
+   基础 .list 是 3 列，断点里改成 2 / 4 / 6 列（见上面的 @media）。
+   用户显式选了列数就不该被屏幕宽度改回去 —— 所以这里用**两个类**去压断点：
+     · 对 `.list`（0,1,0）那几条：特异性直接更高，赢；
+     · 对 `.list:not(.book-chapters)`（0,2,0）那几条：同特异性，靠**源码顺序在后**赢。
+   因此这两条规则必须留在文件末尾，不能被挪到断点之前。
+   只在 AlbumGrid 上加类，所以章节列表（.list.book-chapters）不受影响。
+   ============================================================ */
+.list.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.list.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* 骨架屏也吃同一套档位（v3.13）。它原来只有自己的断点规则（3 列 / ≤640px 2 列），
+   于是"用户选了 3 列、骨架却还是 2 列"，加载完成的一瞬间整页跳一下。
+   类名与 `.list` 逐字相同（都由 core/listLayout.listColumnsClass 产出），
+   特异性 (0,2,0) 高于断点里的 `.skeleton-grid` (0,1,0)，所以同样压得住断点，
+   位置不必像上面那两条一样卡在文件末尾。 */
+.skeleton-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.skeleton-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }

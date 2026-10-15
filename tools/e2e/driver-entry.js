@@ -57,7 +57,8 @@
     // ---- B：搜索层 → 详情（曾经的毛病：三个动画抢一个导航）----
     q(".list-item").click();
     await waitFor(".page-push .card h2"); await sleep(700);
-    qa(".page-push .link").find((l) => l.textContent === "巨乳").click();
+    // 详情页 v7.1：标签是胶囊 .tagchip（作者/登场仍是蓝字 .link），两类都认
+    qa(".page-push .link, .page-push .tagchip").find((l) => l.textContent === "巨乳").click();
     await waitFor(".sr-layer.open"); await sleep(900);
     const before = { srTopLeft: srTopLeft(), detailLeft: detailLeft(), detailOp: q(".page-push") ? Number(getComputedStyle(q(".page-push")).opacity).toFixed(2) : null };
     const fb = frameStats(700);

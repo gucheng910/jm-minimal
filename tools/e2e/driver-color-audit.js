@@ -43,8 +43,8 @@
   const card = document.querySelector(".list-item");
   if (card) { card.click(); await sleep(1800); }
   const detail = Object.fromEntries([
-    entry("作者/标签蓝字 .link", ".d-meta .link"),
-    entry("复制 .d-copy", ".d-copy"),
+    entry("作者/标签蓝字 .link", ".d-facts .link, .d-meta .link"),
+    entry("复制 .d-copy-btn", ".d-copy-btn"),
     entry("返回 .backtxt", ".backtxt"),
     entry("展开 .d-more", ".d-more"),
     entry("主按钮 .btn.primary", ".btn.primary"),

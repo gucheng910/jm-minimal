@@ -6,11 +6,15 @@ import { isAndroid, isNativeApp, hasPlugin, DNS_HINT, BACK_GESTURE, isBackSwipe 
 import type { TouchPoint } from "./core/platform";
 import { client } from "./core/api";
 import { sessionStore } from "./core/storage";
-import { BookIcon, ClockIcon, DownloadIcon, GridIcon, HomeIcon, LightningIcon, MenuIcon, SearchIcon, UserIcon } from "./ui/icons";
+import { BookIcon, ClockIcon, DownloadIcon } from "./ui/icons";
 import SourceSheet from "./ui/SourceSheet";
 import { authService } from "./state/auth";
 import ContentView from "./ContentView";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { loadChromeLayout, visibleChromeUnits } from "./core/chromeLayout";
+import type { ChromeLayoutConfig } from "./core/chromeLayout";
+import { NAV_UNITS, TOP_ACTION_UNITS, TOP_LEFT_UNITS, renderChromeUnits } from "./ui/chrome/units";
+import type { NavCtx, TopBarCtx } from "./ui/chrome/units";
 import { emit, on } from "./core/bus";
 import { useLoggedIn } from "./hooks/useLoggedIn";
 import { useBackHandler } from "./hooks/useBackHandler";
@@ -18,7 +22,8 @@ import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
 import { useSheetTransition } from "./hooks/useSheetTransition";
 import Collapse from "./ui/Collapse";
 import ToastHost, { pushToast } from "./ui/toast";
-import { openGate, startupReady } from "./core/startup";
+import UpdateDialog from "./ui/UpdateDialog";
+import { updateFlow } from "./core/updateFlow";import { openGate, startupReady } from "./core/startup";
 import CacheCenter from "./ui/CacheCenter";
 import AdMenuBanner from "./ui/AdMenuBanner";
 import UpdateSection from "./ui/UpdateSection";
@@ -27,12 +32,12 @@ import { isDesktop } from "./core/dnsClean";
 import TosModal from "./ui/TosModal";
 import { REPO_URL, TOS_ACCEPTED_KEY } from "./core/tos";
 import { APP_VERSION, BUILD_VARIANT, FALLBACK_SHUNT_KEYS, LOCAL_VERSION, UI_KEYS } from "./core/constants";
-import { isLowFx, setLowFxManual } from "./core/lowfx";
 import { initialDark } from "./core/theme";
 import { openExternal } from "./core/openExternal";
 import LibPage from "./ui/LibPage";
 import TagBlockSetting from "./ui/TagBlockSetting";
 import DnsGuide from "./ui/DnsGuide";
+import CustomUiPage from "./ui/CustomUiPage";
 import type { DailyPayload, MemberInfo, PaymentPayload, SettingConfig } from "./core/types";
 
 interface DemoState {
@@ -68,6 +73,13 @@ function signedToday(daily: DailyPayload | null): boolean {
   return false;
 }
 
+/**
+ * 进软件后多久发起静默更新检查。
+ * 1.5s 是"启动流程（还原线路 → 取配置 → 拉首页）已经不抢带宽了"的量级；
+ * 再短会与首页首屏请求叠在一起，再长用户已经进入别处、弹窗会显得突兀。
+ */
+const UPDATE_CHECK_DELAY_MS = 1500;
+
 export default function App() {
   const [state, setState] = useState<DemoState>({ apiBase: sessionStore.apiUrl, busy: false, error: "", msg: "" });
   // member = 会员资料（展示用）。登录态不看它；它缺失/过期时下面的 effect 会静默续期
@@ -90,8 +102,10 @@ export default function App() {
   // 暗色模式：跟随左侧菜单开关，持久化到 localStorage；阅读器区域本身就是深色不受影响。
   // 首次启动（没存过）跟随系统偏好，否则深色手机上一进来是一整屏白（见 core/theme.ts）。
   const [dark, setDark] = useState<boolean>(() => initialDark());
-  // 低配模式（老内核自动开）：抽屉里可手动覆盖，切换后立即改 <html data-lowfx> 生效
-  const [lowFx, setLowFx] = useState<boolean>(() => isLowFx());
+  // 🔻 这里原来有一个 `lowFx` state（抽屉里那个「低配模式（关动效）」开关的受控值）。
+  //    用户要求删掉那个按钮 —— 现代版 / 苹果版 / PC 版共用这一份源码，所以一次删除对三个包同时生效。
+  //    自动判定**没动**：老内核（WebView 57 一档）仍然在 main.tsx 的首帧前自动开低配（core/lowfx.ts），
+  //    只是不再提供手动覆盖入口（core/lowfx.ts 里的 setLowFxManual 现在没有调用方）。
   // 顶栏滚动态：内容滚动出一定距离后加阴影/底边，分离层级
   const [scrolled, setScrolled] = useState(false);
 
@@ -107,8 +121,11 @@ export default function App() {
         new Promise<{ speedOk: boolean }>((resolve) => setTimeout(() => resolve({ speedOk: true }), 35000))
       ]);
       speedOk = info.speedOk;
-    } catch { /* keep */ }
-    setGateBusy(false);
+    } catch { /* keep */ } finally {
+      // 复位必须放 finally：`startupReady` 若一直不落定（ContentView 漏发信号），
+      // 没有 finally 就会永久转圈 —— 而这个按钮是 `disabled={gateBusy}`，等于卡死在门口。
+      setGateBusy(false);
+    }
     setAgeGate(false);
     if (!speedOk) {
       pushToast("线路/DNS 连接失败，" + DNS_HINT, "err", "goto-dns");
@@ -117,17 +134,30 @@ export default function App() {
   const [showSource, setShowSource] = useState(false);
   /** 换源/换线路正在生效的那一项：浮层内该行显示转圈、整层不可操作，成功后才关浮层 */
   const [switching, setSwitching] = useState<string | null>(null);
-  // 会员页的「诊断与线路」默认折叠：线路 / 图源 / 协议版本 / 测速都是排障信息
-  // 会员页「网络与内容」两个设置行：默认都收起（用不到就不占首屏）
+  // 设置页的「诊断与线路」默认折叠：线路 / 图源 / 协议版本 / 测速都是排障信息
+  // 设置页「网络与内容」两个设置行：默认都收起（用不到就不占首屏）
   const [dnsOpen, setDnsOpen] = useState(false);
   const [tagOpen, setTagOpen] = useState(false);
-  // 会员页分组行里的展开态：签到（活动信息 + 立即签到）、账号（资料 + 兑换）
+  // 设置页分组行里的展开态：签到（活动信息 + 立即签到）、账号（资料 + 兑换）
   const [dailyOpen, setDailyOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [backHint, setBackHint] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /**
+   * 顶栏 / 底栏的**单元编排**（有哪些单元、什么顺序、显不显示）。
+   *
+   * 这两个栏过去是写死的 JSX（顶栏 3 个工具、底栏 4 个标签），"想换掉其中一项"只能改代码。
+   * 现在栏只是"按配置把单元排一排"：数据层 `core/chromeLayout.ts`，渲染层 `ui/chrome/units.tsx`。
+   * 默认配置**逐字等于**改造前的写死顺序（那条红线的单测在 `core/chromeLayout.test.ts`）。
+   * 这里订阅一次广播，将来"自定义 UI"面板改完就能即时生效（与 detailLayout 同一套 bus 手法）。
+   */
+  const [chrome, setChrome] = useState<ChromeLayoutConfig>(() => loadChromeLayout());
+  useEffect(() => on("jm:chromeLayout", () => setChrome(loadChromeLayout())), []);
   const [tosOpen, setTosOpen] = useState(false);
+  /** 「自定义 UI」面板的默认页。入口**只有**设置页最上方那一条（抽屉里那条已删除） */
+  const [customUi, setCustomUi] = useState<{ open: boolean; tab: "list" | "detail" }>({ open: false, tab: "list" });
+  const openCustomUi = (which: "list" | "detail") => setCustomUi({ open: true, tab: which });
   const [tosAccepted, setTosAccepted] = useState<boolean>(() => {
     try { return localStorage.getItem(TOS_ACCEPTED_KEY) === "1"; } catch { return false; }
   });
@@ -160,11 +190,40 @@ export default function App() {
 
   useEffect(() => { sessionStore.lang = "CN"; }, []);
 
+  /**
+   * 进入软件后**静默检查一次**更新（v3.16）。
+   *
+   * 三条细节都有理由：
+   *   · 等 18+ 门过了才查 —— 门后那一屏才有内容，检查抢在启动流程里只是白占带宽；
+   *   · 延迟 1.5s —— 启动时正在跑"还原最优线路 → 取配置 → 拉首页"，
+   *     再插一个 GitHub 请求会让首页更慢（用户那边的体感是"首页变卡了"）；
+   *   · 只查一次且**失败静默** —— 节流与静默都在 `core/updateFlow` 里
+   *     （`shouldAutoCheck` + `check(true)`），这里不重复实现策略。
+   */
+  useEffect(() => {
+    if (ageGate) return;
+    const t = window.setTimeout(() => { void updateFlow.checkSilently(); }, UPDATE_CHECK_DELAY_MS);
+    return () => window.clearTimeout(t);
+  }, [ageGate]);
+
   useEffect(() => {
     try {
       if (dark) document.documentElement.setAttribute("data-theme", "dark");
       else document.documentElement.removeAttribute("data-theme");
       localStorage.setItem(UI_KEYS.theme, dark ? "dark" : "light");
+      /**
+       * 主题色同步（v3.17）——index.html 那条 `<meta name="theme-color">` 决定状态栏 /
+       * 浏览器外框的颜色，它以前是**两条按系统 prefers-color-scheme 生效**的 meta，
+       * 只能跟随系统；而这个主题是用户可以覆盖的（抽屉里的「深色模式」开关）。
+       * 用户一覆盖两边就不同步：整屏变暗、状态栏留在暖白。
+       * （顺带记一笔：依赖里没有 @capacitor/status-bar，Android 主题是 DayNight.NoActionBar，
+       *   原生状态栏也只听系统的 —— 这条 meta 是唯一能拉齐的地方。）
+       *
+       * 取值直接读 `--bg` 令牌，而不是在这里再抄一份色值：色板改了这行不用跟着改。
+       */
+      const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta && bg) meta.setAttribute("content", bg);
     } catch { /* ignore */ }
   }, [dark]);
 
@@ -290,6 +349,7 @@ export default function App() {
 
   // 缓存中心 / 收藏足迹：整屏浮层也给个出场淡出（原来只淡入，关掉时硬切）
   const cacheAnim = useSheetTransition(showCache, 200);
+  const customUiAnim = useSheetTransition(customUi.open, 200);
   const libAnim = useSheetTransition(libPanel !== null, 200);
 
   // 侧边抽屉是浮层：返回键先关抽屉，不做页面跳转。
@@ -537,7 +597,7 @@ export default function App() {
       patch({ apiBase: client.apiBase });
       await reloadConfig();
       patch({ busy: false, msg: "已切换线路：" + host });
-      // 换源浮层点完就关，反馈必须是 toast（会员页的 msg 卡片这时看不见）
+      // 换源浮层点完就关，反馈必须是 toast（设置页的 msg 卡片这时看不见）
       pushToast("已切换线路：" + host, "ok");
       setShowSource(false); // 生效后才关浮层：切换期间那一行转圈、其余行不可点
     } catch (err) {
@@ -705,10 +765,10 @@ export default function App() {
     }
   }
 
-  async function openMember() {
+  async function openSettings() {
     setLibPanel(null);
     setLibBehind(false);
-    setTab("member");
+    setTab("settings");
     window.scrollTo(0, 0); // 两参数形式：WebView < 61 不支持字典签名
     // 同步 client 侧已就绪的配置快照（不重复 getSetting，避免覆盖已选好的图床域名）
     setState((s) => ({
@@ -724,16 +784,16 @@ export default function App() {
     } catch { /* 未初始化成功时忽略，页面显示占位 */ }
   }
 
-  /** 跳转到会员页（DnsGuide 组件监听 jm:gotoDns 自行滚动） */
-  function openMemberAndDns() {
-    openMember();
+  /** 跳转到设置页（DnsGuide 组件监听 jm:gotoDns 自行滚动） */
+  function openSettingsAndDns() {
+    openSettings();
   }
 
   // 全局响应「去 DNS 配置」点击：DNS 行默认收起，先展开再滚动（展开 200ms，等它落地再滚）
   useEffect(() => {
     const h = () => {
       setDnsOpen(true);
-      openMemberAndDns();
+      openSettingsAndDns();
       window.setTimeout(() => {
         document.getElementById("dns-guide-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
       }, 340);
@@ -741,7 +801,7 @@ export default function App() {
     return on("jm:gotoDns", h);
   }, []);
 
-  // 会员页「诊断与线路」里点换源 → 复用顶栏同一个换源浮层（一个功能只有一套 UI）
+  // 设置页「诊断与线路」里点换源 → 复用顶栏同一个换源浮层（一个功能只有一套 UI）
   // 注意用 ref 转发：effect 只在挂载时注册一次，直接闭包会捕获首次渲染的 state，
   // 导致每次点都误判"配置未就绪"而重跑 bootstrap()。
   const openSourceRef = useRef(openSourcePanel);
@@ -751,33 +811,64 @@ export default function App() {
     return on("jm:openSource", h);
   }, []);
 
+  /**
+   * 两个栏的**单元上下文**：单元是纯函数（吃 ctx、吐节点），不认识 App 的内部状态。
+   * 回调在这里组装 —— 所以"单元"能被单独测试、单独复用，而 App 不需要为它暴露 state。
+   */
+  const topCtx: TopBarCtx = {
+    onToggleMenu: () => setMenuOpen((o) => !o),
+    onOpenCache: () => { setMenuOpen(false); setShowCache(true); },
+    onSearch: () => { setMenuOpen(false); navTo("search"); },
+    onOpenSource: openSourcePanel
+  };
+  const navCtx: NavCtx = {
+    tab,
+    onHome: goHome,
+    onCategories: () => navTo("categories"),
+    onSearch: () => navTo("search"),
+    onSettings: () => { void openSettings(); }
+  };
+
   return (
     <div className={immersive ? "app immersive" : "app"}>
       <header className={"top-bar" + (scrolled ? " scrolled" : "")}>
         <div className="top-left">
-          <button className="menu-btn" aria-label="菜单" onClick={() => setMenuOpen((o) => !o)}><MenuIcon size={20} /></button>
-          <div className="top-title">JM极简版</div>
+          {renderChromeUnits(visibleChromeUnits(chrome, "topLeft"), TOP_LEFT_UNITS, topCtx, "topLeft")}
         </div>
-        {/* 顶栏只留三个工具：缓存 / 搜索 / 换源。签到与线路详情都归会员页，避免同一功能两个入口 */}
+        {/* 顶栏工具（缓存 / 搜索 / 换源）：顺序与显隐由 core/chromeLayout 决定。
+            签到与线路详情都归设置页，避免同一功能两个入口 */}
         <div className="top-actions">
-          <button aria-label="缓存" onClick={() => { setMenuOpen(false); setShowCache(true); }}><DownloadIcon size={20} /></button>
-          <button aria-label="搜索" onClick={() => { setMenuOpen(false); navTo("search"); }}><SearchIcon size={20} /></button>
-          <button aria-label="换源" title="换源：图源 / 线路 / 一键测速" onClick={openSourcePanel}><LightningIcon size={20} /></button>
+          {renderChromeUnits(visibleChromeUnits(chrome, "topActions"), TOP_ACTION_UNITS, topCtx, "topActions")}
         </div>
       </header>
       <main className="view-stack">
-      <section className={tab === "member" ? "member-page" : "member-page view-hidden"}>
+      <section className={tab === "settings" ? "settings-page" : "settings-page view-hidden"}>
       {state.error && (
         <div className="card err">
           {friendlyError(state.error)}
           {/\[network\]|\[timeout\]|fetch failed|Failed to fetch|network/i.test(state.error) && (
             <div style={{ marginTop: 8 }}>
-              <button className="ghost" onClick={openMemberAndDns}>去会员页配 DNS</button>
+              <button className="ghost" onClick={openSettingsAndDns}>去设置页配 DNS</button>
             </div>
           )}
         </div>
       )}
       {state.msg && <div className="card msg">{state.msg}</div>}
+
+      {/* 自定义 UI：版面编排的**唯一**入口（抽屉里那条已按用户要求删除 —— 同一功能不留两个入口）。
+          位置：设置页**最上方**（v3.13 调整）。原来它在最底部（当时的理由是"调外观不是日常项"），
+          但用户的实际动线是"进设置就是为了调外观"，藏在最底部要点到底才看得见。
+          放在这里还有一个副作用是好的：它是**唯一**的常驻入口，且进去之后能切到全部四个页面。
+          ⚠️ 它落在 `state.error` / `state.msg` 两张**瞬时通知卡下面** —— 通知卡是"本机故障/操作反馈"，
+          盖在自定义入口上面才是对的（把入口压到故障提示上，用户会先看到自己的设置入口而看不到错误）。 */}
+      <p className="sectitle">自定义 UI</p>
+      <div className="group">
+        <button className="grow" onClick={() => openCustomUi("detail")}>
+          <span>自定义 UI</span>
+          <span className="v">4 个页面</span>
+          <span className="chev">›</span>
+        </button>
+      </div>
 
       {!logged && (
         <div className="card row">
@@ -832,8 +923,10 @@ export default function App() {
         )
       ) : (
         <div className="member-body">
-          <h2 className="member-title">会员中心（官方数据）</h2>
-
+          {/* 这个 div 的第一行原来是 <h2 className="member-title">会员中心（官方数据）</h2>。
+              用户要求删掉：登录后这一整块本来就是"我的 / 账号"两组，标题只是把窗口名又念了一遍，
+              白占一行高度。（`.member-title` 的 CSS 规则保留：它是通用样式，留着一条没人用的规则
+              不造成任何行为差异，而删它会让这一轮的改动面变大。） */}
           <p className="sectitle">我的</p>
           <div className="group">
             <button className="grow" disabled={state.busy} onClick={() => setLibPanel("favorite")}>
@@ -938,8 +1031,9 @@ export default function App() {
           <button onClick={() => { openExternal("https://comic18j-bibi.me/payment?link=homepage_icon"); }}>前往官方赞助页面</button>
         </div>
       )}
+
       </section>
-      {tab !== "member" && (
+      {tab !== "settings" && (
       <section className="browse-page">
       <ErrorBoundary label="内容页">
       {tab === "home" && <ContentView key="home" />}
@@ -950,11 +1044,9 @@ export default function App() {
       )}
       </main>
 
+      {/* 底栏：单元顺序与显隐由 core/chromeLayout 决定（默认 = 首页 · 分类 · 搜索 · 设置） */}
       <nav className="bottom-nav">
-        <button className={tab === "home" ? "nav-item active" : "nav-item"} onClick={goHome}><HomeIcon /><span>首页</span></button>
-        <button className={tab === "categories" ? "nav-item active" : "nav-item"} onClick={() => navTo("categories")}><GridIcon /><span>分类</span></button>
-        <button className={tab === "search" ? "nav-item active" : "nav-item"} onClick={() => navTo("search")}><SearchIcon /><span>搜索</span></button>
-        <button className={tab === "member" ? "nav-item active" : "nav-item"} onClick={() => { openMember(); }}><UserIcon /><span>会员</span></button>
+        {renderChromeUnits(visibleChromeUnits(chrome, "nav"), NAV_UNITS, navCtx, "nav")}
       </nav>
 
       <div className={"menu-backdrop" + (menuOpen ? " open" : "")} onClick={() => setMenuOpen(false)} />
@@ -964,7 +1056,14 @@ export default function App() {
           <img className="menu-logo" src="./icons/icon-192.png" alt="JM极简版" />
           <div className="drawer-id">
             <div className="drawer-name">JM极简版</div>
-            <div className="drawer-ver">v{LOCAL_VERSION}</div>
+            {/* 版本号 = 更新日志的常驻入口（v3.16）：日志默认只在升级后自动弹一次，
+                全新安装不弹 —— 所以必须有个地方能随时翻出来。点它看这一版改了什么。 */}
+            <button
+              type="button"
+              className="drawer-ver"
+              aria-label={"查看更新日志 v" + LOCAL_VERSION}
+              onClick={() => { emit("jm:showChangelog"); setMenuOpen(false); }}
+            >v{LOCAL_VERSION} · 更新日志</button>
           </div>
         </div>
         <div className="drawer-body">
@@ -984,11 +1083,12 @@ export default function App() {
               <span>深色模式</span>
               <span className={"switch" + (dark ? " on" : "")} aria-hidden="true"><i /></span>
             </button>
-            {/* 低配模式：老内核（WebView 57 一档）自动开启；手动切换后写死用户选择 */}
-            <button className="ditem" onClick={() => { const next = !lowFx; setLowFx(next); setLowFxManual(next); }}>
-              <span>低配模式（关动效）</span>
-              <span className={"switch" + (lowFx ? " on" : "")} aria-hidden="true"><i /></span>
-            </button>
+            {/* 🔻 两行已按用户要求删除：
+                · 「低配模式（关动效）」开关 —— 现代版 / 苹果版 / PC 版同一份源码，一处删除三个包一起生效。
+                  （老内核仍然自动进低配，只是不再有手动覆盖入口。）
+                · 「自定义 UI」快捷入口 —— 它与设置页里那条是**同一个功能两个入口**，
+                  用户要求"左侧菜单栏的自定义UI按钮删了"。设置页那条仍在（且已提到最上方），
+                  所以"配置项没有入口"这条不变量没有被破坏。 */}
             <button className="ditem" onClick={() => setTosOpen(true)}>
               <span>使用须知</span><span className="v">›</span>
             </button>
@@ -1038,18 +1138,35 @@ export default function App() {
       )}
       {backHint && <div className="back-hint">再按一次返回退出</div>}
       <ToastHost />
+      {/* 更新提示 / 更新日志（v3.16）：整屏浮层 + 返回键分层都收在这个组件里 */}
+      <UpdateDialog ready={!ageGate} />
       <TosModal open={tosOpen} requireWait={!tosAccepted} onAccept={acceptTos} />
+      {customUiAnim.mounted && (
+        <CustomUiPage
+          open
+          initialPage={customUi.tab}
+          entering={customUiAnim.entering}
+          closing={customUiAnim.closing}
+          onClose={() => setCustomUi((s) => ({ ...s, open: false }))}
+        />
+      )}
       {/* 缓存中心打开时确认页不抽走，只压到它下面当背板：缓存中心是淡入淡出的，
           抽走会让后面的主页在过渡期间露出来（真机反馈"打开和关闭都要跳过一下主页"） */}
       {ageGate && (
         <div className={"age-gate" + (cacheAnim.mounted ? " behind" : "")}>
           {/* 无网时的出口：右上角直达离线缓存（缓存中心只需本地 IDB，不依赖已初始化网络） */}
+          {/* v3.17：原来这里是个 42×42 的纯图标方块，而它是**整屏唯一的元素**、
+              没有任何文字说明"点它能干嘛"。改成带字的胶囊，并把图标降到 16px（内联小按钮那一档）。 */}
           <button className="age-cache" aria-label="离线缓存" onClick={() => setShowCache(true)}>
-            <DownloadIcon size={20} />
+            <DownloadIcon size={16} />
+            <span>离线缓存</span>
           </button>
           <div className="age-card">
             <img className="age-logo-img" src="./icons/icon-192.png" alt="JM极简版" />
-            <h1>JMClient</h1>
+            {/* v3.17：原来标题写的是 JMClient —— 而这个 App 在抽屉头、桌面窗口标题、清单里
+                都叫「JM极简版」（另有包名 jm-client / appId dev.jmclient.app 两处只在内部用）。
+                首屏用最少见的那个名字没有理由，统一成用户看惯的那个。 */}
+            <h1>JM极简版</h1>
             <p className="age-warn">本站内容包含成人题材，仅供年满 18 周岁的成年人浏览。</p>
             <button className="age-confirm" disabled={gateBusy} onClick={confirmGate}>
               {gateBusy ? <><span className="mini-spin" />正在自动选择最快线路…</> : "我保证我已满18周岁，确认进入"}

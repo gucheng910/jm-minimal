@@ -1,6 +1,6 @@
 {
   "name": "jm-client",
-  "version": "2.2.7",
+  "version": "2.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,10 @@
     "lint": "oxlint src electron tools",
     "lint:fix": "oxlint src electron tools --fix",
     "contrast": "node tools/contrast-audit.mjs",
-    "check": "npm run lint && npm run contrast && npm test",
+    "scan:hang": "node tools/scan-hang-risks.mjs --root src --root electron --root tools --min-level medium --baseline tools/.hang-risks-baseline.json --fail-on high",
+    "scan:hang:all": "node tools/scan-hang-risks.mjs --root src --root electron --root tools --context",
+    "scan:gap": "node scripts/css-gap-scan.mjs --check",
+    "check": "npm run lint && npm run contrast && npm run scan:hang && npm run scan:gap && npm test",
     "e2e": "node tools/e2e/run.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

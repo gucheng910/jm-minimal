@@ -31,11 +31,11 @@ export interface AppEvents {
   "jm:coinChanged": undefined;
   /** 底部导航再次点击「首页」：从详情/阅读退回列表并刷新推荐 */
   "jm:refreshHome": undefined;
-  /** 请求跳到会员页的 DNS 配置卡 */
+  /** 请求跳到设置页的 DNS 配置卡 */
   "jm:gotoDns": undefined;
   /** 登录态变化（登录/登出/自动续期）——各页面据此同步登录相关 UI */
   "jm:authChanged": undefined;
-  /** 请求打开换源浮层（会员页「诊断与线路」复用顶栏那一个浮层） */
+  /** 请求打开换源浮层（设置页「诊断与线路」复用顶栏那一个浮层） */
   "jm:openSource": undefined;
   /**
    * 从收藏/足迹点开的详情页**真正打开了**。
@@ -48,6 +48,49 @@ export interface AppEvents {
    * 订阅方据此把先前藏起来的收藏/足迹浮层重新揭开，列表内容与滚动位置都还在。
    */
   "jm:detailClosed": undefined;
+  /**
+   * 详情页展示编排被改动（显隐 / 顺序）。
+   * 真值在 localStorage（core/detailLayout.ts），这里只播"变了"——
+   * 详情页收到后重读配置重渲染，与 jm:deseam / jm:theme 同一套做法。
+   */
+  "jm:detailLayout": undefined;
+  /**
+   * 详情页**版面样式**被改动（封面大小 / 标题字号 / 简介行数 / 疏密 / 圆角）。
+   * 与 jm:detailLayout 同一套做法：真值在 localStorage（core/detailStyle.ts），这里只播"变了"。
+   * 订阅方是详情页（AlbumDetail）——它据此把 data-dl-* 挂到 .detail-card 上。
+   */
+  "jm:detailStyle": undefined;
+  /**
+   * 列表页展示编排被改动（卡片副标题字段 / 每行列数）。
+   * 与 jm:detailLayout 同一套做法：真值在 localStorage（core/listLayout.ts），这里只播"变了"。
+   * 订阅方是列表网格（AlbumGrid）与卡片（AlbumCard）。
+   */
+  "jm:listLayout": undefined;
+  /**
+   * 顶栏 / 底栏 / 阅读器控制条的单元编排被改动。
+   * 与 jm:detailLayout 同一套做法：真值在 localStorage（core/chromeLayout.ts），这里只播"变了"。
+   * 订阅方是 App（两个栏）与 Reader（控制条）。
+   */
+  "jm:chromeLayout": undefined;
+  /**
+   * 阅读器**观感**被改动（滚动条档位 / 控制条自动隐藏时长）。
+   * 与 jm:detailStyle 同一套做法：真值在 localStorage（core/readerStyle.ts），这里只播"变了"。
+   * 订阅方是阅读器（Reader）——它据此把 `data-jm-rsb` 挂到 <html> 上并调整自动隐藏时长。
+   */
+  "jm:readerStyle": undefined;
+  /**
+   * 更新流程状态变化（v3.16）。detail 不带载荷 —— 与其它层同一条纪律：
+   * **真值在 `core/updateFlow` 的模块状态里**，订阅方收到事件后自己去读快照。
+   * 订阅方是更新弹窗（ui/UpdateDialog）与设置页里的手动更新按钮（ui/UpdateSection）。
+   */
+  "jm:update": undefined;
+  /**
+   * 手动打开「更新日志」（v3.16）。
+   * 为什么要它：日志默认只在**升级后第一次进首页**自动弹 —— 全新安装不弹（见 `appVersion.ts`），
+   * 那就必须有一个常驻入口，否则用户永远看不到自己这一版改了什么。
+   * 入口是侧边栏底部那行版本号（它本来就写着 `v2.2.7`，点它看日志是最自然的去处）。
+   */
+  "jm:showChangelog": undefined;
 }
 
 type EmitArgs<K extends keyof AppEvents> = AppEvents[K] extends undefined ? [] : [detail: AppEvents[K]];
