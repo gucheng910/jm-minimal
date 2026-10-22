@@ -100,6 +100,41 @@ async function main() {
       E2E_PORT: String(Number(PORT) + 4)
     });
 
+    console.log("\n==== 阅读器窗口化（整章 40 页只挂视口附近；离屏 img/canvas 必须回收、占位盒等高）====");
+    const win = await runNode("harness.mjs", {
+      DRIVER: "driver-window.js",
+      E2E_PORT: String(Number(PORT) + 16)
+    });
+
+    console.log("\n==== 阅读器窗口化·降级（抹掉 Worker：重排必须落回主线程且照样画出来）====");
+    const winNoWorker = await runNode("harness.mjs", {
+      DRIVER: "driver-window.js",
+      // `?jmnoworker=1`：驱动把 window.Worker 抹掉，逼 core/scrambleOffload 走同步降级路径
+      TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "jmnoworker=1",
+      E2E_PORT: String(Number(PORT) + 17)
+    });
+
+    console.log("\n==== 18+ 门上的静默预取（偷跑：门还挡着就拉首屏 + 预热封面，且不重复请求）====");
+    const prewarm = await runNode("harness.mjs", {
+      DRIVER: "driver-prewarm.js",
+      // `?jmcover=1`：桩给一个非空 img_host（默认为空 = 封面根本不发请求），否则预热无地址可拼
+      TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "jmcover=1",
+      E2E_PORT: String(Number(PORT) + 20)
+    });
+
+    console.log("\n==== 封面图 Worker 解码（解到显示盒尺寸；画布必须有像素）====");
+    const cover = await runNode("harness.mjs", {
+      DRIVER: "driver-cover.js",
+      E2E_PORT: String(Number(PORT) + 18)
+    });
+
+    console.log("\n==== 封面图·降级（抹掉 Worker：必须退回 <img>，且一条任务都不发）====");
+    const coverNoWorker = await runNode("harness.mjs", {
+      DRIVER: "driver-cover.js",
+      TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "jmnoworker=1",
+      E2E_PORT: String(Number(PORT) + 19)
+    });
+
     console.log("\n==== 付费漫画购买闭环 ====");
     const paid = await runNode("harness.mjs", {
       DRIVER: "driver-paid.js",
@@ -110,6 +145,10 @@ async function main() {
     console.log("\n==== 加载态：首页骨架（过 18+ 门 / 切 tab）+ 骨架列数跟配置 ====");
     const loading = await runNode("harness.mjs", {
       DRIVER: "driver-loading.js",
+      // 这条用例的前提是"过门之后才开始拉首屏"（用 delay 桩逼出骨架屏）。
+      // 门上的静默预取会把这个等待抹平，所以这里显式关掉它（`?jmprewarm=0`）——
+      // 预取本身由 `门上预取` 那一段单独验。
+      TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "jmprewarm=0",
       E2E_PORT: String(Number(PORT) + 11)
     });
 
@@ -144,10 +183,14 @@ async function main() {
     let ptrCode = 0;
     if (!process.env.E2E_SKIP_PTR) {
       console.log("\n==== 下拉刷新（CDP 原生触摸）====");
-      ptrCode = await runNode("ptr.mjs", { E2E_PORT: String(Number(PORT) + 1) });
+      // 同上：这条断言"下拉会重新请求首屏"，需要冷启动那串顺序请求作为前提 → 关掉门上的预取
+      ptrCode = await runNode("ptr.mjs", {
+        E2E_PORT: String(Number(PORT) + 1),
+        TEST_URL: URL_ + (URL_.includes("?") ? "&" : "?") + "jmprewarm=0"
+      });
     }
-    if (nav || srloop || entry || rapid || scrollleak || auth || cache || hist || reader || paid || loading || chromeDrv || forms || upd || updDesk || ptrCode) process.exitCode = 1;
-    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，搜索层列表不溢出 " + (srloop ? "✗" : "✓") + "，详情转场一致性/连点 " + (entry ? "✗" : "✓") + "，手快不硬跳 " + (rapid ? "✗" : "✓") + "，列表位置记忆 " + (scrollleak ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，付费购买 " + (paid ? "✗" : "✓") + "，加载态骨架 " + (loading ? "✗" : "✓") + "，壳层单元/编辑页 " + (chromeDrv ? "✗" : "✓") + "，详情+列表形态 " + (forms ? "✗" : "✓") + "，更新提示/日志 " + (upd ? "✗" : "✓") + "，更新提示·桌面 " + (updDesk ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
+    if (nav || srloop || entry || rapid || scrollleak || auth || cache || hist || reader || win || winNoWorker || prewarm || cover || coverNoWorker || paid || loading || chromeDrv || forms || upd || updDesk || ptrCode) process.exitCode = 1;
+    console.log("\n结果: 导航回归 " + (nav ? "✗" : "✓") + "，搜索层列表不溢出 " + (srloop ? "✗" : "✓") + "，详情转场一致性/连点 " + (entry ? "✗" : "✓") + "，手快不硬跳 " + (rapid ? "✗" : "✓") + "，列表位置记忆 " + (scrollleak ? "✗" : "✓") + "，登录态一致性 " + (auth ? "✗" : "✓") + "，缓存/离线详情 " + (cache ? "✗" : "✓") + "，连载/足迹 " + (hist ? "✗" : "✓") + "，阅读器弹窗 " + (reader ? "✗" : "✓") + "，阅读器窗口化 " + (win ? "✗" : "✓") + "，窗口化降级 " + (winNoWorker ? "✗" : "✓") + "，门上预取 " + (prewarm ? "✗" : "✓") + "，封面降采样 " + (cover ? "✗" : "✓") + "，封面降级 " + (coverNoWorker ? "✗" : "✓") + "，付费购买 " + (paid ? "✗" : "✓") + "，加载态骨架 " + (loading ? "✗" : "✓") + "，壳层单元/编辑页 " + (chromeDrv ? "✗" : "✓") + "，详情+列表形态 " + (forms ? "✗" : "✓") + "，更新提示/日志 " + (upd ? "✗" : "✓") + "，更新提示·桌面 " + (updDesk ? "✗" : "✓") + "，下拉刷新 " + (ptrCode ? "✗" : "✓"));
   } finally {
     if (server) { try { server.kill(); } catch (e) { /* 忽略 */ } }
   }

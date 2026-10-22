@@ -64,7 +64,7 @@
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
 | PC + 前端 | package.json → version | 2.3.0 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 2.3.0 / versionCode 81 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| Android | android/app/build.gradle → defaultConfig | versionName 2.3.1 / versionCode 82 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
 > ⚠️ **现值以本表为准**：package.json `2.3.0` / build.gradle `versionName 2.3.0` + `versionCode 81`。
 > （2026-10-15 更新：2.2.7 → **2.3.0** —— 这批工作（四个页面的自定义 UI、详情页编辑器拖拽手感与行内落位）
@@ -206,7 +206,15 @@ pwsh -NoProfile -File tools\build-compat-apk.ps1 -Version 2.1.0
 | `JM_WEBVIEW_DEBUG=1` | 允许 `adb forward` 到 WebView DevTools | 无法用 CDP 探针诊断（release 默认关） |
 
 > ⚠️ `JM_NO_SEAM` 必须在 `npm run build:compat` **之前**设（`vite.config.ts` 在配置加载时读 `process.env`），设晚了产物里还留着去条纹代码。
-> 验证方式（产物级）：`Select-String -Path dist-compat/assets/*.js -Pattern "去条纹","seam page="` 必须为 **0** 条。
+> 验证方式（产物级）：`npm run check:bundle -- --dir dist-compat --expect no-seam`
+> —— 它按**功能文案**判（`去条纹已开启` / `去条纹已关闭` / `去条纹 ✓` / `（去条纹关闭）` / `seam page=` 必须一条都不剩），
+> 顺带校验两个 worker 分块（`scrambleWorker-*.js` 切块重排/去条纹、`imageWorker-*.js` 封面解码降采样）
+> 都存在且被主包引用 —— 分块被打进包却没被引用时，功能会静默走降级路径，构建日志里看不出来。
+>
+> 📌 **2026-10-22 更正**：这里原先写的是「`去条纹` 字符串必须 0 条」——**这条判据是错的**。
+> 设置面板的按钮提示「阅读设置：模式 / 去条纹 / 跳页」在 NO_SEAM 包里必然保留（模式与跳页还在用），
+> 已发布的 `release/jm-minimal-compat-2.3.0.apk` 实测就是每个 js 2 条。按 0 条判会一直被自己吓到，
+> 而真正的信号是上面那五条功能文案。脚本的判定口径就是照这个实测校准的。
 
 老内核（WebView < 61 这一档）的兼容底线，改 UI 时别踩：
 
@@ -365,6 +373,10 @@ npm run test:watch   # 单测 watch 模式
 npm run build        # tsc 类型检查 + 产物 dist/
 npm run preview      # 预览 dist
 npx electron .       # 桌面壳跑 dist（未打包=开发态：DNS 清洗可用、更新不可用）
+
+# 产物级校验（构建之后跑）：worker 分块是否在、去条纹是否按变体摇干净
+npm run check:bundle                                  # 查 dist/（含去条纹）
+npm run check:bundle -- --dir dist-compat --expect no-seam   # 查老安卓包（不该含）
 ```
 ### 7.2 打包 / 发布（按 §3/§4/§5 顺序）
 ```bash

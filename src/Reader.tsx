@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { client } from "./core/api";
@@ -20,7 +20,8 @@ import { TAP_ZONES_CONTINUOUS, TAP_ZONES_SINGLE, loadTapInvert, resolveTapAction
 import { READER_STATUS_UNITS, READER_TOOL_UNITS, READER_TOP_UNITS, renderChromeUnits } from "./ui/chrome/units";
 import type { ReaderStatusCtx, ReaderToolCtx, ReaderTopCtx } from "./ui/chrome/units";
 import { pushToast } from "./ui/toast";
-import { deseaOn, drawUnscrambled, pageNameOf, scrambleSliceCount, SEAM_VISIBLE_SCORE, setDeseam, smoothSeams } from "./core/scramble";
+import { deseaOn, makeCanvas, needsUnscramble, pageNameOf, scrambleSliceCount, SEAM_VISIBLE_SCORE, setDeseam } from "./core/scramble";
+import { offloadAvailable, paintScrambled, shutdownScrambleWorker } from "./core/scrambleOffload";
 import { resolveReaderScrollHost, scrollByHost, scrollToTopOf, scrollTopOf } from "./core/scrollHost";
 import { NO_SEAM, UI_KEYS } from "./core/constants";
 import { isLowFx } from "./core/lowfx";
@@ -37,6 +38,25 @@ const MODE_KEY = UI_KEYS.readerMode;
 const PRELOAD_AHEAD_PAGES = 3;
 /** 预取防抖：停下翻页 60ms 后再发请求（原来是 180ms，快速连翻时等于没预取） */
 const PRELOAD_DEBOUNCE_MS = 60;
+
+/**
+ * 连续模式的**窗口化渲染**：只有视口附近的这些页真正挂载 `<figure>`+`<img>`，
+ * 其余页退化成"比例盒占位"——同一个 `.jm-figure` 类、同样的 `--jm-ar` 撑高，
+ * 只是里面**没有 img、没有 canvas**。
+ *
+ * 为什么必须做：整章一次性挂载时，每页不只有一个解码后的位图，切块重排还会给每页
+ * 额外留一张**全分辨率 CPU 画布**（core/scramble 的 `willReadFrequently`，
+ * 一张 1200×1800 就是 8.6 MB），200 页的章节光画布就过 GB —— 于是滚动掉帧、
+ * WebView 被系统回收。占位页一换，位图和画布随 DOM 一起回收（canvas 是插在
+ * figure 里的，React 卸载 figure 时自然带走了它）。
+ *
+ * 取值权衡：一屏约放得下 1.5~2 页 → 前 4 页 ≈ 提前两屏开始解码，够一次普通手势滑动；
+ * 后 2 页让"往回翻一点"不必重新解码。低配机（isLowFx）再砍一半，别和主线程抢解码。
+ */
+const WINDOW_AHEAD = 4;
+const WINDOW_BEHIND = 2;
+const WINDOW_AHEAD_LOW = 2;
+const WINDOW_BEHIND_LOW = 1;
 
 interface Props {
   albumId: number | string;
@@ -63,6 +83,21 @@ function imageName(p: ReadPage): string {
   if (p.name) return p.name;
   const clean = (p.image || "").split("?")[0].split("/").pop() || "";
   return clean.replace(/\.(webp|jpg|jpeg|png|gif)$/i, "");
+}
+
+/**
+ * 页图 URL（带一次去重的诊断日志）。
+ * 放在模块级：窗口化之后只有挂载中的那几页会调用它，日志量随之降到"真正取过的页"。
+ */
+function pageSrc(p: ReadPage): string {
+  const src = p.image;
+  const key = imageName(p) + "|" + src;
+  if (!loggedSrc.has(key)) {
+    if (loggedSrc.size >= LOGGED_SRC_MAX) loggedSrc.clear(); // 容量上限：不随着阅读时长无界增长
+    loggedSrc.add(key);
+    jlog("pageSrc page=" + imageName(p) + " → " + src.split("//").slice(-1)[0].slice(0, 70));
+  }
+  return src;
 }
 
 // 去条纹 = 纯本地图像修复（不消耗额外流量）：
@@ -172,6 +207,9 @@ function handlePageImgError(e: React.SyntheticEvent<HTMLImageElement>, onGiveUp:
   clearPageRetry(im);
   const timer = window.setTimeout(() => {
     pageRetryTimers.delete(im);
+    // 窗口化之后页会随滚动卸载：元素已经不在文档里就不要再拉一遍
+    // （设置一个游离 <img> 的 src 照样会发请求，等于给已经看不见的页白烧流量）
+    if (!im.isConnected) return;
     im.src = retryUrl(im.dataset.origSrc || im.src, n);
   }, delay);
   pageRetryTimers.set(im, timer);
@@ -183,6 +221,8 @@ function markPageFailed(im: HTMLImageElement, onGiveUp: () => void): void {
   const box = pageBoxOf(im);
   if (box && box.dataset.failed !== "1") {
     box.dataset.failed = "1";
+    // 图床健康评分：这一张彻底失败了 → 记一笔（连续失败会让该 host 进入退避冷却，见 core/hostHealth）
+    client.noteImageResult(im.dataset.origSrc || im.src, false, "page give up");
     onGiveUp();
   }
 }
@@ -199,10 +239,13 @@ function resetPageImage(im: HTMLImageElement): void {
 }
 
 // —— 去条纹（接缝修复）延后执行 ——
-// 重排（drawUnscrambled）是「能不能读懂」的前提，必须随图片加载立刻完成；
+// 重排（拼回切块）是「能不能读懂」的前提，必须随图片加载立刻出图；
 // 去条纹只是画质优化，实测单页 measure+smooth 最坏 191 ms，同步做会把主线程堵死，
-// 导致后续图片迟迟不加载、切片迟迟不重排。所以：立刻重排 → 进入视口 + 主线程空闲时再修。
-interface SeamTask { pageName: string; parts: number }
+// 导致后续图片迟迟不加载、切片迟迟不重排。所以：先出未修复的图 → 进入视口后再修。
+//
+// v2.3.x 起这两步都尽量在 **Worker** 里跑（core/scrambleOffload）：主线程只把回来的位图贴一次。
+// 没有 Worker 的老内核自动降级成原来那套同步路径，下面的队列/空闲调度两种路径共用。
+interface SeamTask { pageName: string; parts: number; img: HTMLImageElement }
 const seamTasks = new WeakMap<HTMLCanvasElement, SeamTask>();
 const seamQueue: HTMLCanvasElement[] = [];
 let seamPumping = false;
@@ -234,92 +277,119 @@ function enqueueSeam(cv: HTMLCanvasElement): void {
   pumpSeam();
 }
 
+/**
+ * 修一条边界的接缝，并把诊断打进 [jmd] 日志。
+ * 日志字段与改造前逐字一致（判定值 / 残留 / 边界跳变 / 干净列数 / 剔除列数 / 保留遍数）——
+ * 唯一区别是这些数据现在由 Worker 回传，而不是在这里同步量出来。
+ */
+async function repairSeams(cv: HTMLCanvasElement, task: SeamTask): Promise<void> {
+  const res = await paintScrambled(cv, task.img, { parts: task.parts, repair: true, threshold: SEAM_VISIBLE_SCORE }).catch(() => null);
+  if (!res || !res.ok) return;
+  const bandLines: string[] = [];
+  let bands = 0;
+  let bad = 0;
+  let maxLevel = 0;
+  let maxEnd = 0;
+  let sumDrop = 0;
+  for (const info of res.bands) {
+    bands += 1;
+    if (info.level > maxLevel) maxLevel = info.level;
+    if (info.endLevel > maxEnd) maxEnd = info.endLevel;
+    if (info.level <= SEAM_VISIBLE_SCORE) continue;
+    bad += 1;
+    sumDrop += Math.max(0, info.jumpBefore - info.jumpAfter);
+    // 每条超标边界都记全：判定值 / 残留 / **边界跳变（肉眼指标）** / 干净列数 /
+    // 被内容判据剔除的列数 / 保留遍数。
+    // 「跳变降了多少」是验收指标（2026-10-10 的回归就是只量遍数才放过去的）；
+    // 「干净列数 + 剔除列数」用来判断判定是否过严。
+    bandLines.push("b=" + info.b + " lv=" + info.level.toFixed(2) + "→" + info.endLevel.toFixed(2) +
+      " 跳" + info.jumpBefore.toFixed(0) + "→" + info.jumpAfter.toFixed(0) +
+      " n=" + info.n + " 剔除=" + info.rejected + " 修" + info.repaired);
+  }
+  const tail = bad === 0
+    ? " 达标跳过"
+    : (sumDrop > 0 ? " → 跳变共降 " + sumDrop.toFixed(0) + " 灰阶（保留 " + res.fixed + " 遍，残留 " + maxEnd.toFixed(2) + "）"
+                   : " → 未修（回滚 / 样本不足）");
+  jlog("seam page=" + task.pageName + " 超额 " + maxLevel.toFixed(2) + "，超标 " + bad + "/" + bands + " 条边界" + tail + (res.offloaded ? " [worker]" : ""));
+  if (bad > 0) jlog("seam bands page=" + task.pageName + " " + bandLines.join(" | "));
+}
+
 function pumpSeam(): void {
   if (seamPumping) return;
   seamPumping = true;
   const step = () => {
     const cv = seamQueue.shift();
     if (!cv) { seamPumping = false; return; }
-    if (cv.isConnected && !cv.dataset.seamRepaired && deseaOn()) {
-      const task = seamTasks.get(cv);
-      if (task) {
-        try {
-          // smoothSeams 内部已经量过所有边界、并通过回调把每条边界的信息带回来，
-          // 所以这里不再单独 measureSeamDetail 一次 —— 原来每次进视口要跑两遍全扫
-          // （Reader 一遍 + smoothSeams 内部一遍），纯浪费。
-          const bandLines: string[] = [];
-          let bands = 0;
-          let bad = 0;
-          let maxLevel = 0;
-          let maxEnd = 0;
-          let sumDrop = 0;
-          const fixed = smoothSeams(cv, task.parts, SEAM_VISIBLE_SCORE, (info) => {
-            bands += 1;
-            if (info.level > maxLevel) maxLevel = info.level;
-            if (info.endLevel > maxEnd) maxEnd = info.endLevel;
-            if (info.level <= SEAM_VISIBLE_SCORE) return;
-            bad += 1;
-            sumDrop += Math.max(0, info.jumpBefore - info.jumpAfter);
-            // 每条超标边界都记全：判定值 / 残留 / **边界跳变（肉眼指标）** / 干净列数 /
-            // 被内容判据剔除的列数 / 保留遍数。
-            // 「跳变降了多少」是验收指标（2026-10-10 的回归就是只量遍数才放过去的）；
-            // 「干净列数 + 剔除列数」用来判断判定是否过严。
-            bandLines.push("b=" + info.b + " lv=" + info.level.toFixed(2) + "→" + info.endLevel.toFixed(2) +
-              " 跳" + info.jumpBefore.toFixed(0) + "→" + info.jumpAfter.toFixed(0) +
-              " n=" + info.n + " 剔除=" + info.rejected + " 修" + info.repaired);
-          });
-          cv.dataset.seamRepaired = "1";
-          const tail = bad === 0
-            ? " 达标跳过"
-            : (sumDrop > 0 ? " → 跳变共降 " + sumDrop.toFixed(0) + " 灰阶（保留 " + fixed + " 遍，残留 " + maxEnd.toFixed(2) + "）"
-                           : " → 未修（回滚 / 样本不足）");
-          jlog("seam page=" + task.pageName + " 超额 " + maxLevel.toFixed(2) + "，超标 " + bad + "/" + bands + " 条边界" + tail);
-          if (bad > 0) jlog("seam bands page=" + task.pageName + " " + bandLines.join(" | "));
-        } catch (err) {
-          // canvas 被跨域数据污染（图床未发 CORS 头）→ 无法量测，跳过
-          jlog("seam skip page=" + task.pageName + " " + String(err).slice(0, 60));
-        }
-      }
+    const task = seamTasks.get(cv);
+    if (cv.isConnected && !cv.dataset.seamRepaired && deseaOn() && task) {
+      cv.dataset.seamRepaired = "1"; // 先占位：Worker 路径是异步的，不能让同一张画布排两次队
+      void repairSeams(cv, task)
+        .catch((err) => jlog("seam skip page=" + task.pageName + " " + String(err).slice(0, 60)))
+        .then(() => idleRun(step));
+      return;
     }
     idleRun(step);
   };
   idleRun(step);
 }
 
-function applyScramble(img: HTMLImageElement, albumId: number | string, scrambleId?: number | string) {
+/**
+ * 把这一页重排（拼回切块）画进 canvas，可选顺带修复接缝。
+ *
+ * ⚠️ 现在是**异步**的（Worker 回传位图后主线程贴一次）：调用方必须等它完成再 `markPageReady`，
+ * 否则 figure 会先切到 `height:auto`、而画布还是空的 → 页面高度塌成 0。
+ * 返回 `null` 表示"这一页不需要重排"或"还没解码完"，调用方照旧直接 markPageReady。
+ */
+function applyScramble(img: HTMLImageElement, albumId: number | string, scrambleId?: number | string): Promise<void> | null {
   // 尚未解码完成先不动（交给 onLoad）；否则会把键写死，后续再也不会还原
-  if (!img.complete || img.naturalWidth === 0) return;
+  if (!img.complete || img.naturalWidth === 0) return null;
   // 变量名不要叫 `on`：会遮蔽从 core/bus 导入的事件订阅函数 on()（no-shadow），
   // 一旦后面在这段作用域里写 on("jm:xxx", ...) 就会变成 "boolean is not a function"
   const repairOn = deseaOn();
   // 键 = scrambleId + 开关状态 + 当前图源地址：图源切换、scrambleId 迟到/变化、开关切换都必须重绘
   const key = String(scrambleId ?? "") + "|" + (repairOn ? "fix" : "raw") + "|" + (img.currentSrc || img.src);
-  if (img.dataset.scrambleKey === key) return;
+  if (img.dataset.scrambleKey === key) return null;
   // 图源/页面变化时允许对新图重新做一次接缝修复
   delete img.dataset.seamRepaired;
-  // 清掉同一容器内上一轮生成的 canvas（切源 / 单页翻页时 React 会替换 img，旧 canvas 必须移除）
-  const parent = img.parentElement;
-  if (parent) parent.querySelectorAll("canvas.scramble-canvas").forEach((c) => c.remove());
-  const canvas = scrambleId ? drawUnscrambled(img, albumId, scrambleId) : null;
   img.dataset.scrambleKey = key;
-  if (!canvas) {
+  if (!needsUnscramble(img, albumId, scrambleId)) {
+    // 整图（gif / 早于 scramble_id 的老专辑）：把可能残留的 canvas 清掉，恢复原图
+    const p = img.parentElement;
+    if (p) p.querySelectorAll("canvas.scramble-canvas").forEach((c) => c.remove());
     img.style.display = "";
-    return;
+    return null;
   }
+  const pageName = pageNameOf(img);
+  const parts = scrambleSliceCount(albumId, pageName);
+  // Worker 路径只贴一次位图、从不回读 → 画布保持 GPU 侧（合成更快）；
+  // 降级路径要反复 getImageData → 必须 CPU 侧（willReadFrequently）。
+  const canvas = makeCanvas(img, !offloadAvailable());
   canvas.classList.add("scramble-canvas");
+  canvas.style.display = "none"; // 画好之前不显示：空画布在个别内核上会闪一帧黑
   if (img.dataset.page) canvas.dataset.page = img.dataset.page;
   img.parentElement?.insertBefore(canvas, img.nextSibling);
-  img.style.display = "none";
-  // 重排已完成（上面 9ms 的 drawUnscrambled）→ 去条纹排队，等进入视口 + 主线程空闲再做
-  // NO_SEAM 构建里 !NO_SEAM 是编译期常量 false → 整块（含 observer/队列）会被摇掉
-  if (scrambleId && repairOn && !NO_SEAM) {
-    const pageName = pageNameOf(img);
-    seamTasks.set(canvas, { pageName, parts: scrambleSliceCount(albumId, pageName) });
-    const obs = ensureSeamObserver();
-    if (obs) obs.observe(canvas); else enqueueSeam(canvas);
-  } else if (scrambleId) {
-    jlog("unscramble page=" + pageNameOf(img) + (NO_SEAM ? "" : "（去条纹关闭）"));
-  }
+
+  // 第一遍：只重排（不改像素）。出图很快，用户先能读；修复随后由视口观察器触发。
+  return paintScrambled(canvas, img, { parts, repair: false })
+    .then((res) => {
+      if (!res.ok || !canvas.isConnected) {
+        canvas.remove();
+        return;
+      }
+      // 画好了才把旧 canvas 摘掉、把原图藏起来 —— 中间不留空白帧
+      const parent = img.parentElement;
+      if (parent) parent.querySelectorAll("canvas.scramble-canvas").forEach((c) => { if (c !== canvas) c.remove(); });
+      canvas.style.display = "";
+      img.style.display = "none";
+      if (!scrambleId || NO_SEAM || !repairOn) {
+        if (scrambleId) jlog("unscramble page=" + pageName + (NO_SEAM ? "" : "（去条纹关闭）"));
+        return;
+      }
+      // 去条纹排队：等进入视口（观察器）+ 主线程空闲再做。NO_SEAM 构建里这段会被整块摇掉。
+      seamTasks.set(canvas, { pageName, parts, img });
+      const obs = ensureSeamObserver();
+      if (obs) obs.observe(canvas); else enqueueSeam(canvas);
+    });
 }
 
 /**
@@ -333,6 +403,53 @@ function hhmm(d: Date = new Date()): string {
   const two = (n: number) => (n < 10 ? "0" + n : String(n));
   return two(d.getHours()) + ":" + two(d.getMinutes());
 }
+
+/**
+ * 比例盒占位页 —— 与真页**共用** `.jm-figure` 类：
+ * `height:0 + padding-top:var(--jm-ar)` 让它的高度与真页骨架一像素不差，
+ * 所以滚动条长度、滚动位置、当前页计数、`#jm-pg-N` 跳页全都不受影响，
+ * 唯一区别是里面没有 img / canvas（→ 位图与画布不会为离屏页常驻）。
+ */
+const ReaderSlot = memo(function ReaderSlot({ page, ar }: { page: number; ar: number }) {
+  return (
+    <div className="jm-figure" id={"jm-pg-" + page} data-page={page}
+      style={{ "--jm-ar": ar + "%" } as CSSProperties} />
+  );
+});
+
+/**
+ * 真正渲染出来的一页：`<img>` + 失败重试按钮。
+ * 抽成 memo 组件是窗口化的配套：窗口滑动时只有进出窗口的那 1~2 页重渲染，
+ * 占位页和窗口内的其它页全部命中 memo 直接跳过（否则每次跨页都要重建两百个元素）。
+ */
+const ReaderPageView = memo(function ReaderPageView({ page, ar, src, name, known, onLoad, onError, onRetry }: {
+  page: number;
+  ar: number;
+  src: string;
+  name: string;
+  /** 这一页在本话里已经"亮过"（滚走过又滚回来）：不要再走 140ms 淡入，否则往回翻像在闪 */
+  known: boolean;
+  onLoad: (im: HTMLImageElement) => void;
+  onError: (e: React.SyntheticEvent<HTMLImageElement>) => void;
+  onRetry: (im: HTMLImageElement | null) => void;
+}) {
+  return (
+    <figure className="jm-figure" id={"jm-pg-" + page} data-page={page}
+      data-known={known ? "1" : undefined}
+      style={{ "--jm-ar": ar + "%" } as CSSProperties}>
+      <img className="jm-page" data-page={page} src={src} alt={name} crossOrigin="anonymous"
+        loading="lazy" decoding="async" draggable={false}
+        onLoad={(e) => { onLoad(e.currentTarget); }}
+        onError={onError} />
+      {/* 重试全用尽才显示（CSS 按 figure[data-failed] 控制）：以前失败页和"还在加载"长得一模一样，
+          用户只能靠「换源」把整块重挂一遍来蒙 —— 现在失败是可见的，并且能单页重来 */}
+      <button type="button" className="jm-retry" onClick={(e) => {
+        e.stopPropagation();
+        onRetry(e.currentTarget.parentElement?.querySelector<HTMLImageElement>("img.jm-page") ?? null);
+      }}>加载失败 · 点按重试</button>
+    </figure>
+  );
+});
 
 export default function ReaderPanel({
   albumId: albumIdProp, pages: pagesProp, title: titleProp, scrambleId: scrambleIdProp,
@@ -416,6 +533,15 @@ export default function ReaderPanel({
    * 图片/拼图就绪后 figure 再切回自然高度（同一话内页面尺寸基本一致，学到的比例误差通常只有 1px 级）。
    */
   const ratioRef = useRef(139.5);
+  /**
+   * 每页实测过的高度比例（高 ÷ 宽 × 100），按页码存。
+   * 窗口化的占位盒用它撑高：学过的一页换成占位盒时高度分毫不差，
+   * 没学过（读者是从中间跳进来的）才退回本话的估算值 `ratioRef`。
+   * 换话/换源（stageGen）时清空 —— 那是另一批图，比例没有可比性。
+   */
+  const pageRatioRef = useRef<Map<number, number>>(new Map());
+  /** 本话里已经亮过的页（滚走过又滚回来）：重挂时不再淡入，见 ReaderPageView 的 known */
+  const seenPagesRef = useRef<Set<number>>(new Set());
   /** 当前页检测函数：骨架→内容切换会改变高度，切完要重算一次，避免计数停在旧值 */
   const recomputeRef = useRef<(() => void) | null>(null);
   const recomputeRafRef = useRef(0);
@@ -479,6 +605,19 @@ export default function ReaderPanel({
   const currentRef = useRef(1);
   /** 已预取（并正在解码）的前方页：键是页码，翻过去即释放 */
   const preloadRef = useRef<Map<number, HTMLImageElement>>(new Map());
+  /**
+   * 窗口化之后页会反复挂载/卸载，传给 memo 页的回调必须是**稳定引用**
+   * （否则每次渲染都换新函数 → memo 形同虚设，两百个元素照样重建）；
+   * 但同时又必须总是调到最后一次渲染的闭包 —— 用 ref 转发，与上面 `dialogRef` 同一手法。
+   */
+  const pageHooks = useRef<{
+    load: (im: HTMLImageElement) => void;
+    err: (e: React.SyntheticEvent<HTMLImageElement>) => void;
+    retry: (im: HTMLImageElement | null) => void;
+  }>({ load: () => { /* 挂载后才赋值 */ }, err: () => { /* 同上 */ }, retry: () => { /* 同上 */ } });
+  const onPageLoadStable = useCallback((im: HTMLImageElement) => pageHooks.current.load(im), []);
+  const onPageErrorStable = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => pageHooks.current.err(e), []);
+  const onPageRetryStable = useCallback((im: HTMLImageElement | null) => pageHooks.current.retry(im), []);
   /** 本话累计"彻底失败"的页数；自愈次数与上次自愈时间（允许隔一段时间再自愈一次，不再一话只给一次机会） */
   const pageFailRef = useRef(0);
   const healCountRef = useRef(0);
@@ -548,6 +687,9 @@ export default function ReaderPanel({
     releaseOfflinePageUrlsBefore(blobCursorRef.current);
   }, [stageGen]);
 
+  // 换话/换源 = 换了一批图：每页比例表作废（页码会从 1 重新开始，留着就是拿上一话的尺寸撑这一话）
+  useEffect(() => { pageRatioRef.current.clear(); seenPagesRef.current.clear(); }, [stageGen, albumId]);
+
   const [pageUrls, setPageUrls] = useState<ReadPage[]>(pages);
   // 父组件先以空 pages[] 渲染阅读器（立即进入），后台获取到实际数据后更新 props → 同步到内部状态
   useEffect(() => { if (pages.length > 0) setPageUrls(pages); }, [pages]);
@@ -555,17 +697,40 @@ export default function ReaderPanel({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+    const pending: Promise<void>[] = [];
     keepAnchor(() => {
       root.querySelectorAll<HTMLImageElement>("img.jm-page").forEach((img) => {
         if (!img.complete || img.naturalWidth === 0) return; // 还没解码：等 onLoad
-        applyScramble(img, albumId, scrambleId);
-        markPageReady(img);
+        const p = applyScramble(img, albumId, scrambleId);
+        if (p) pending.push(p.then(() => { if (img.isConnected) markPageReady(img); }));
+        else markPageReady(img);
       });
     });
+    // 这一轮重排是异步的（Worker）：画好后再各自 markPageReady（见 onPageLoaded 的同一条理由）
+    void Promise.allSettled(pending);
   }, [albumId, scrambleId, pageUrls]);
 
 
   const total = pages.length;
+
+  /**
+   * 连续模式的渲染窗口（页下标，闭区间）：以「当前页」为中心取前后各若干页。
+   * 窗口外的页只渲染 `ReaderSlot` 占位盒（同样的 `.jm-figure` + `--jm-ar`，高度一致）。
+   *
+   * current 由滚动监维护（每跨一页 setState 一次），所以窗口是"跟着读者走"的：
+   * 往下翻 → 后面补挂、前面卸载；往上翻反之。跳页（浮标/输入页码）同样走 current，
+   * 目标页会立刻进入窗口，`#jm-pg-N` 的占位盒在跳转前就已经在 DOM 里，scrollIntoView 不受影响。
+   */
+  const [winFrom, winTo] = useMemo(() => {
+    const n = pageUrls.length;
+    if (n === 0) return [0, -1] as [number, number];
+    let idx = pageUrls.findIndex((p) => Number(p.page) === current);
+    if (idx < 0) idx = 0;
+    const low = isLowFx();
+    const ahead = low ? WINDOW_AHEAD_LOW : WINDOW_AHEAD;
+    const behind = low ? WINDOW_BEHIND_LOW : WINDOW_BEHIND;
+    return [Math.max(0, idx - behind), Math.min(n - 1, idx + ahead)] as [number, number];
+  }, [pageUrls, current]);
 
   useEffect(() => { localStorage.setItem(MODE_KEY, mode); }, [mode]);
 
@@ -610,6 +775,9 @@ export default function ReaderPanel({
   useEffect(() => {
     return () => { releaseOfflinePageUrls(); };
   }, []);
+
+  // 卸载时关掉重排 Worker（避开"阅读器退了、Worker 线程还在"的残留；下次进阅读器会按需重建）
+  useEffect(() => () => { shutdownScrambleWorker(); }, []);
 
 
   const loadedPage = useMemo(() => pages.find((p) => Number(p.page) === current) || pages[0], [pages, current]);
@@ -765,8 +933,9 @@ export default function ReaderPanel({
     // 查询限定在本阅读器内：缓存中心那份离线阅读器可能同时挂载，
     // 不限定范围会扫到它的 .jm-figure（页码、锚点、浮标都会算错）
     const scope: ParentNode = rootRef.current || document;
-    const figs = Array.from(scope.querySelectorAll<HTMLElement>(".jm-figure"));
-    if (figs.length === 0) return;
+    // ⚠️ 这里**不能**把 .jm-figure 的 NodeList 缓存到闭包里：窗口化之后离屏页会被卸载成
+    // 占位盒再挂回来，缓存的节点一旦脱离文档，getBoundingClientRect 全是 0，页码会永远停在 1。
+    // 所以每次计算都现查（一次 querySelectorAll + 一次布局，已经被下面的 rAF 节流压到每帧一次）。
     // 滚动宿主判定统一在 core/scrollHost.ts（判定条件只有一份，双宿主与老内核兜底都在那里）
     const hostInfo = resolveReaderScrollHost(rootRef.current);
     const host = hostInfo.measured;
@@ -779,7 +948,7 @@ export default function ReaderPanel({
       // 阅读参考线：滚动视口（窗口或 overlay 容器）45% 高度处
       const lineY = (isWin ? 0 : host.getBoundingClientRect().top) + host.clientHeight * 0.45;
       let cur = 1;
-      for (const f of figs) {
+      for (const f of scope.querySelectorAll<HTMLElement>(".jm-figure")) {
         const top = f.getBoundingClientRect().top;
         if (top > lineY) break; // 参考线以下无需再扫
         cur = Number(f.dataset.page || String(f.id).replace(/^jm-pg-/, "") || 1);
@@ -792,11 +961,26 @@ export default function ReaderPanel({
       showRail();
     };
     const target = isWin ? window : host;
-    target.addEventListener("scroll", compute, { passive: true });
+    /**
+     * 滚动事件的**每帧一次**节流。
+     * 原来直接挂 compute：一次手势里 scroll 会连发十几到几十次，每次都强制一次布局
+     * （读 200 个 getBoundingClientRect）再 setState —— 这就是长章节里"页码跳得卡、滚动发涩"
+     * 的一半来源。合并到 rAF 之后每帧最多一次，且与绘制对齐。
+     */
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        compute();
+      });
+    };
+    target.addEventListener("scroll", onScroll, { passive: true });
     recomputeRef.current = compute; // 骨架切内容后高度变了，需要主动重算一次
     compute();
     return () => {
-      target.removeEventListener("scroll", compute);
+      target.removeEventListener("scroll", onScroll);
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
       if (recomputeRef.current === compute) recomputeRef.current = null;
       if (recomputeRafRef.current) { cancelAnimationFrame(recomputeRafRef.current); recomputeRafRef.current = 0; }
     };
@@ -865,8 +1049,15 @@ export default function ReaderPanel({
     delete im.dataset.retryN;
     const box = pageBoxOf(im);
     if (box) delete box.dataset.failed;
-    applyScramble(im, albumId, scrambleId);
-    markPageReady(im);
+    // 图床健康评分：这一张成功了 → 清掉该 host 的冷却（退避之后能自己回来）
+    client.noteImageResult(im.currentSrc || im.src, true);
+    const pending = applyScramble(im, albumId, scrambleId);
+    if (!pending) { markPageReady(im); return; }
+    // 重排现在是异步的（Worker 回传位图）：画好再切 data-ready，
+    // 否则 figure 会先变成 height:auto 而画布还是空的 → 整章高度塌掉。
+    void pending.then(() => { if (im.isConnected) markPageReady(im); }).catch(() => {
+      if (im.isConnected) markPageReady(im);
+    });
   }
 
   /** 手动选源：立刻关浮层，阅读器先进加载骨架，再按新源从头填充（失败把原页放回） */
@@ -1283,12 +1474,27 @@ export default function ReaderPanel({
     const w = img.naturalWidth, h = img.naturalHeight;
     if (!w || !h) return;
     const pct = Math.round((h / w) * 1000) / 10;
-    if (!(pct > 60 && pct < 400) || pct === ratioRef.current) return;
+    if (!(pct > 60 && pct < 400)) return;
+    // **每页自己的比例**：窗口化之后离屏页会被换成占位盒，占位盒得按"这一页自己的"比例撑高，
+    // 否则滚过一页跨页大图/长图时，卸载瞬间高度换个值，下面的内容会"啪"地跳一下
+    // （卸载是 React 渲染期发生的，绕过 keepAnchor，没有补偿机会）。
+    const pageNo = Number(img.dataset.page || 0);
+    if (pageNo > 0) {
+      pageRatioRef.current.set(pageNo, pct);
+      seenPagesRef.current.add(pageNo);
+    }
+    if (pct === ratioRef.current) return;
     ratioRef.current = pct;
-    // 还没就绪的骨架同步换成新比例（跑在 keepAnchor 里，所以不会把读者顶走）
+    // 还没就绪的骨架同步换成新比例（跑在 keepAnchor 里，所以不会把读者顶走）。
+    // 用 arOf 而不是直接用 pct：已经学过自己比例的那几页不能被本话的估算值覆盖掉。
     rootRef.current?.querySelectorAll<HTMLElement>(".jm-figure:not([data-ready])").forEach((f) => {
-      f.style.setProperty("--jm-ar", pct + "%");
+      f.style.setProperty("--jm-ar", arOf(Number(f.dataset.page || 0)) + "%");
     });
+  }
+
+  /** 某一页占位盒该用的比例：优先用这页学过的高度，没学过才用本话的估算比例 */
+  function arOf(page: number): number {
+    return pageRatioRef.current.get(page) ?? ratioRef.current;
   }
 
   /** 内容就绪：比例盒骨架 → 自然高度（先补偿滚动，再在下一帧重算当前页） */
@@ -1307,37 +1513,11 @@ export default function ReaderPanel({
     });
   }
 
-  function pageSrc(p: ReadPage): string {
-    const src = p.image;
-    const key = imageName(p) + "|" + src;
-    if (!loggedSrc.has(key)) {
-      if (loggedSrc.size >= LOGGED_SRC_MAX) loggedSrc.clear(); // 容量上限：不随着阅读时长无界增长
-      loggedSrc.add(key);
-      jlog("pageSrc page=" + imageName(p) + " → " + src.split("//").slice(-1)[0].slice(0, 70));
-    }
-    return src;
-  }
-
   function renderPage(p: ReadPage) {
     return (
-      <figure
-        key={String(p.page)}
-        id={"jm-pg-" + p.page}
-        data-page={p.page}
-        className="jm-figure"
-        style={{ "--jm-ar": ratioRef.current + "%" } as CSSProperties}
-      >
-        <img className="jm-page" data-page={p.page} src={pageSrc(p)} alt={imageName(p)} crossOrigin="anonymous" loading="lazy" decoding="async" draggable={false}
-          onLoad={(e) => { onPageLoaded(e.currentTarget); }}
-          onError={onImgError} />
-        {/* 重试全用尽才显示（CSS 按 figure[data-failed] 控制）：以前失败页和"还在加载"长得一模一样，
-            用户只能靠「换源」把整块重挂一遍来蒙 —— 现在失败是可见的，并且能单页重来 */}
-        <button type="button" className="jm-retry" onClick={(e) => {
-          e.stopPropagation();
-          const im = e.currentTarget.parentElement?.querySelector<HTMLImageElement>("img.jm-page");
-          if (im) resetPageImage(im);
-        }}>加载失败 · 点按重试</button>
-      </figure>
+      <ReaderPageView key={String(p.page)} page={p.page} ar={arOf(p.page)}
+        src={pageSrc(p)} name={imageName(p)} known={seenPagesRef.current.has(p.page)}
+        onLoad={onPageLoadStable} onError={onPageErrorStable} onRetry={onPageRetryStable} />
     );
   }
 
@@ -1508,6 +1688,12 @@ export default function ReaderPanel({
     </>
   ), document.body);
 
+  // 把"最后一次渲染"的处理器交给稳定回调（页卸载/挂载很频繁，但闭包必须是最新的：
+  // 换话换源后 albumId / scrambleId 都变了，旧闭包会把图按旧切块数去重排）
+  pageHooks.current.load = onPageLoaded;
+  pageHooks.current.err = onImgError;
+  pageHooks.current.retry = (im) => { if (im) resetPageImage(im); };
+
   const bubblePage = scrubPage ?? current;
   const bubbleRatio = total > 1 ? Math.min(1, Math.max(0, (bubblePage - 1) / (total - 1))) : 0;
 
@@ -1559,7 +1745,13 @@ export default function ReaderPanel({
     <div className={"reader-wrap" + (chromeOn ? " chrome-on" : "")} ref={rootRef} onClick={onReaderTap}>
       {toolbar}
       <h2 className="reader-title">{title}</h2>
-      <div className="reader-cont" key={"stage" + stageGen}>{pageUrls.map((p) => renderPage(p))}</div>
+      {/* 窗口化：窗口外的页只留一个等高占位盒（不再挂 img / canvas）。
+          顺序与 key 都不变，所以滚动条、当前页计数、#jm-pg-N 跳页的行为与整章全挂时一致。 */}
+      <div className="reader-cont" key={"stage" + stageGen}>
+        {pageUrls.map((p, i) => (i >= winFrom && i <= winTo
+          ? renderPage(p)
+          : <ReaderSlot key={String(p.page)} page={p.page} ar={arOf(p.page)} />))}
+      </div>
       {total > 1 && (
         <div ref={railRef} role="slider" aria-label="阅读进度" aria-valuemin={1} aria-valuemax={total} aria-valuenow={bubblePage}
           className={"reader-rail" + (railVisible ? " show" : "")}

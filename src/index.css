@@ -134,6 +134,10 @@ html { background: var(--bg); }
 [data-theme="dark"] .bottom-nav {
   background: rgba(32, 30, 28, 0.92); /* 同上：蓝灰 #1C1F27 → 暖中性 */
   border-top-color: #343331;
+  /* 暗色底栏与页面底色只差一档（#100F0F ↔ ≈#201E1C），1px 的 #343331 分隔线基本看不出来，
+     底栏就像"浮在内容上的一层"而不是一条栏。补一层向上的极淡投影把它托起来。
+     浅色态不加：白玻璃压在纸色底上本来就分得开，加了反而显脏。 */
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.32);
 }
 [data-theme="dark"] .nav-item { color: var(--ink-3); }
 [data-theme="dark"] .nav-item.active { color: var(--brand); }
@@ -700,6 +704,14 @@ h3 { font-size: 14px; margin: 4px 0; }
   overflow: hidden;
   word-break: break-all;
 }
+/* 图**没**加载成功时（缺 Cover 加的 .in）让整个 <img> 什么都不画。
+   不这么做的话：浏览器会给挂掉的 <img> 自己排一遍 alt 文字（外加破图标），
+   那层画在 .thumb-fallback **之上** —— 两层同样的书名叠在一起，
+   看上去就是"封面渲染坏了"（弱网/换源失败时整屏都这样）。
+   用 visibility 而不是 display：占位与尺寸照旧，比例盒与栅格完全不受影响。
+   ⚠️ 选择器只挂 .list-item：.in 由 AlbumCard 的 Cover 独家写入；缓存中心那个
+   <img class="thumb"> 从不加 .in，套同一条会把它整片藏掉（它走自己的 onError）。 */
+.list-item > .thumb-box > .thumb:not(.in) { visibility: hidden; }
 
 /* ---------- 加载 / 空反馈 ---------- */
 .loading-box {
@@ -1306,6 +1318,11 @@ h3 { font-size: 14px; margin: 4px 0; }
 /* 就绪后淡入（只动 opacity，零位移；低配模式会被全局动效压制掉） */
 .jm-figure[data-ready] > .jm-page,
 .jm-figure[data-ready] > .scramble-canvas { animation: jm-img-in 140ms var(--ease-out) both; }
+/* 阅读器窗口化：一页滚出窗口会被卸载成占位盒，滚回来时重新挂载。
+   `data-known`（本话亮过）的那几页不再淡入 —— 否则快速往回翻会像在一帧帧闪光；
+   "首次看到这一页"仍然照旧淡入，观感与改造前一致。 */
+.jm-figure[data-known][data-ready] > .jm-page,
+.jm-figure[data-known][data-ready] > .scramble-canvas { animation: none; }
 .jm-single-wrap[data-ready] > .jm-single,
 .jm-single-wrap[data-ready] > .scramble-canvas { animation: jm-img-in 140ms var(--ease-out) both; }
 /* 阅读区关掉浏览器自带的滚动锚定：高度自校正由 JS 的 keepAnchor 负责，
@@ -1413,11 +1430,14 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
   top: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
   transform: translate(-50%, -50%);
   white-space: nowrap;
   pointer-events: none;        /* 命中区域是整个 rail，thumb 只负责显示 */
 }
+/* 页码胶囊改成**挂在圆点左边**。原先是 [页码][圆点] 当成一行整体居中，而那一行 ≈39px 宽、
+   中心又压在 right:3px 的轨道上 —— 右边的白色圆点被视口切掉一半（截图里就是个半圆）。
+   现在圆点仍居中在轨道线上（滚动位置指示不能偏），页码往左挂，永不越界。 */
+.reader-thumb > .reader-thumb-dot { margin-left: 0; }  /* 压掉老内核补丁给的 gap 替身，别把圆点推离线 */
 .reader-thumb-dot {
   width: 12px;
   height: 12px;
@@ -1427,6 +1447,11 @@ html.jm-reading::-webkit-scrollbar { width: 0; height: 0; }
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22), 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 .reader-thumb-num {
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-right: 6px;
   min-width: 21px;
   text-align: center;
   font-size: 10.5px;
@@ -1727,7 +1752,11 @@ button.ghost.danger { color: var(--err); border-color: var(--line-strong); }
 .tos-backdrop[data-closed] .tos-card { opacity: 0; transform: scale(0.98); transition-duration: 160ms;
 }
 .tos-card h2 { margin: 0 0 10px; font-size: 18px; text-align: center; }
-.tos-scroll { overflow-y: auto; flex: 1; padding-right: 2px; }
+/* 长文弹窗隐藏原生滚动条：桌面内核那条约 15px 的灰条压在一张 420px 宽的卡片右侧，
+   整个"原生 App"的观感就没了（移动端多数内核本来不显示，桌面与 Electron 才显形）。
+   滚动能力一点没动，只是不画那条轨道 —— 与 .d-tags-scroll 同一手法。 */
+.tos-scroll { overflow-y: auto; flex: 1; padding-right: 2px; scrollbar-width: none; }
+.tos-scroll::-webkit-scrollbar { width: 0; height: 0; }
 .tos-scroll p { font-size: 13px; line-height: 1.75; color: var(--ink); margin: 0 0 10px; word-break: break-word; }
 .tos-accept { margin-top: 12px; padding: 12px; font-size: 14px; font-weight: 700; }
 .tos-link { color: var(--brand-deep); text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
@@ -2424,6 +2453,19 @@ body.jm-scroll-lock { overflow: hidden; }
    —— 模块排放对照图：工作台 jm-detail-layout-proposal（v6 的分组行/select 已退役）
    ============================================================ */
 .detail-card { background: none; padding: 4px 0 28px; margin: 0; border-radius: 0; }
+/* ---------- 内联小图标 svg.ic ----------
+   `.morebtn .ic` / `.sortbtn .ic` 只补了尺寸与线宽，**基础形状必须由这一条给**：
+   少了它，裸 <svg class="ic"> 作为 inline-flex 的子项量到 0×0 ——
+   详情页的返回箭头就是这么整只消失的（外壳只剩"返回"两个字）；
+   而且默认 fill:black，一旦有了尺寸会画成实心块。
+   下面第一条用到它的正是 .backtxt。 */
+svg.ic {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+svg.ic.sm { width: 15px; height: 15px; }
+
 /* 返回独占一行；标题挪进主视觉右栏 */
 .d-head { display: flex; align-items: center; gap: 8px; max-width: var(--measure); }
 .backtxt {
@@ -2683,6 +2725,9 @@ body.jm-scroll-lock { overflow: hidden; }
 }
 .morebtn:active { transform: scale(0.95); }
 .morebtn .ic { width: 14px; height: 14px; stroke-width: 1.6; }
+/* 九点格子是**实心点**：svg.ic 的基础规则把 fill 置了 none，这里单独补回填充
+   （与 icons.tsx 里 GripIcon/MoreIcon 的写法同义，只是这条留在了 CSS 里）。 */
+.morebtn .ic circle { fill: currentColor; stroke: none; }
 
 /* 下划线标签行 */
 .tabs { position: relative; display: flex; gap: 22px; padding: 0 0 12px; overflow-x: auto; scrollbar-width: none; }
@@ -2858,6 +2903,19 @@ body.jm-scroll-lock { overflow: hidden; }
 .settings-page .grow-note { margin: 0 0 12px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
 .settings-page .grow-actions { gap: 8px; margin-top: 12px; }
 .settings-page .member-grid { gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+
+/* 赞助价目（设置页）：名称左、价格右。原来是一列同色 muted 小字，档位之间既没对齐也没分隔，
+   四行看下来分不清哪行是哪个价位。这里只用 flex 的 space-between + 一条发丝线，
+   刻意不用 gap —— 老内核上 gap 需要额外补丁，而给价格一个 margin-left 在任何引擎上都成立。 */
+.plan-list { margin: 10px 0 12px; }
+.plan-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 9px 0; border-bottom: 1px solid var(--line);
+  font-size: 13px; color: var(--ink);
+}
+.plan-row:last-child { border-bottom: 0; padding-bottom: 2px; }
+.plan-price { margin-left: 12px; font-weight: 600; white-space: nowrap; }
+.plan-price i { font-style: normal; font-weight: 400; color: var(--ink-3); }
 
 /* ============================================================
  * 老内核兜底：WebView < 88 没有 aspect-ratio
@@ -3090,6 +3148,7 @@ html[data-lowfx="1"] .toast { background: var(--surface); }
 /* 阴影同样吃合成层，低配模式去掉大阴影，只保留分隔线 */
 html[data-lowfx="1"] .side-drawer,
 html[data-lowfx="1"] .app-sheet,
+html[data-lowfx="1"] .bottom-nav,
 html[data-lowfx="1"] .cache-overlay .cache-body { box-shadow: none; }
 
 /* ============================================================

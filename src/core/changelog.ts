@@ -30,6 +30,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "2.3.1",
+    date: "2026-10-22",
+    title: "更顺一点：界面微调 + 加载更快",
+    items: [
+      "略微优化了界面",
+      "优化了加载速度"
+    ]
+  },
+  {
     version: "2.3.0",
     date: "2026-10-15",
     title: "自定义 UI 上线：各个页面都能自己调",

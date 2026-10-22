@@ -51,6 +51,9 @@ try {
     # 必须在 npm run build:compat 之前设：vite.config.ts 用它注入 __NO_SEAM__（构建期常量，整块逻辑才会被摇掉）
     $env:JM_NO_SEAM = "1"
     npm run build:compat 2>&1 | Select-Object -Last 2
+    # 产物级校验：去条纹功能文案必须一条不剩（忘设 JM_NO_SEAM 时这里会红，而不是等真机反馈卡顿）
+    node tools/check-bundle.mjs --dir dist-compat --expect no-seam
+    if ($LASTEXITCODE -ne 0) { Write-Host "bundle check failed（去条纹没被摇掉？）" -ForegroundColor Red; exit 1 }
   }
   Write-Host "=== 3) cap copy (dist-compat) ===" -ForegroundColor Cyan
   $env:JM_WEB_DIR = "dist-compat"

@@ -24,6 +24,7 @@ import Collapse from "./ui/Collapse";
 import ToastHost, { pushToast } from "./ui/toast";
 import UpdateDialog from "./ui/UpdateDialog";
 import { updateFlow } from "./core/updateFlow";import { openGate, startupReady } from "./core/startup";
+import { prewarmOnGate } from "./core/prewarm";
 import CacheCenter from "./ui/CacheCenter";
 import AdMenuBanner from "./ui/AdMenuBanner";
 import UpdateSection from "./ui/UpdateSection";
@@ -204,6 +205,19 @@ export default function App() {
     if (ageGate) return;
     const t = window.setTimeout(() => { void updateFlow.checkSilently(); }, UPDATE_CHECK_DELAY_MS);
     return () => window.clearTimeout(t);
+  }, [ageGate]);
+
+  /**
+   * 18+ 门上**静默预取**（core/prewarm）：定线路、取 setting、拉首屏列表、预热前 12 张封面的字节。
+   *
+   * 为什么放在门上：这一屏用户要读 18+ 文案 + 协议（协议还要求滚到底），期间本来什么事都不做；
+   * 而冷启动的那一串顺序请求（init → setting → 首屏 → 封面）正是"第一次出图慢"的全部来源。
+   * 预取到的首屏列表会被 ContentView **接管**（只交一次），所以不会多一次请求；
+   * 且不渲染任何内容 —— 放行仍然只由点击确认决定。
+   */
+  useEffect(() => {
+    if (!ageGate) return;
+    prewarmOnGate();
   }, [ageGate]);
 
   useEffect(() => {
@@ -1023,9 +1037,14 @@ export default function App() {
         <div className="card">
           <h2>官方赞助</h2>
           <p className="muted">赞助支持项目持续更新；选择方案并支付后权益自动生效。</p>
-          <div className="row">
+          {/* 价目行：名称在左、价格在右，行间一条发丝线。原来 4 个档位是 4 行同色小字堆在一起，
+              读起来像免责声明、也没法比价。纯排版改动，出口按钮与跳转行为一个字没动。 */}
+          <div className="plan-list">
             {(state.payment.plans || []).map((p) => (
-              <span key={p.key} className="muted" style={{ display: "block", marginBottom: 4 }}>{p.name} · USD {p.price} / {p.days} 天</span>
+              <div key={p.key} className="plan-row">
+                <span>{p.name}</span>
+                <span className="plan-price">USD {p.price}<i> / {p.days} 天</i></span>
+              </div>
             ))}
           </div>
           <button onClick={() => { openExternal("https://comic18j-bibi.me/payment?link=homepage_icon"); }}>前往官方赞助页面</button>

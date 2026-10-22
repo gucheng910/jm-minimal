@@ -62,6 +62,21 @@ async function main() {
 
   await evalJs("(async () => { const g = document.querySelector('.age-confirm'); if (g) g.click(); const t0 = Date.now(); while (Date.now() - t0 < 30000) { if (document.querySelectorAll('.list-item').length > 2) break; await new Promise(r => setTimeout(r, 200)); } await new Promise(r => setTimeout(r, 1200)); return true; })()");
 
+  /**
+   * 先把可能挡在屏上的浮层关掉：**版本号一变就会弹一次内置更新日志**，它会盖住列表，
+   * 让下面的触摸手势打空 —— 2.3.1 这次就是这么红的（与下拉逻辑本身无关）。
+   * 只认按钮文案最稳：更新日志是「知道了」，新版本提示是「下次再说」。
+   */
+  await evalJs(`(async () => {
+    const t = (el) => (el ? (el.textContent || "").trim() : "");
+    for (const re of [/知道了/, /下次再说/]) {
+      const b = Array.from(document.querySelectorAll(".update-sheet button")).find((x) => re.test(t(x)));
+      if (b) { b.click(); await new Promise((r) => setTimeout(r, 400)); }
+    }
+    return !document.querySelector(".update-sheet");
+  })()`);
+  await sleep(300);
+
   const before = await evalJs("(window.__reqs||[]).filter(r=>r.path==='random_recommend').length");
   const touch = (type, y) => send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x: 200, y, radiusX: 8, radiusY: 8, force: 1 }] });
   await touch("touchStart", 300);

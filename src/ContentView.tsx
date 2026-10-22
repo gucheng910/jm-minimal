@@ -23,6 +23,7 @@ import { SearchResultPage } from "./ui/SearchResultPage";
 import type { SRKind } from "./ui/SearchResultPage";
 import { KIND_META } from "./ui/SearchResultPage";
 import { announceStartupReady, gatePassed } from "./core/startup";
+import { takePrewarmedRecommend } from "./core/prewarm";
 import { bookIdOf } from "./core/series";
 import { hasOpenSheet } from "./core/uiLocks";
 import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
@@ -544,7 +545,10 @@ export default function ContentView({ initialAction = "" }: ContentViewProps = {
           // 通知 18+ 门：启动阶段结束（有可用图床/线路即放行），不再按"测速是否完成"卡首屏
           announceStartupReady({ speedOk });
           let list: AlbumSummary[] | null = null;
-          const r1 = await client.getRandomRecommend().catch(() => null);
+          // 18+ 门上已经预取过的首屏列表（core/prewarm）：拿到就直接用，**不会再请求一次**。
+          // 没预取（还没开始 / 失败 / 已被取走）就照原样自己拉。
+          const prewarmed = takePrewarmedRecommend();
+          const r1 = await (prewarmed ?? client.getRandomRecommend().catch(() => null)).catch(() => null);
           if (alive && Array.isArray(r1)) {
             list = r1 as AlbumSummary[];
           } else {

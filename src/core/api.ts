@@ -3,6 +3,7 @@ import { aesEcbDecrypt, md5Hex } from "./crypto";
 import { API_PATHS } from "./endpoints";
 import { measureImages, pickFastestSource, type SpeedSample } from "./speed";
 import { chooseLine, loadHostConfig } from "./host";
+import { canTrust as canTrustHost, isCoolingDown as isHostCoolingDown, orderHosts, recordFailure as recordHostFailure, recordSuccess as recordHostSuccess } from "./hostHealth";
 import { getMemCache, invalidatePath, makeKey, setMemCache } from "./requestCache";
 import { bookIdOf, mergeBookMeta, rememberSeries } from "./series";
 import { emit } from "./bus";
@@ -99,6 +100,14 @@ const HOST_POOL_TTL_MS = 10 * 60 * 1000;
 
 function hostOf(url: string): string {
   try { return new URL(url).hostname; } catch { return ""; }
+}
+
+/** 从任意 URL 里取 host（用于阅读器上报加载结果；容忍 blob:/data:） */
+function hostOfUrlSafe(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.hostname || u.host || "";
+  } catch { return ""; }
 }
 
 /** 取 URL 的路径 + query：换图床时只换 host，保留原路径与签权参数 */
@@ -779,7 +788,12 @@ export class JMClient {
    *     在镜像池的各图床上是同一份内容（实测 7 个图床同一路径同为 200/167708B），
    *     所以正解是：**验证真实 URL → 不行就把主机换成可用的镜像图床**（路径与 t 参数不变）。
    *
-   * 成本：最常见 **只发 1 次 HEAD**（~0 字节）；只有当前图床不可用时，才多发 N 次 /setting（并发，
+   * 2026-10-22 起多了两层"别白花时间"的判断（图床健康评分，见 core/hostHealth.ts）：
+   *  · **信任窗口**：这个 host 10 分钟内成功过 → 跳过 HEAD 直接开读（失败自有页级重试 + 自愈兜底）；
+   *  · **冷却期**：这个 host 刚连续失败过（1s/2s/4s… 封顶 5min 退避）→ 连 HEAD 都不发，直接挑镜像。
+   * 于是"反复进阅读器"的场景从**每次一次 HEAD** 降到**一次都不发**。
+   *
+   * 成本：最常见 **0~1 次 HEAD**（~0 字节）；只有当前图床不可用时，才多发 N 次 /setting（并发，
    * 有 10 分钟缓存）+ N 次真实取图（并发）。且被选中的那张正是第 1 页，URL 完全相同 → 命中缓存不白下。
    * 找不到可用图床就原样返回 null，交给页级重试与阅读器自愈兜底。
    */
@@ -788,17 +802,37 @@ export class JMClient {
     const pageUrl = String(first?.image || "");
     if (!pageUrl) return null;
     const curHost = hostOf(pageUrl);
-    if (await this.headOk(pageUrl, SOURCE_HEAD_TIMEOUT_MS)) {
+
+    // ① 信任窗口：这个 host 最近成功过 → 不再探，直接用（省掉每次进阅读器的固定成本）
+    if (canTrustHost(curHost)) {
       this.preferredHost = curHost;
-      return null; // 最常见的出口
+      jlogApi("preflight: " + curHost + " 10 分钟内成功过，跳过 HEAD");
+      return null;
     }
+    // ② 冷却期：刚连续失败过，HEAD 也是白发 → 直接去挑镜像
+    if (isHostCoolingDown(curHost)) {
+      jlogApi("preflight: 图床 " + curHost + " 处于失败冷却期，跳过 HEAD 直接换源");
+    } else {
+      // ③ 正常预检：HEAD 一次，成败与耗时都记账
+      const startedAt = Date.now();
+      const ok = await this.headOk(pageUrl, SOURCE_HEAD_TIMEOUT_MS);
+      if (ok) {
+        recordHostSuccess(curHost, Date.now() - startedAt);
+        this.preferredHost = curHost;
+        return null; // 最常见的出口
+      }
+      recordHostFailure(curHost, "preflight HEAD 失败");
+      jlogApi("preflight: 图床 " + curHost + " 取不到正文图，改从镜像池里挑一个");
+    }
+
     const path = pathOf(pageUrl);
-    jlogApi("preflight: 图床 " + curHost + " 取不到正文图，改从镜像池里挑一个");
     // 先试"上次成功过的图床"：命中就只花 1 张图的探测（重复进阅读器时最省）
-    const tried = this.preferredHost && this.preferredHost !== curHost
+    const tried = this.preferredHost && this.preferredHost !== curHost && !isHostCoolingDown(this.preferredHost)
       ? await this.probeMirrorHosts(path, [this.preferredHost])
       : [];
-    const samples = tried.some((s) => s.ok) ? tried : await this.probeMirrorHosts(path, await this.candidateHosts());
+    // 候选按健康分排序（好的先测），冷却中的直接不进队列
+    const candidates = orderHosts(await this.candidateHosts()).filter((h) => !isHostCoolingDown(h) && h !== curHost);
+    const samples = tried.some((s) => s.ok) ? tried : await this.probeMirrorHosts(path, candidates);
     const ok = samples.filter((s) => s.ok && String(s.tag) !== curHost);
     if (ok.length === 0) {
       jlogApi("preflight: 镜像池里也没有可用图床，交给页级重试");
@@ -812,6 +846,17 @@ export class JMClient {
     return { ...r, images: r.images.map((p) => ({ ...p, image: swapHostKeepPath(String(p.image || ""), host) })) };
   }
 
+  /**
+   * 正文图的加载结果上报（阅读器调用）：只驱动图床健康评分/冷却，不影响本次显示。
+   * 成功会把该 host 的冷却清掉 —— 这也是"退避之后还能自己回来"的机制。
+   */
+  noteImageResult(url: string, ok: boolean, detail?: string): void {
+    const host = hostOfUrlSafe(url);
+    if (!host) return;
+    if (ok) recordHostSuccess(host);
+    else recordHostFailure(host, detail || "page load failed");
+  }
+
   /** 用真实页路径（只换主机）实测一批图床：<img> 真解码，403/404 不会被当成可用 */
   private probeMirrorHosts(path: string, hosts: string[]): Promise<SpeedSample[]> {
     const list = [...new Set(hosts)].filter(Boolean);
@@ -819,7 +864,16 @@ export class JMClient {
     return measureImages(
       list.map((h) => ({ label: h, url: "https://" + h + path, tag: h })),
       SOURCE_PROBE_TIMEOUT_MS
-    );
+    ).then((samples) => {
+      // 探针结果同样记账：测速是"真实取图"，成败与耗时都是这个 host 的证据
+      for (const s of samples) {
+        const host = String(s.tag || "");
+        if (!host) continue;
+        if (s.ok) recordHostSuccess(host, s.ms);
+        else recordHostFailure(host, "mirror probe failed");
+      }
+      return samples;
+    });
   }
 
   /** 图床镜像池：/setting?app_img_shunt=k 的 img_host 去重（10 分钟缓存，别每次进阅读器都问一遍） */

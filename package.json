@@ -1,6 +1,6 @@
 {
   "name": "jm-client",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,6 +23,7 @@
     "cap:sync:ios": "cap sync ios",
     "pc:pack": "vite build && electron-builder --win nsis portable",
     "build:compat": "tsc --noEmit && vite build --mode compat",
+    "check:bundle": "node tools/check-bundle.mjs",
     "e2e:compat": "node tools/e2e/compat.mjs"
   },
   "dependencies": {
