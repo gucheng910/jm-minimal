@@ -16,7 +16,10 @@ describe("内置更新日志表", () => {
       expect(e.version).toMatch(/^\d+(\.\d+)*$/);
       expect(e.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(e.title.trim().length).toBeGreaterThan(0);
-      for (const item of e.items) expect(item.trim().length).toBeGreaterThan(4);
+      // 只要求"非空"（trim 后 > 0）：这条断言的本意是拦住空串/纯空白条目。
+      // 原来写的是 > 4，但补丁版可以只有一条**字面的**「无」（2.3.2 就是按用户要求这么写的），
+      // 中文一个字就够表达"没更新内容"，阈值卡长度会把它误判成坏条目。
+      for (const item of e.items) expect(item.trim().length).toBeGreaterThan(0);
     }
   });
 

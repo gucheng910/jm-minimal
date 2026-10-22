@@ -20,7 +20,7 @@
    *   ① 日志副标题里必须出现它；② 关闭日志后记账写的必须是它；③ 负对照的种子必须等于它。
    * 之所以不硬编码散在四处：2.2.7 → 2.3.0 那次升级就是漏改了这里，`更新提示/日志` 两支直接红。
    */
-  const APP_VERSION = "2.3.1";
+  const APP_VERSION = "2.3.2";
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const q = (s) => document.querySelector(s);
   const qa = (s) => Array.from(document.querySelectorAll(s));
@@ -69,11 +69,11 @@
     throw new Error("首次进入没弹「更新日志」，标题是：" + txt(q(".update-sheet .sheet-head h3")));
   }
   if (notesSub.indexOf("v" + APP_VERSION) < 0) throw new Error("日志副标题里没有当前版本：" + notesSub);
-  // ⚠️ 阈值 2（不是"等于条目总数"）：判别力在"有条目、每条非空"。
-  // 2.3.1 是两条的补丁版（"略微优化了界面" + "优化了加载速度"），阈值 3 会把合法的补丁日志判红；
-  // 写死条数也会在每次精简日志时误红。
-  if (noteItems.length < 2) {
-    throw new Error("日志正文条目太少（应 ≥2 条，实际 " + noteItems.length + "）：" + noteItems.join(" / ").slice(0, 120));
+  // ⚠️ 阈值 1（不是"等于条目总数"）：判别力在"有条目、每条非空"。
+  // 补丁版可能只有一条（2.3.2 用户明确要求"更新写无"，条目就是字面的「无」），
+  // 阈值写 2/3 都会把合法的补丁日志判红；写死条数也会在每次精简日志时误红。
+  if (noteItems.length < 1) {
+    throw new Error("日志正文条目为空（至少要有 1 条，哪怕是「无」）：" + noteItems.join(" / ").slice(0, 120));
   }
   // 记账必须在**关闭时**写：此刻还没关，所以 storage 里应当还是"升级前那个版本"
   const seenBefore = JSON.parse(localStorage.getItem("jmclient.version.seen") || "null");

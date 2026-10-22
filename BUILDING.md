@@ -64,7 +64,7 @@
 | 位置 | 文件 | 现值 | 影响 |
 |---|---|---|---|
 | PC + 前端 | package.json → version | 2.3.0 | 安装包命名、latest.yml version、electron-updater 比较基准；vite 构建时注入 __APP_VERSION__（vite.config.ts）→ 前端 LOCAL_VERSION |
-| Android | android/app/build.gradle → defaultConfig | versionName 2.3.1 / versionCode 82 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
+| Android | android/app/build.gradle → defaultConfig | versionName 2.3.2 / versionCode 83 | APK 版本；Android 应用内更新比较的 LOCAL_VERSION（原生 versionName 优先） |
 
 > ⚠️ **现值以本表为准**：package.json `2.3.0` / build.gradle `versionName 2.3.0` + `versionCode 81`。
 > （2026-10-15 更新：2.2.7 → **2.3.0** —— 这批工作（四个页面的自定义 UI、详情页编辑器拖拽手感与行内落位）

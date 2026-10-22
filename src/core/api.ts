@@ -2,7 +2,7 @@ import { APP_VERSION, AUTO_SELECT_TTL_MS, CONTENT_SECRET, FALLBACK_SHUNT_KEYS, H
 import { aesEcbDecrypt, md5Hex } from "./crypto";
 import { API_PATHS } from "./endpoints";
 import { measureImages, pickFastestSource, type SpeedSample } from "./speed";
-import { chooseLine, loadHostConfig } from "./host";
+import { chooseLine, loadHostConfig, pickLiveLine } from "./host";
 import { canTrust as canTrustHost, isCoolingDown as isHostCoolingDown, orderHosts, recordFailure as recordHostFailure, recordSuccess as recordHostSuccess } from "./hostHealth";
 import { getMemCache, invalidatePath, makeKey, setMemCache } from "./requestCache";
 import { bookIdOf, mergeBookMeta, rememberSeries } from "./series";
@@ -200,7 +200,18 @@ export class JMClient {
     this.hostConfig = host;
     // 桌面端：把官方线路域名注册进内置 DNS 清洗池（早于任何业务请求）
     registerDnsHosts(host.jm3_Server.map(([h]) => h));
-    const hostName = chooseLine(host, excludeLine);
+    /**
+     * 选线路：**先并行探活，谁先应答用谁**；一个都不应答才退回随机（与改造前一致）。
+     *
+     * 原来这里是纯随机 `chooseLine(host, excludeLine)`，隐患是线路表里有各自的 Cloudflare 前置域名，
+     * 某条在某网络上完全建不起连接时（实测 `www.cdngwc.net` 就是），随机挑中它 = 整个会话所有请求
+     * 全部超时，登录也显示"网络连接失败"。探活是 4 条并发、谁先回谁赢，正常情况下只多花最快那条
+     * 线路的一个往返；而在 18+ 门上它由 `core/prewarm` 提前跑掉，用户点确认时已经选好。
+     */
+    const candidates = host.jm3_Server.filter(([, name]) => name !== excludeLine).map(([h]) => h);
+    const live = await pickLiveLine(candidates);
+    const hostName = live || chooseLine(host, excludeLine);
+    if (live) jlogApi("init: 探活选中线路 " + live + (live === chooseLine(host, excludeLine) ? "" : "（随机选择会挑到别的那条）"));
     this.apiBase = "https://" + hostName + "/";
     sessionStore.apiUrl = this.apiBase;
     return this.apiBase;
@@ -553,6 +564,8 @@ export class JMClient {
     const timeoutMs = options.timeoutMs ?? 15000;
     const cacheTtl = method === "GET" ? options.cacheTtlMs || 0 : 0;
     let lastErr: unknown = null;
+    /** 最后一次失败的类别（循环外做线路级 fallback 时要用：network/timeout 才换线路） */
+    let lastKind: string | undefined;
     /** 401 续期后的重发次数：它是「换张证再试一次」，不消耗网络重试预算（否则预算=1 时会空手退出） */
     let authReplayLeft = 1;
 
@@ -637,6 +650,7 @@ export class JMClient {
         }
         lastErr = err;
         const kind = kindOf(err);
+        lastKind = kind;
         // 线路劣化自愈：连续多次**网络层**失败（不是业务错误码）说明当前线路节点在抽风，
         // 后台重测一次换线。测速/探测自身的失败不算（options.host 或 probing>0），否则会自激。
         if (this.probing === 0 && !options.host && (kind === "network" || kind === "timeout")) this.noteLineFailure();
@@ -661,6 +675,27 @@ export class JMClient {
         try {
           return await this.request<T>(apiPath, params, { ...options, host: altHost, retries: 1, cacheTtlMs: 0 });
         } catch { /* 下一线路 */ }
+      }
+    }
+    /**
+     * 线路级 fallback（**网络/超时**，2026-10-22 新增）：当前线路整条不可达时换一条再打一次。
+     *
+     * 改造前这里只处理 `api decrypt failed`（"命中异常节点"），网络层失败则是直接抛给界面 ——
+     * 于是选到死线路时，登录页永远只显示"网络连接失败"，而且下一次请求还打在同一个死线路上。
+     *
+     * 顺序：先并行探活挑一条活线路（`pickLiveLine`，谁先应答谁赢），再把这一次请求打到它上面。
+     * - 只对**幂等**请求这么做：POST（登录/注册/购买）绝不重发，避免重复建会话/重复下单；
+     * - `host` 已指定（说明这次本来就是 fallback 尝试）时不再递归；
+     * - 挑选成功会顺手 `selectLine` 换过去，后续请求都走新线路。
+     */
+    if (!options.host && this.hostConfig && idempotent && (lastKind === "network" || lastKind === "timeout")) {
+      const dead = hostOf(this.apiBase);
+      const alts = this.hostConfig.jm3_Server.map(([h]) => h).filter((h) => h && h !== dead);
+      const live = await pickLiveLine(alts);
+      if (live) {
+        jlogApi("线路失效（" + lastKind + "）：改走 " + live + " 重试 " + apiPath);
+        this.selectLine("https://" + live + "/");
+        return await this.request<T>(apiPath, params, { ...options, host: live, retries: 1, cacheTtlMs: 0 });
       }
     }
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));

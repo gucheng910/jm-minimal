@@ -53,3 +53,41 @@ export function chooseLine(host: HostConfig, excludeName = "線路5"): string {
   const pick = lines[Math.floor(Math.random() * lines.length)];
   return pick ? pick[0] : host.jm3_Server[0][0];
 }
+
+/**
+ * 并行"探活"挑线路：**第一个应答的赢**。
+ *
+ * 为什么需要它（2026-10-22 实测，见 docs/26 §11）：
+ * 官方线路表有 5 条（`chooseLine` 默认排除「線路5」），它们是各自独立的 Cloudflare 前置域名，
+ * **可达性随网络/时间各不相同**。实测那一轮：4 条通、1 条（`www.cdngwc.net`）连 TCP 都建不起来。
+ * 而 `chooseLine` 是**随机**取的 —— 于是约 1/4 的冷启动会挑到死线路，之后每个请求（含登录）
+ * 都只能超时，用户看到的就是"网络连接失败，请配 DNS"。
+ *
+ * 判据只看"能不能拿到 HTTP 响应"：jm 各线路对 `GET /` 返回 403，**那也是活的证据**；
+ * 只有网络层失败（DNS/连接/TLS/超时）才当死 —— 所以这里不能看 `resp.ok`。
+ *
+ * 不用 `Promise.all`：死线路会一直等到超时（4s），把首屏拖住。这里是**谁先应答谁赢**，
+ * 正常网络下耗时 = 最快那条线路的一个往返（0.2~0.5s）。
+ */
+export async function pickLiveLine(candidates: string[], timeoutMs = 4000): Promise<string> {
+  const list = [...new Set(candidates.filter(Boolean))];
+  if (list.length === 0) return "";
+  return new Promise<string>((resolve) => {
+    let left = list.length;
+    let settled = false;
+    const win = (h: string) => {
+      if (settled) return;
+      settled = true;
+      resolve(h);
+    };
+    for (const h of list) {
+      fetchWithTimeout("https://" + h + "/", { method: "GET", cache: "no-store", credentials: "omit" }, timeoutMs)
+        .then(() => win(h)) // 拿到响应（哪怕 403）就是活的
+        .catch(() => {
+          left -= 1;
+          // 全部不通：返回空串，交回调用方（它会退回原来的随机选择，行为与改造前一致）
+          if (left === 0) win("");
+        });
+    }
+  });
+}

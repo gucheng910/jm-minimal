@@ -30,6 +30,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "2.3.2",
+    date: "2026-10-22",
+    title: "修复部分网络环境下登录失败",
+    items: [
+      "无"
+    ]
+  },
+  {
     version: "2.3.1",
     date: "2026-10-22",
     title: "更顺一点：界面微调 + 加载更快",
